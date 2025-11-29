@@ -67,16 +67,26 @@ impl Database {
     // ========================================================================
 
     /// Create a new input relation.
+    /// Changes to this relation are recorded and undone on pop().
     pub fn create_input<T: Tuple + Send + Sync>(&mut self, name: &str) -> Relation<T> {
         let id = self.graph.create_input::<T>(name);
         self.ensure_recompute_fns_len(id);
         Relation::new(id)
     }
 
+    /// Create a new persistent input relation.
+    /// Changes to this relation are NOT recorded and survive pop().
+    /// Use this for data that should persist across backtracking, like learned clauses in a SAT solver.
+    pub fn create_persistent_input<T: Tuple + Send + Sync>(&mut self, name: &str) -> Relation<T> {
+        let id = self.graph.create_persistent_input::<T>(name);
+        self.ensure_recompute_fns_len(id);
+        Relation::new(id)
+    }
+
     /// Insert a tuple into a relation.
     pub fn insert<T: Tuple + Send + Sync>(&mut self, rel: Relation<T>, tuple: T) {
-        // Record the change for checkpoint stack if recording
-        if self.checkpoint_stack.is_recording() {
+        // Record the change for checkpoint stack if recording (skip persistent inputs)
+        if self.checkpoint_stack.is_recording() && !self.graph.get(rel.id).is_persistent() {
             self.checkpoint_stack.record(rel.id, vec![Change::insert(tuple.clone())]);
         }
 
@@ -96,8 +106,8 @@ impl Database {
 
     /// Delete a tuple from a relation.
     pub fn delete<T: Tuple + Send + Sync>(&mut self, rel: Relation<T>, tuple: T) {
-        // Record the change for checkpoint stack if recording
-        if self.checkpoint_stack.is_recording() {
+        // Record the change for checkpoint stack if recording (skip persistent inputs)
+        if self.checkpoint_stack.is_recording() && !self.graph.get(rel.id).is_persistent() {
             self.checkpoint_stack.record(rel.id, vec![Change::delete(tuple.clone())]);
         }
 

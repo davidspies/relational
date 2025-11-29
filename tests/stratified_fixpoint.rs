@@ -629,3 +629,176 @@ fn test_is_recording() {
     db.pop();
     assert!(!db.is_recording());
 }
+
+// ============================================================================
+// Persistent Input Tests
+// ============================================================================
+
+/// Test that persistent inputs survive pop while regular inputs are undone.
+///
+/// This models a CDCL SAT solver scenario where:
+/// - Learned clauses (persistent) should survive backtracking
+/// - Decision variables (regular) should be undone on backtrack
+#[test]
+fn test_persistent_vs_regular_inputs() {
+    let mut db = Database::new();
+
+    // Regular input: decision variables (should be undone on pop)
+    let decisions = db.create_input::<i32>("decisions");
+
+    // Persistent input: learned clauses (should survive pop)
+    let learned = db.create_persistent_input::<i32>("learned");
+
+    // Insert initial data before any checkpoint
+    db.insert(decisions, 1);
+    db.insert(learned, 100);
+
+    // Push checkpoint
+    db.push(Some("decision_point"));
+
+    // Make a decision and learn a clause
+    db.insert(decisions, 2);
+    db.insert(learned, 200);
+
+    // Verify both have the new data
+    let decisions_result: Vec<_> = db.collect(decisions);
+    assert!(decisions_result.contains(&1));
+    assert!(decisions_result.contains(&2));
+
+    let learned_result: Vec<_> = db.collect(learned);
+    assert!(learned_result.contains(&100));
+    assert!(learned_result.contains(&200));
+
+    // Pop - should undo decision but keep learned clause
+    db.pop();
+
+    // Decisions should be restored (2 removed)
+    let decisions_result: Vec<_> = db.collect(decisions);
+    assert!(decisions_result.contains(&1));
+    assert!(!decisions_result.contains(&2), "Decision 2 should be undone");
+    assert_eq!(decisions_result.len(), 1);
+
+    // Learned clauses should persist (200 kept)
+    let learned_result: Vec<_> = db.collect(learned);
+    assert!(learned_result.contains(&100));
+    assert!(
+        learned_result.contains(&200),
+        "Learned clause 200 should survive pop"
+    );
+    assert_eq!(learned_result.len(), 2);
+}
+
+/// Test persistent inputs with nested checkpoints.
+#[test]
+fn test_persistent_nested_checkpoints() {
+    let mut db = Database::new();
+
+    let regular = db.create_input::<i32>("regular");
+    let persistent = db.create_persistent_input::<i32>("persistent");
+
+    db.insert(regular, 1);
+    db.insert(persistent, 100);
+
+    // Level 1
+    db.push(Some("level1"));
+    db.insert(regular, 2);
+    db.insert(persistent, 200);
+
+    // Level 2
+    db.push(Some("level2"));
+    db.insert(regular, 3);
+    db.insert(persistent, 300);
+
+    // Verify current state
+    assert_eq!(db.collect::<i32>(regular).len(), 3); // {1, 2, 3}
+    assert_eq!(db.collect::<i32>(persistent).len(), 3); // {100, 200, 300}
+
+    // Pop level 2
+    db.pop();
+
+    // Regular should lose 3, persistent keeps 300
+    let regular_result: Vec<_> = db.collect(regular);
+    assert_eq!(regular_result.len(), 2);
+    assert!(!regular_result.contains(&3));
+
+    let persistent_result: Vec<_> = db.collect(persistent);
+    assert_eq!(persistent_result.len(), 3);
+    assert!(persistent_result.contains(&300));
+
+    // Pop level 1
+    db.pop();
+
+    // Regular should lose 2, persistent still has all
+    let regular_result: Vec<_> = db.collect(regular);
+    assert_eq!(regular_result.len(), 1);
+    assert!(regular_result.contains(&1));
+
+    let persistent_result: Vec<_> = db.collect(persistent);
+    assert_eq!(persistent_result.len(), 3);
+    assert!(persistent_result.contains(&100));
+    assert!(persistent_result.contains(&200));
+    assert!(persistent_result.contains(&300));
+}
+
+/// Test that derived relations correctly reflect persistent input changes.
+#[test]
+fn test_persistent_with_derived() {
+    let mut db = Database::new();
+
+    let regular = db.create_input::<i32>("regular");
+    let persistent = db.create_persistent_input::<i32>("persistent");
+
+    // Derived: union of regular and persistent
+    let combined = db.union(regular, persistent);
+
+    db.insert(regular, 1);
+    db.insert(persistent, 100);
+
+    db.push(Some("checkpoint"));
+
+    db.insert(regular, 2);
+    db.insert(persistent, 200);
+
+    // Combined should have all 4
+    let combined_result: Vec<_> = db.collect(combined);
+    assert_eq!(combined_result.len(), 4);
+
+    // Pop
+    db.pop();
+
+    // Combined should have 1 (regular) + 100, 200 (persistent) = 3 items
+    let combined_result: Vec<_> = db.collect(combined);
+    assert_eq!(combined_result.len(), 3);
+    assert!(combined_result.contains(&1));
+    assert!(combined_result.contains(&100));
+    assert!(combined_result.contains(&200));
+    assert!(!combined_result.contains(&2));
+}
+
+/// Test delete operations on persistent inputs.
+#[test]
+fn test_persistent_delete() {
+    let mut db = Database::new();
+
+    let persistent = db.create_persistent_input::<i32>("persistent");
+
+    db.insert(persistent, 100);
+    db.insert(persistent, 200);
+
+    db.push(Some("before_delete"));
+
+    // Delete from persistent - this should also persist (not be undone)
+    db.delete(persistent, 100);
+
+    let result: Vec<_> = db.collect(persistent);
+    assert_eq!(result.len(), 1);
+    assert!(result.contains(&200));
+
+    // Pop - delete should NOT be undone for persistent input
+    db.pop();
+
+    let result: Vec<_> = db.collect(persistent);
+    assert_eq!(result.len(), 1);
+    assert!(result.contains(&200));
+    assert!(!result.contains(&100), "Delete on persistent should survive pop");
+}

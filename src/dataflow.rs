@@ -113,6 +113,9 @@ pub struct Node {
     pub incremental_op: Option<IncrementalOpFn>,
     /// Whether this is a manual input (not auto-reverted on backtrack).
     pub is_manual_input: bool,
+    /// Whether this input is persistent (changes survive pop).
+    /// Only meaningful for input nodes.
+    pub is_persistent: bool,
 }
 
 impl Node {
@@ -130,6 +133,10 @@ impl Node {
 
     pub fn is_feedback(&self) -> bool {
         matches!(self.kind, NodeKind::Feedback { .. })
+    }
+
+    pub fn is_persistent(&self) -> bool {
+        self.is_persistent
     }
 }
 
@@ -155,6 +162,16 @@ impl DataflowGraph {
 
     /// Create a new input node.
     pub fn create_input<T: Tuple + Send + Sync>(&mut self, name: &str) -> NodeId {
+        self.create_input_internal::<T>(name, false)
+    }
+
+    /// Create a new persistent input node.
+    /// Changes to persistent inputs are NOT recorded and survive pop().
+    pub fn create_persistent_input<T: Tuple + Send + Sync>(&mut self, name: &str) -> NodeId {
+        self.create_input_internal::<T>(name, true)
+    }
+
+    fn create_input_internal<T: Tuple + Send + Sync>(&mut self, name: &str, persistent: bool) -> NodeId {
         let id = NodeId(self.nodes.len());
         let node = Node {
             id,
@@ -165,6 +182,7 @@ impl DataflowGraph {
             operator: None,
             incremental_op: None,
             is_manual_input: true,
+            is_persistent: persistent,
         };
         self.nodes.push(node);
         self.name_to_id.insert(name.to_string(), id);
@@ -190,6 +208,7 @@ impl DataflowGraph {
             operator: Some(operator),
             incremental_op,
             is_manual_input: false,
+            is_persistent: false,
         };
         self.nodes.push(node);
         if let Some(n) = name {
@@ -211,6 +230,7 @@ impl DataflowGraph {
             operator: None,
             incremental_op: None,
             is_manual_input: false,
+            is_persistent: false,
         };
         self.nodes.push(node);
         self.name_to_id.insert(name.to_string(), id);
