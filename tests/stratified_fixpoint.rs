@@ -450,3 +450,182 @@ fn test_diamond_dependency() {
     assert!(result.contains(&15), "should have 10+5=15 from C");
     assert_eq!(result.len(), 2);
 }
+
+// ============================================================================
+// Push/Pop Checkpoint Tests
+// ============================================================================
+
+/// Test basic push/pop without feedback loops.
+#[test]
+fn test_push_pop_simple() {
+    let mut db = Database::new();
+
+    let items = db.create_input::<i32>("items");
+    let doubled = db.map(items, |x| x * 2);
+
+    // Initial state
+    db.insert(items, 1);
+    db.insert(items, 2);
+
+    assert_eq!(db.collect(items).len(), 2);
+    assert_eq!(db.collect(doubled).len(), 2);
+
+    // Push checkpoint
+    db.push(Some("before_changes"));
+    assert_eq!(db.stack_depth(), 1);
+
+    // Make changes
+    db.insert(items, 3);
+    db.delete(items, 1);
+
+    assert_eq!(db.collect(items).len(), 2); // {2, 3}
+    let doubled_result: Vec<_> = db.collect(doubled);
+    assert!(doubled_result.contains(&4)); // 2*2
+    assert!(doubled_result.contains(&6)); // 3*2
+
+    // Pop - should restore to before changes
+    assert!(db.pop());
+    assert_eq!(db.stack_depth(), 0);
+
+    // Check state is restored
+    let items_result: Vec<_> = db.collect(items);
+    assert_eq!(items_result.len(), 2);
+    assert!(items_result.contains(&1));
+    assert!(items_result.contains(&2));
+
+    let doubled_result: Vec<_> = db.collect(doubled);
+    assert!(doubled_result.contains(&2)); // 1*2
+    assert!(doubled_result.contains(&4)); // 2*2
+}
+
+/// Test nested push/pop.
+#[test]
+fn test_push_pop_nested() {
+    let mut db = Database::new();
+
+    let items = db.create_input::<i32>("items");
+
+    db.insert(items, 1);
+
+    // First push
+    db.push(Some("level1"));
+    db.insert(items, 2);
+
+    // Second push
+    db.push(Some("level2"));
+    db.insert(items, 3);
+
+    assert_eq!(db.collect::<i32>(items).len(), 3); // {1, 2, 3}
+    assert_eq!(db.stack_depth(), 2);
+
+    // Pop level2 - should remove 3
+    db.pop();
+    assert_eq!(db.stack_depth(), 1);
+    let items_result: Vec<_> = db.collect(items);
+    assert_eq!(items_result.len(), 2);
+    assert!(items_result.contains(&1));
+    assert!(items_result.contains(&2));
+    assert!(!items_result.contains(&3));
+
+    // Pop level1 - should remove 2
+    db.pop();
+    assert_eq!(db.stack_depth(), 0);
+    let items_result: Vec<_> = db.collect(items);
+    assert_eq!(items_result.len(), 1);
+    assert!(items_result.contains(&1));
+}
+
+/// Test push/pop with transitive closure.
+#[test]
+fn test_push_pop_with_feedback() {
+    let mut db = Database::new();
+
+    let edges = db.create_input::<(i32, i32)>("edges");
+
+    // Set up transitive closure
+    let (path_var, path) = db.variable::<(i32, i32)>("path");
+    let extended = db.join(path, edges, |(_, b)| *b, |(b, _)| *b);
+    let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
+    let all_paths = db.union(edges, new_paths);
+
+    // Initial edges: 1 -> 2 -> 3
+    db.insert(edges, (1, 2));
+    db.insert(edges, (2, 3));
+
+    db.feedback(path_var, edges, all_paths);
+
+    // Initial paths: (1,2), (2,3), (1,3)
+    let paths: Vec<_> = db.collect(path);
+    assert_eq!(paths.len(), 3);
+    assert!(paths.contains(&(1, 3)));
+
+    // Push and add more edges
+    db.push(Some("before_new_edges"));
+
+    db.insert(edges, (3, 4));
+
+    // Now paths should include (3,4), (2,4), (1,4)
+    let paths: Vec<_> = db.collect(path);
+    assert_eq!(paths.len(), 6);
+    assert!(paths.contains(&(1, 4)));
+
+    // Pop - should restore to 3 paths
+    db.pop();
+
+    let paths: Vec<_> = db.collect(path);
+    assert_eq!(paths.len(), 3, "Should have 3 paths after pop: {:?}", paths);
+    assert!(paths.contains(&(1, 2)));
+    assert!(paths.contains(&(2, 3)));
+    assert!(paths.contains(&(1, 3)));
+    assert!(!paths.contains(&(1, 4)), "Should not have (1,4) after pop");
+}
+
+/// Test that pop on empty stack returns false.
+#[test]
+fn test_pop_empty_stack() {
+    let mut db = Database::new();
+
+    assert!(!db.pop());
+    assert_eq!(db.stack_depth(), 0);
+}
+
+/// Test push without changes followed by pop.
+#[test]
+fn test_push_pop_no_changes() {
+    let mut db = Database::new();
+
+    let items = db.create_input::<i32>("items");
+    db.insert(items, 1);
+    db.insert(items, 2);
+
+    db.push(Some("no_changes"));
+    // No changes made
+
+    assert!(db.pop());
+
+    // State should be unchanged
+    let items_result: Vec<_> = db.collect(items);
+    assert_eq!(items_result.len(), 2);
+    assert!(items_result.contains(&1));
+    assert!(items_result.contains(&2));
+}
+
+/// Test is_recording method.
+#[test]
+fn test_is_recording() {
+    let mut db = Database::new();
+
+    assert!(!db.is_recording());
+
+    db.push(None);
+    assert!(db.is_recording());
+
+    db.push(None);
+    assert!(db.is_recording());
+
+    db.pop();
+    assert!(db.is_recording());
+
+    db.pop();
+    assert!(!db.is_recording());
+}

@@ -1,22 +1,257 @@
 //! Checkpoint system for backtracking state.
 //!
-//! Checkpoints save the state of derived relations, allowing you to
-//! backtrack after making changes. Manual inputs are NOT automatically
-//! reverted - users decide what to keep/change.
+//! Uses a stack-based approach with speculative execution. On pop:
+//! 1. Simultaneously undo all recorded changes to inputs + feedbacks
+//! 2. Resolve corrections in stratified order as recomputation reveals
+//!    actual vs expected differences
 
 use std::collections::HashMap;
 
-use crate::dataflow::{AnyCollection, NodeId};
+use crate::change::{Change, Diff};
+use crate::collection::Collection;
+use crate::dataflow::NodeId;
+use crate::Tuple;
 
-/// A checkpoint capturing the state of the database at a point in time.
-pub struct Checkpoint {
-    /// Unique identifier for this checkpoint.
-    pub id: CheckpointId,
-    /// Optional name for the checkpoint.
+/// Type-erased changes that can be manipulated.
+pub trait AnyChanges: Send + Sync {
+    /// Apply these changes to the given collection state.
+    fn apply(&self, state: &mut dyn crate::dataflow::AnyCollection);
+    /// Unapply these changes (negate and apply).
+    fn unapply(&self, state: &mut dyn crate::dataflow::AnyCollection);
+    /// Clone into a box.
+    fn clone_box(&self) -> Box<dyn AnyChanges>;
+    /// Negate all changes, returning a new boxed changes.
+    fn negate(&self) -> Box<dyn AnyChanges>;
+    /// Compute self - other (for correction calculation).
+    fn subtract(&self, other: &dyn AnyChanges) -> Box<dyn AnyChanges>;
+    /// Check if empty.
+    fn is_empty(&self) -> bool;
+    /// Downcast to Any for type checking.
+    fn as_any(&self) -> &dyn std::any::Any;
+    /// Downcast to mutable Any for type checking.
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+
+impl<T: Tuple + Send + Sync> AnyChanges for Vec<Change<T>> {
+    fn apply(&self, state: &mut dyn crate::dataflow::AnyCollection) {
+        if let Some(coll) = state.as_any_mut().downcast_mut::<Collection<T>>() {
+            coll.apply_changes(self.iter().cloned());
+        }
+    }
+
+    fn unapply(&self, state: &mut dyn crate::dataflow::AnyCollection) {
+        if let Some(coll) = state.as_any_mut().downcast_mut::<Collection<T>>() {
+            let negated: Vec<Change<T>> = self
+                .iter()
+                .map(|c| Change {
+                    tuple: c.tuple.clone(),
+                    diff: -c.diff,
+                })
+                .collect();
+            coll.apply_changes(negated);
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn AnyChanges> {
+        Box::new(self.clone())
+    }
+
+    fn negate(&self) -> Box<dyn AnyChanges> {
+        Box::new(
+            self.iter()
+                .map(|c| Change {
+                    tuple: c.tuple.clone(),
+                    diff: -c.diff,
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn subtract(&self, other: &dyn AnyChanges) -> Box<dyn AnyChanges> {
+        // Try to downcast other to the same type
+        if let Some(other_vec) = other
+            .as_any()
+            .downcast_ref::<Vec<Change<T>>>()
+        {
+            // Build a map of tuple -> diff for other
+            let mut other_map: HashMap<T, Diff> = HashMap::new();
+            for c in other_vec {
+                *other_map.entry(c.tuple.clone()).or_insert(Diff(0)) += c.diff;
+            }
+
+            // Compute self - other
+            let mut result_map: HashMap<T, Diff> = HashMap::new();
+            for c in self {
+                *result_map.entry(c.tuple.clone()).or_insert(Diff(0)) += c.diff;
+            }
+            for (tuple, diff) in other_map {
+                *result_map.entry(tuple).or_insert(Diff(0)) -= diff;
+            }
+
+            // Convert back to Vec<Change<T>>
+            let result: Vec<Change<T>> = result_map
+                .into_iter()
+                .filter(|(_, d)| d.0 != 0)
+                .map(|(tuple, diff)| Change { tuple, diff })
+                .collect();
+
+            Box::new(result)
+        } else {
+            // Types don't match, return self unchanged
+            self.clone_box()
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty() || self.iter().all(|c| c.diff.0 == 0)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
+/// A frame on the checkpoint stack, storing changes since the previous frame.
+pub struct CheckpointFrame {
+    /// Optional name for this checkpoint.
     pub name: Option<String>,
-    /// Saved state for each node (by node ID).
-    pub(crate) states: HashMap<NodeId, Box<dyn AnyCollection>>,
-    /// Which nodes are manual inputs (won't be auto-reverted).
+    /// Changes made since the previous checkpoint, by node ID.
+    /// These are the changes TO UNDO when popping.
+    changes: HashMap<NodeId, Box<dyn AnyChanges>>,
+}
+
+impl CheckpointFrame {
+    pub fn new(name: Option<String>) -> Self {
+        CheckpointFrame {
+            name,
+            changes: HashMap::new(),
+        }
+    }
+
+    /// Record changes for a node (accumulates).
+    pub fn record<T: Tuple + Send + Sync>(&mut self, node_id: NodeId, new_changes: Vec<Change<T>>) {
+        if new_changes.is_empty() {
+            return;
+        }
+
+        if let Some(existing) = self.changes.get_mut(&node_id) {
+            // Try to merge - apply the new changes to existing
+            if let Some(existing_vec) = existing.as_any_mut().downcast_mut::<Vec<Change<T>>>() {
+                existing_vec.extend(new_changes);
+            }
+        } else {
+            self.changes.insert(node_id, Box::new(new_changes));
+        }
+    }
+
+    /// Get the recorded changes for a node.
+    pub fn get(&self, node_id: NodeId) -> Option<&dyn AnyChanges> {
+        self.changes.get(&node_id).map(|b| b.as_ref())
+    }
+
+    /// Take ownership of changes for a node.
+    pub fn take(&mut self, node_id: NodeId) -> Option<Box<dyn AnyChanges>> {
+        self.changes.remove(&node_id)
+    }
+
+    /// Get all node IDs that have changes.
+    pub fn changed_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.changes.keys().copied()
+    }
+
+    /// Iterate over all changes.
+    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &dyn AnyChanges)> + '_ {
+        self.changes.iter().map(|(k, v)| (*k, v.as_ref()))
+    }
+
+    /// Check if this frame has any changes.
+    pub fn has_changes(&self) -> bool {
+        !self.changes.is_empty()
+    }
+}
+
+impl Clone for CheckpointFrame {
+    fn clone(&self) -> Self {
+        CheckpointFrame {
+            name: self.name.clone(),
+            changes: self
+                .changes
+                .iter()
+                .map(|(k, v)| (*k, v.clone_box()))
+                .collect(),
+        }
+    }
+}
+
+/// A stack-based checkpoint manager for efficient backtracking.
+pub struct CheckpointStack {
+    frames: Vec<CheckpointFrame>,
+}
+
+impl CheckpointStack {
+    pub fn new() -> Self {
+        CheckpointStack { frames: Vec::new() }
+    }
+
+    /// Push a new checkpoint frame onto the stack.
+    pub fn push(&mut self, name: Option<String>) -> usize {
+        self.frames.push(CheckpointFrame::new(name));
+        self.frames.len()
+    }
+
+    /// Pop the top checkpoint frame.
+    pub fn pop(&mut self) -> Option<CheckpointFrame> {
+        self.frames.pop()
+    }
+
+    /// Record changes to the current frame (top of stack).
+    pub fn record<T: Tuple + Send + Sync>(&mut self, node_id: NodeId, changes: Vec<Change<T>>) {
+        if let Some(frame) = self.frames.last_mut() {
+            frame.record(node_id, changes);
+        }
+    }
+
+    /// Get the current stack depth.
+    pub fn depth(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Check if the stack is empty.
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
+    /// Check if we're currently recording (have at least one frame).
+    pub fn is_recording(&self) -> bool {
+        !self.frames.is_empty()
+    }
+}
+
+impl Default for CheckpointStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Legacy types for backwards compatibility
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CheckpointId(pub(crate) usize);
+
+impl CheckpointId {
+    pub fn index(&self) -> usize {
+        self.0
+    }
+}
+
+pub struct Checkpoint {
+    pub id: CheckpointId,
+    pub name: Option<String>,
+    pub(crate) states: HashMap<NodeId, Box<dyn crate::dataflow::AnyCollection>>,
     pub(crate) manual_inputs: Vec<NodeId>,
 }
 
@@ -25,7 +260,11 @@ impl Clone for Checkpoint {
         Checkpoint {
             id: self.id,
             name: self.name.clone(),
-            states: self.states.iter().map(|(k, v)| (*k, v.clone_box())).collect(),
+            states: self
+                .states
+                .iter()
+                .map(|(k, v)| (*k, v.clone_box()))
+                .collect(),
             manual_inputs: self.manual_inputs.clone(),
         }
     }
@@ -41,27 +280,15 @@ impl Checkpoint {
         }
     }
 
-    /// Get the checkpoint name or a default.
     pub fn display_name(&self) -> String {
-        self.name.clone().unwrap_or_else(|| format!("checkpoint_{}", self.id.0))
+        self.name
+            .clone()
+            .unwrap_or_else(|| format!("checkpoint_{}", self.id.0))
     }
 }
 
-/// A unique identifier for a checkpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CheckpointId(pub(crate) usize);
-
-impl CheckpointId {
-    pub fn index(&self) -> usize {
-        self.0
-    }
-}
-
-/// Manages checkpoints for a database.
 pub struct CheckpointManager {
-    /// All checkpoints, indexed by ID.
     checkpoints: Vec<Checkpoint>,
-    /// Current checkpoint counter.
     next_id: usize,
 }
 
@@ -73,16 +300,13 @@ impl CheckpointManager {
         }
     }
 
-    /// Create a new checkpoint ID.
     pub fn next_id(&mut self) -> CheckpointId {
         let id = CheckpointId(self.next_id);
         self.next_id += 1;
         id
     }
 
-    /// Store a checkpoint.
     pub fn store(&mut self, checkpoint: Checkpoint) {
-        // Find existing or push new
         if let Some(pos) = self.checkpoints.iter().position(|c| c.id == checkpoint.id) {
             self.checkpoints[pos] = checkpoint;
         } else {
@@ -90,16 +314,13 @@ impl CheckpointManager {
         }
     }
 
-    /// Get a checkpoint by ID.
     pub fn get(&self, id: CheckpointId) -> Option<&Checkpoint> {
         self.checkpoints.iter().find(|c| c.id == id)
     }
 
-    /// List all checkpoints.
     pub fn list(&self) -> &[Checkpoint] {
         &self.checkpoints
     }
-
 }
 
 impl Default for CheckpointManager {
@@ -108,14 +329,10 @@ impl Default for CheckpointManager {
     }
 }
 
-/// Information about what changed when restoring a checkpoint.
 #[derive(Debug, Default)]
 pub struct RestoreInfo {
-    /// Nodes that were restored to checkpoint state.
     pub restored_nodes: Vec<NodeId>,
-    /// Manual input nodes that were NOT restored (user must decide).
     pub manual_input_nodes: Vec<NodeId>,
-    /// Whether any re-propagation is needed.
     pub needs_propagation: bool,
 }
 

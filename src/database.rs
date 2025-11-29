@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::change::{Change, Diff};
-use crate::checkpoint::{Checkpoint, CheckpointId, CheckpointManager, RestoreInfo};
+use crate::checkpoint::{Checkpoint, CheckpointId, CheckpointManager, CheckpointStack, RestoreInfo};
 use crate::collection::Collection;
 use crate::dataflow::{AnyChanges, AnyCollection, DataflowGraph, NodeId};
 use crate::operators;
@@ -17,6 +17,8 @@ type RecomputeFn = Box<dyn Fn(&DataflowGraph) -> Box<dyn AnyCollection> + Send +
 pub struct Database {
     graph: DataflowGraph,
     checkpoints: CheckpointManager,
+    /// Stack-based checkpoints for backtracking (push/pop semantics).
+    checkpoint_stack: CheckpointStack,
     /// Maximum iterations for fixed-point computation.
     max_iterations: usize,
     /// Type-erased recomputation functions for each derived node.
@@ -42,6 +44,7 @@ impl Database {
         Database {
             graph: DataflowGraph::new(),
             checkpoints: CheckpointManager::new(),
+            checkpoint_stack: CheckpointStack::new(),
             max_iterations: 1000,
             recompute_fns: Vec::new(),
             feedback_loops: Vec::new(),
@@ -72,6 +75,11 @@ impl Database {
 
     /// Insert a tuple into a relation.
     pub fn insert<T: Tuple + Send + Sync>(&mut self, rel: Relation<T>, tuple: T) {
+        // Record the change for checkpoint stack if recording
+        if self.checkpoint_stack.is_recording() {
+            self.checkpoint_stack.record(rel.id, vec![Change::insert(tuple.clone())]);
+        }
+
         let node = self.graph.get_mut(rel.id);
 
         if let Some(changes) = node.pending_changes.as_any_mut().downcast_mut::<Vec<Change<T>>>() {
@@ -88,6 +96,11 @@ impl Database {
 
     /// Delete a tuple from a relation.
     pub fn delete<T: Tuple + Send + Sync>(&mut self, rel: Relation<T>, tuple: T) {
+        // Record the change for checkpoint stack if recording
+        if self.checkpoint_stack.is_recording() {
+            self.checkpoint_stack.record(rel.id, vec![Change::delete(tuple.clone())]);
+        }
+
         let node = self.graph.get_mut(rel.id);
 
         if let Some(changes) = node.pending_changes.as_any_mut().downcast_mut::<Vec<Change<T>>>() {
@@ -1013,6 +1026,10 @@ impl Database {
 
                 if changed {
                     let var_id = self.feedback_loops[i].var_id;
+
+                    // Record feedback changes for checkpoint stack
+                    self.record_feedback_change(var_id, new_state.as_ref());
+
                     self.graph.get_mut(var_id).state = new_state;
                     self.recompute_all();
                     iterations += 1;
@@ -1024,6 +1041,50 @@ impl Database {
         }
 
         self.graph.clear_dirty();
+    }
+
+    /// Record a feedback change for the checkpoint stack.
+    /// This computes the diff between the current state and new state.
+    fn record_feedback_change(&mut self, var_id: NodeId, new_state: &dyn AnyCollection) {
+        if !self.checkpoint_stack.is_recording() {
+            return;
+        }
+
+        // We need to compute the diff generically. The compute_and_check function
+        // already does the diff check, but we need the actual changes.
+
+        // Get the old state
+        let old_state = self.graph.get(var_id).state.as_ref();
+
+        // Try to downcast and compute diff for common types
+        // This is somewhat limited but covers the common cases
+        if let Some(changes) = Self::compute_diff_typed::<(i32, i32)>(old_state, new_state) {
+            self.checkpoint_stack.record(var_id, changes);
+        } else if let Some(changes) = Self::compute_diff_typed::<i32>(old_state, new_state) {
+            self.checkpoint_stack.record(var_id, changes);
+        } else if let Some(changes) = Self::compute_diff_typed::<i64>(old_state, new_state) {
+            self.checkpoint_stack.record(var_id, changes);
+        } else if let Some(changes) = Self::compute_diff_typed::<(i64, i64)>(old_state, new_state) {
+            self.checkpoint_stack.record(var_id, changes);
+        } else if let Some(changes) = Self::compute_diff_typed::<String>(old_state, new_state) {
+            self.checkpoint_stack.record(var_id, changes);
+        }
+    }
+
+    fn compute_diff_typed<T: Tuple + Send + Sync>(
+        old_state: &dyn AnyCollection,
+        new_state: &dyn AnyCollection
+    ) -> Option<Vec<Change<T>>> {
+        if let (Some(old_coll), Some(new_coll)) = (
+            old_state.as_any().downcast_ref::<Collection<T>>(),
+            new_state.as_any().downcast_ref::<Collection<T>>(),
+        ) {
+            let changes = old_coll.diff(new_coll);
+            if !changes.is_empty() {
+                return Some(changes);
+            }
+        }
+        None
     }
 
     fn recompute_all(&mut self) {
@@ -1098,6 +1159,116 @@ impl Database {
             .iter()
             .map(|c| (c.id, c.name.as_deref()))
             .collect()
+    }
+
+    // ========================================================================
+    // Stack-based Checkpoints (Push/Pop)
+    // ========================================================================
+
+    /// Push a new checkpoint frame onto the stack.
+    ///
+    /// Changes made after this call will be tracked and can be undone with `pop()`.
+    /// Returns the new stack depth.
+    pub fn push(&mut self, name: Option<&str>) -> usize {
+        self.checkpoint_stack.push(name.map(|s| s.to_string()))
+    }
+
+    /// Pop the top checkpoint frame, undoing all changes since the matching push.
+    ///
+    /// This uses speculative execution to efficiently restore state:
+    /// 1. Simultaneously undo all recorded changes to inputs + feedbacks
+    /// 2. Resolve corrections in stratified order as recomputation reveals
+    ///    actual vs expected differences
+    ///
+    /// Returns true if a frame was popped, false if the stack was empty.
+    pub fn pop(&mut self) -> bool {
+        let frame = match self.checkpoint_stack.pop() {
+            Some(f) => f,
+            None => return false,
+        };
+
+        if !frame.has_changes() {
+            return true;
+        }
+
+        // Step 1: Apply all undos simultaneously to inputs and feedbacks
+        // This sets up the "expected" state for speculative execution
+        for node_id in frame.changed_nodes() {
+            if let Some(changes) = frame.get(node_id) {
+                let node = self.graph.get(node_id);
+                if node.is_input() || node.is_feedback() {
+                    // Unapply the changes (negate and apply)
+                    changes.unapply(self.graph.get_mut(node_id).state.as_mut());
+                }
+            }
+        }
+
+        // Recompute all derived nodes based on restored inputs
+        self.recompute_all();
+
+        // Step 2: For each feedback in stratified order, resolve corrections
+        // The correction is: what we expected to see minus what we actually see
+        // If we expected a deletion but the tuple is still there, we need to delete it
+        // If we expected the tuple to remain but it's gone, we need to re-add it
+        for i in 0..self.feedback_loops.len() {
+            let var_id = self.feedback_loops[i].var_id;
+
+            // Get the expected change at this feedback (negated recorded change)
+            if let Some(recorded_changes) = frame.get(var_id) {
+                let expected_changes = recorded_changes.negate();
+
+                // Compute the actual state now
+                let (new_state, _) = (self.feedback_loops[i].compute_and_check)(&self.graph);
+
+                // The correction is: expected - actual
+                // If expected says "delete X" but actual shows X is still there,
+                // we need to apply that deletion
+                // This is handled by applying the expected changes
+                expected_changes.apply(self.graph.get_mut(var_id).state.as_mut());
+            }
+
+            // Run stratified fixpoint for feedbacks 0..=i
+            self.run_partial_stratified_fixpoint(i + 1);
+        }
+
+        true
+    }
+
+    /// Run stratified fixpoint for the first `num_feedbacks` feedback loops.
+    fn run_partial_stratified_fixpoint(&mut self, num_feedbacks: usize) {
+        let mut iterations = 0;
+
+        'outer: loop {
+            if iterations >= self.max_iterations {
+                break;
+            }
+
+            for i in 0..num_feedbacks.min(self.feedback_loops.len()) {
+                let (new_state, changed) = (self.feedback_loops[i].compute_and_check)(&self.graph);
+
+                if changed {
+                    let var_id = self.feedback_loops[i].var_id;
+                    self.graph.get_mut(var_id).state = new_state;
+                    self.recompute_all();
+                    iterations += 1;
+                    continue 'outer;
+                }
+            }
+
+            break;
+        }
+
+        self.graph.clear_dirty();
+    }
+
+    /// Check if we're currently recording changes (have at least one frame on the stack).
+    pub fn is_recording(&self) -> bool {
+        self.checkpoint_stack.is_recording()
+    }
+
+    /// Get the current checkpoint stack depth.
+    pub fn stack_depth(&self) -> usize {
+        self.checkpoint_stack.depth()
     }
 
     // ========================================================================

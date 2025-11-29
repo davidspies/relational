@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! A relational query engine with differential dataflow semantics.
 //!
 //! This crate provides:
