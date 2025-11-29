@@ -35,9 +35,21 @@ pub struct Database {
     max_iterations: usize,
     /// Type-erased recomputation functions for each derived node.
     recompute_fns: Vec<Option<RecomputeFn>>,
-    /// Feedback loops in order of declaration (for stratified fixpoint).
-    /// Each entry is (variable_id, base_id, recursive_id, recompute_fn).
-    feedback_loops: Vec<FeedbackLoop>,
+    /// Feedback loops and interrupts in order of declaration (for stratified fixpoint).
+    stratified_ops: Vec<StratifiedOp>,
+    /// Whether the last fixpoint was interrupted.
+    interrupted: bool,
+}
+
+/// An operation in the stratified fixpoint computation.
+enum StratifiedOp {
+    /// A feedback loop that runs to fixpoint.
+    Feedback(FeedbackLoop),
+    /// An interrupt that stops propagation if the relation is non-empty.
+    Interrupt {
+        /// Function to check if the interrupt condition is met (relation non-empty).
+        check: Box<dyn Fn(&DataflowGraph) -> bool + Send + Sync>,
+    },
 }
 
 
@@ -210,7 +222,8 @@ impl Database {
             checkpoint_stack: CheckpointStack::new(),
             max_iterations: 1000,
             recompute_fns: Vec::new(),
-            feedback_loops: Vec::new(),
+            stratified_ops: Vec::new(),
+            interrupted: false,
         }
     }
 
@@ -290,14 +303,19 @@ impl Database {
 
     /// Propagate changes through the dataflow graph.
     fn propagate_changes(&mut self) {
-        if self.feedback_loops.is_empty() {
-            // No feedback loops - just recompute derived relations
+        if self.stratified_ops.is_empty() {
+            // No feedback loops or interrupts - just recompute derived relations
             self.recompute_all();
             self.graph.clear_dirty();
         } else {
             // Re-run stratified fixpoint to propagate through feedback loops
             self.run_stratified_fixpoint();
         }
+    }
+
+    /// Check if the last fixpoint computation was interrupted.
+    pub fn was_interrupted(&self) -> bool {
+        self.interrupted
     }
 
     // ========================================================================
@@ -1146,7 +1164,7 @@ impl Database {
         let base_id = base.id;
         let recursive_id = recursive.id;
 
-        self.feedback_loops.push(FeedbackLoop {
+        self.stratified_ops.push(StratifiedOp::Feedback(FeedbackLoop {
             var_id,
             compute_input: Box::new(move |graph: &DataflowGraph| {
                 let base_coll = graph
@@ -1171,18 +1189,42 @@ impl Database {
             }),
             input_totals: Box::new(Collection::<T>::new()),
             ops: Box::new(TypedFeedbackOps::<T>::new()),
-        });
+        }));
 
         // Run stratified fixpoint for all feedback loops
         self.run_stratified_fixpoint();
     }
 
-    /// Run stratified fixpoint computation for all feedback loops.
+    /// Add an interrupt that stops fixpoint propagation when the relation is non-empty.
     ///
-    /// Feedbacks are processed in declaration order. If any feedback produces
-    /// a change, we restart from the first feedback. This continues until
-    /// a full pass through all feedbacks produces no changes.
+    /// Interrupts are checked in declaration order along with feedbacks.
+    /// When an interrupt fires (relation non-empty), the fixpoint stops immediately.
+    /// Use `was_interrupted()` to check if the last fixpoint was interrupted.
+    pub fn interrupt<T: Tuple + Send + Sync>(&mut self, rel: Relation<T>) {
+        let rel_id = rel.id;
+        self.stratified_ops.push(StratifiedOp::Interrupt {
+            check: Box::new(move |graph: &DataflowGraph| {
+                graph
+                    .get(rel_id)
+                    .state
+                    .as_any()
+                    .downcast_ref::<Collection<T>>()
+                    .map(|c| !c.is_empty())
+                    .unwrap_or(false)
+            }),
+        });
+    }
+
+    /// Run stratified fixpoint computation for all feedback loops and interrupts.
+    ///
+    /// Operations are processed in declaration order:
+    /// - Feedbacks: run to fixpoint, if any change, restart from the first op
+    /// - Interrupts: if relation non-empty, stop immediately
+    ///
+    /// This continues until a full pass produces no changes, or an interrupt fires.
     fn run_stratified_fixpoint(&mut self) {
+        self.interrupted = false;
+
         // First recompute all derived nodes to reflect any input changes
         self.recompute_all();
 
@@ -1196,44 +1238,66 @@ impl Database {
                 );
             }
 
-            for i in 0..self.feedback_loops.len() {
-                // Compute what's flowing into this feedback
-                let input = (self.feedback_loops[i].compute_input)(&self.graph);
-
-                // Update input_totals and get newly positive tuples
-                let (newly_positive, var_id) = {
-                    let fl = &mut self.feedback_loops[i];
-                    let np = fl.ops.add_to_input_totals(
-                        fl.input_totals.as_mut(),
-                        input.as_ref(),
-                    );
-                    (np, fl.var_id)
-                };
-
-                if !newly_positive.is_empty() {
-                    // Record input deltas and output additions for checkpoint stack
-                    if self.checkpoint_stack.is_recording() {
-                        // Record what we added to input_totals (the newly positive tuples)
-                        self.checkpoint_stack.record_feedback_input_deltas(
-                            var_id,
-                            self.feedback_loops[i].ops.clone_tuples(newly_positive.as_ref()),
-                        );
-                        // Record output additions (same as newly positive)
-                        self.checkpoint_stack.record_feedback_outputs(
-                            var_id,
-                            self.feedback_loops[i].ops.clone_tuples(newly_positive.as_ref()),
-                        );
+            for i in 0..self.stratified_ops.len() {
+                match &self.stratified_ops[i] {
+                    StratifiedOp::Interrupt { check } => {
+                        // Check if interrupt condition is met
+                        if check(&self.graph) {
+                            self.interrupted = true;
+                            self.graph.clear_dirty();
+                            return;
+                        }
                     }
+                    StratifiedOp::Feedback(_) => {
+                        // Process feedback - need to extract data due to borrow checker
+                        let (input, var_id) = {
+                            let fl = match &self.stratified_ops[i] {
+                                StratifiedOp::Feedback(fl) => fl,
+                                _ => unreachable!(),
+                            };
+                            ((fl.compute_input)(&self.graph), fl.var_id)
+                        };
 
-                    // Apply +1 to output for each newly positive tuple
-                    self.feedback_loops[i].ops.apply_output_adds(
-                        self.graph.get_mut(var_id).state.as_mut(),
-                        newly_positive.as_ref(),
-                    );
+                        // Update input_totals and get newly positive tuples
+                        let newly_positive = {
+                            let fl = match &mut self.stratified_ops[i] {
+                                StratifiedOp::Feedback(fl) => fl,
+                                _ => unreachable!(),
+                            };
+                            fl.ops.add_to_input_totals(
+                                fl.input_totals.as_mut(),
+                                input.as_ref(),
+                            )
+                        };
 
-                    self.recompute_all();
-                    iterations += 1;
-                    continue 'outer;
+                        if !newly_positive.is_empty() {
+                            // Record and apply the changes
+                            let fl = match &self.stratified_ops[i] {
+                                StratifiedOp::Feedback(fl) => fl,
+                                _ => unreachable!(),
+                            };
+
+                            if self.checkpoint_stack.is_recording() {
+                                self.checkpoint_stack.record_feedback_input_deltas(
+                                    var_id,
+                                    fl.ops.clone_tuples(newly_positive.as_ref()),
+                                );
+                                self.checkpoint_stack.record_feedback_outputs(
+                                    var_id,
+                                    fl.ops.clone_tuples(newly_positive.as_ref()),
+                                );
+                            }
+
+                            fl.ops.apply_output_adds(
+                                self.graph.get_mut(var_id).state.as_mut(),
+                                newly_positive.as_ref(),
+                            );
+
+                            self.recompute_all();
+                            iterations += 1;
+                            continue 'outer;
+                        }
+                    }
                 }
             }
 
@@ -1257,6 +1321,17 @@ impl Database {
             }
         }
     }
+
+    /// Get an iterator over feedback loops (for pop operations).
+    fn feedback_iter(&self) -> impl Iterator<Item = (usize, &FeedbackLoop)> {
+        self.stratified_ops.iter().enumerate().filter_map(|(i, op)| {
+            match op {
+                StratifiedOp::Feedback(fl) => Some((i, fl)),
+                StratifiedOp::Interrupt { .. } => None,
+            }
+        })
+    }
+
 
     // ========================================================================
     // Checkpoints
@@ -1362,9 +1437,7 @@ impl Database {
         // Step 2: For all feedbacks, send -1 for outputs AND subtract recorded input deltas
         // Collect the feedback data we need to process
         let feedback_data: Vec<FeedbackRollbackData> = self
-            .feedback_loops
-            .iter()
-            .enumerate()
+            .feedback_iter()
             .map(|(i, fl)| FeedbackRollbackData {
                 index: i,
                 var_id: fl.var_id,
@@ -1376,13 +1449,21 @@ impl Database {
         // Apply -1 for each output we recorded, and subtract recorded input deltas from input_totals
         for data in &feedback_data {
             if let Some(outputs) = &data.outputs {
-                self.feedback_loops[data.index].ops.apply_output_removes(
+                // Need to work around borrow checker by getting ops separately
+                let fl = match &self.stratified_ops[data.index] {
+                    StratifiedOp::Feedback(fl) => fl,
+                    _ => unreachable!(),
+                };
+                fl.ops.apply_output_removes(
                     self.graph.get_mut(data.var_id).state.as_mut(),
                     outputs.as_ref(),
                 );
             }
             if let Some(input_deltas) = &data.input_deltas {
-                let fl = &mut self.feedback_loops[data.index];
+                let fl = match &mut self.stratified_ops[data.index] {
+                    StratifiedOp::Feedback(fl) => fl,
+                    _ => unreachable!(),
+                };
                 fl.ops.subtract_from_input_totals(
                     fl.input_totals.as_mut(),
                     input_deltas.as_ref(),
@@ -1398,14 +1479,24 @@ impl Database {
         // (because input_totals is still positive for them after the subtraction)
         for data in &feedback_data {
             if let Some(outputs) = &data.outputs {
-                let still_positive = self.feedback_loops[data.index].ops.get_positive_in_totals(
-                    self.feedback_loops[data.index].input_totals.as_ref(),
-                    outputs.as_ref(),
-                );
+                let still_positive = {
+                    let fl = match &self.stratified_ops[data.index] {
+                        StratifiedOp::Feedback(fl) => fl,
+                        _ => unreachable!(),
+                    };
+                    fl.ops.get_positive_in_totals(
+                        fl.input_totals.as_ref(),
+                        outputs.as_ref(),
+                    )
+                };
 
                 if !still_positive.is_empty() {
                     // Re-add these tuples to output
-                    self.feedback_loops[data.index].ops.apply_output_adds(
+                    let fl = match &self.stratified_ops[data.index] {
+                        StratifiedOp::Feedback(fl) => fl,
+                        _ => unreachable!(),
+                    };
+                    fl.ops.apply_output_adds(
                         self.graph.get_mut(data.var_id).state.as_mut(),
                         still_positive.as_ref(),
                     );
@@ -1413,22 +1504,24 @@ impl Database {
                     // Record in parent frame (if exists)
                     self.checkpoint_stack.record_feedback_outputs_to_parent(
                         data.var_id,
-                        self.feedback_loops[data.index].ops.clone_tuples(still_positive.as_ref()),
+                        fl.ops.clone_tuples(still_positive.as_ref()),
                     );
                 }
             }
         }
 
         // Step 5: Run fixpoint to handle any corrections
-        if !self.feedback_loops.is_empty() {
-            self.run_partial_stratified_fixpoint(self.feedback_loops.len());
+        let has_feedbacks = self.feedback_iter().next().is_some();
+        if has_feedbacks {
+            self.run_partial_stratified_fixpoint();
         }
 
         true
     }
 
-    /// Run stratified fixpoint for the first `num_feedbacks` feedback loops.
-    fn run_partial_stratified_fixpoint(&mut self, num_feedbacks: usize) {
+    /// Run stratified fixpoint (used after pop to re-establish fixpoint).
+    /// This is the same as run_stratified_fixpoint but doesn't reset interrupted flag.
+    fn run_partial_stratified_fixpoint(&mut self) {
         self.recompute_all();
 
         let mut iterations = 0;
@@ -1441,44 +1534,62 @@ impl Database {
                 );
             }
 
-            for i in 0..num_feedbacks.min(self.feedback_loops.len()) {
-                // Compute what's flowing into this feedback
-                let input = (self.feedback_loops[i].compute_input)(&self.graph);
-
-                // Update input_totals and get newly positive tuples
-                let (newly_positive, var_id) = {
-                    let fl = &mut self.feedback_loops[i];
-                    let np = fl.ops.add_to_input_totals(
-                        fl.input_totals.as_mut(),
-                        input.as_ref(),
-                    );
-                    (np, fl.var_id)
-                };
-
-                if !newly_positive.is_empty() {
-                    // Record input deltas and output additions for checkpoint stack
-                    if self.checkpoint_stack.is_recording() {
-                        // Record what we added to input_totals (the newly positive tuples)
-                        self.checkpoint_stack.record_feedback_input_deltas(
-                            var_id,
-                            self.feedback_loops[i].ops.clone_tuples(newly_positive.as_ref()),
-                        );
-                        // Record output additions (same as newly positive)
-                        self.checkpoint_stack.record_feedback_outputs(
-                            var_id,
-                            self.feedback_loops[i].ops.clone_tuples(newly_positive.as_ref()),
-                        );
+            for i in 0..self.stratified_ops.len() {
+                match &self.stratified_ops[i] {
+                    StratifiedOp::Interrupt { check } => {
+                        if check(&self.graph) {
+                            self.interrupted = true;
+                            self.graph.clear_dirty();
+                            return;
+                        }
                     }
+                    StratifiedOp::Feedback(_) => {
+                        let (input, var_id) = {
+                            let fl = match &self.stratified_ops[i] {
+                                StratifiedOp::Feedback(fl) => fl,
+                                _ => unreachable!(),
+                            };
+                            ((fl.compute_input)(&self.graph), fl.var_id)
+                        };
 
-                    // Apply +1 to output for each newly positive tuple
-                    self.feedback_loops[i].ops.apply_output_adds(
-                        self.graph.get_mut(var_id).state.as_mut(),
-                        newly_positive.as_ref(),
-                    );
+                        let newly_positive = {
+                            let fl = match &mut self.stratified_ops[i] {
+                                StratifiedOp::Feedback(fl) => fl,
+                                _ => unreachable!(),
+                            };
+                            fl.ops.add_to_input_totals(
+                                fl.input_totals.as_mut(),
+                                input.as_ref(),
+                            )
+                        };
 
-                    self.recompute_all();
-                    iterations += 1;
-                    continue 'outer;
+                        if !newly_positive.is_empty() {
+                            let fl = match &self.stratified_ops[i] {
+                                StratifiedOp::Feedback(fl) => fl,
+                                _ => unreachable!(),
+                            };
+
+                            if self.checkpoint_stack.is_recording() {
+                                self.checkpoint_stack.record_feedback_input_deltas(
+                                    var_id,
+                                    fl.ops.clone_tuples(newly_positive.as_ref()),
+                                );
+                                self.checkpoint_stack.record_feedback_outputs(
+                                    var_id,
+                                    fl.ops.clone_tuples(newly_positive.as_ref()),
+                                );
+                            }
+
+                            fl.ops.apply_output_adds(
+                                self.graph.get_mut(var_id).state.as_mut(),
+                                newly_positive.as_ref(),
+                            );
+
+                            self.recompute_all();
+                            iterations += 1;
+                            continue 'outer;
+                        }
+                    }
                 }
             }
 

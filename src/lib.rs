@@ -105,6 +105,7 @@ mod database;
 pub mod operators;
 mod checkpoint;
 mod relation;
+pub mod cdcl;
 
 pub use change::{Change, Diff};
 pub use collection::Collection;
@@ -112,6 +113,7 @@ pub use dataflow::{Node, NodeId};
 pub use database::Database;
 pub use checkpoint::Checkpoint;
 pub use relation::{Relation, Variable};
+pub use cdcl::Solver;
 
 /// A trait for types that can be used as tuples in relations.
 pub trait Tuple: Clone + Eq + std::hash::Hash + std::fmt::Debug + 'static {}
