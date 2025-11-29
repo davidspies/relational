@@ -600,6 +600,327 @@ impl Database {
     }
 
     // ========================================================================
+    // Aggregation
+    // ========================================================================
+
+    /// Group by key and compute maximum value.
+    ///
+    /// For each distinct key K, outputs (K, max(V)) where V are all values
+    /// associated with that key.
+    pub fn group_max<T, K, V, FK, FV>(
+        &mut self,
+        input: Relation<T>,
+        key_fn: FK,
+        value_fn: FV,
+    ) -> Relation<(K, V)>
+    where
+        T: Tuple + Send + Sync,
+        K: Tuple + Send + Sync,
+        V: Tuple + Ord + Send + Sync,
+        FK: Fn(&T) -> K + Send + Sync + Clone + 'static,
+        FV: Fn(&T) -> V + Send + Sync + Clone + 'static,
+    {
+        let input_id = input.id;
+        let key_fn_clone = key_fn.clone();
+        let value_fn_clone = value_fn.clone();
+
+        let id = self.graph.create_derived::<(K, V)>(
+            None,
+            vec![input.id],
+            Box::new(|_, _| {
+                (
+                    Box::new(Collection::<(K, V)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Vec::<Change<(K, V)>>::new()) as Box<dyn AnyChanges>,
+                )
+            }),
+            None,
+        );
+        self.ensure_recompute_fns_len(id);
+
+        // Store the recompute function
+        self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
+            let input_coll = graph
+                .get(input_id)
+                .state
+                .as_any()
+                .downcast_ref::<Collection<T>>()
+                .cloned()
+                .unwrap_or_default();
+            let output = operators::aggregate(
+                &input_coll,
+                &key_fn_clone,
+                &value_fn_clone,
+                |k, vals| operators::max(k, vals),
+            );
+            // Filter out None results and unwrap
+            let mut result = Collection::new();
+            for (opt, diff) in output.iter_with_multiplicity() {
+                if let Some(kv) = opt {
+                    result.apply_change(Change::new(kv.clone(), diff));
+                }
+            }
+            Box::new(result) as Box<dyn AnyCollection>
+        }));
+
+        let input_coll = self
+            .graph
+            .get(input.id)
+            .state
+            .as_any()
+            .downcast_ref::<Collection<T>>()
+            .cloned()
+            .unwrap_or_default();
+        let output = operators::aggregate(&input_coll, &key_fn, &value_fn, |k, vals| {
+            operators::max(k, vals)
+        });
+        // Filter out None results
+        let mut result = Collection::new();
+        for (opt, diff) in output.iter_with_multiplicity() {
+            if let Some(kv) = opt {
+                result.apply_change(Change::new(kv.clone(), diff));
+            }
+        }
+        self.graph.get_mut(id).state = Box::new(result);
+
+        Relation::new(id)
+    }
+
+    /// Group by key and compute minimum value.
+    ///
+    /// For each distinct key K, outputs (K, min(V)) where V are all values
+    /// associated with that key.
+    pub fn group_min<T, K, V, FK, FV>(
+        &mut self,
+        input: Relation<T>,
+        key_fn: FK,
+        value_fn: FV,
+    ) -> Relation<(K, V)>
+    where
+        T: Tuple + Send + Sync,
+        K: Tuple + Send + Sync,
+        V: Tuple + Ord + Send + Sync,
+        FK: Fn(&T) -> K + Send + Sync + Clone + 'static,
+        FV: Fn(&T) -> V + Send + Sync + Clone + 'static,
+    {
+        let input_id = input.id;
+        let key_fn_clone = key_fn.clone();
+        let value_fn_clone = value_fn.clone();
+
+        let id = self.graph.create_derived::<(K, V)>(
+            None,
+            vec![input.id],
+            Box::new(|_, _| {
+                (
+                    Box::new(Collection::<(K, V)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Vec::<Change<(K, V)>>::new()) as Box<dyn AnyChanges>,
+                )
+            }),
+            None,
+        );
+        self.ensure_recompute_fns_len(id);
+
+        // Store the recompute function
+        self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
+            let input_coll = graph
+                .get(input_id)
+                .state
+                .as_any()
+                .downcast_ref::<Collection<T>>()
+                .cloned()
+                .unwrap_or_default();
+            let output = operators::aggregate(
+                &input_coll,
+                &key_fn_clone,
+                &value_fn_clone,
+                |k, vals| operators::min(k, vals),
+            );
+            // Filter out None results and unwrap
+            let mut result = Collection::new();
+            for (opt, diff) in output.iter_with_multiplicity() {
+                if let Some(kv) = opt {
+                    result.apply_change(Change::new(kv.clone(), diff));
+                }
+            }
+            Box::new(result) as Box<dyn AnyCollection>
+        }));
+
+        let input_coll = self
+            .graph
+            .get(input.id)
+            .state
+            .as_any()
+            .downcast_ref::<Collection<T>>()
+            .cloned()
+            .unwrap_or_default();
+        let output = operators::aggregate(&input_coll, &key_fn, &value_fn, |k, vals| {
+            operators::min(k, vals)
+        });
+        // Filter out None results
+        let mut result = Collection::new();
+        for (opt, diff) in output.iter_with_multiplicity() {
+            if let Some(kv) = opt {
+                result.apply_change(Change::new(kv.clone(), diff));
+            }
+        }
+        self.graph.get_mut(id).state = Box::new(result);
+
+        Relation::new(id)
+    }
+
+    /// Group by key and compute sum of values.
+    ///
+    /// For each distinct key K, outputs (K, sum(V)) where V are all i64 values
+    /// associated with that key, weighted by multiplicity.
+    pub fn group_sum<T, K, FK, FV>(
+        &mut self,
+        input: Relation<T>,
+        key_fn: FK,
+        value_fn: FV,
+    ) -> Relation<(K, i64)>
+    where
+        T: Tuple + Send + Sync,
+        K: Tuple + Send + Sync,
+        FK: Fn(&T) -> K + Send + Sync + Clone + 'static,
+        FV: Fn(&T) -> i64 + Send + Sync + Clone + 'static,
+    {
+        let input_id = input.id;
+        let key_fn_clone = key_fn.clone();
+        let value_fn_clone = value_fn.clone();
+
+        let id = self.graph.create_derived::<(K, i64)>(
+            None,
+            vec![input.id],
+            Box::new(|_, _| {
+                (
+                    Box::new(Collection::<(K, i64)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Vec::<Change<(K, i64)>>::new()) as Box<dyn AnyChanges>,
+                )
+            }),
+            None,
+        );
+        self.ensure_recompute_fns_len(id);
+
+        // Store the recompute function
+        self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
+            let input_coll = graph
+                .get(input_id)
+                .state
+                .as_any()
+                .downcast_ref::<Collection<T>>()
+                .cloned()
+                .unwrap_or_default();
+            Box::new(operators::aggregate(
+                &input_coll,
+                &key_fn_clone,
+                &value_fn_clone,
+                |k, vals| operators::sum(k, vals),
+            )) as Box<dyn AnyCollection>
+        }));
+
+        let input_coll = self
+            .graph
+            .get(input.id)
+            .state
+            .as_any()
+            .downcast_ref::<Collection<T>>()
+            .cloned()
+            .unwrap_or_default();
+        let output = operators::aggregate(&input_coll, &key_fn, &value_fn, |k, vals| {
+            operators::sum(k, vals)
+        });
+        self.graph.get_mut(id).state = Box::new(output);
+
+        Relation::new(id)
+    }
+
+    /// Group by key and count tuples.
+    ///
+    /// For each distinct key K, outputs (K, count) where count is the number
+    /// of tuples with that key (weighted by multiplicity).
+    pub fn group_count<T, K, FK>(
+        &mut self,
+        input: Relation<T>,
+        key_fn: FK,
+    ) -> Relation<(K, i64)>
+    where
+        T: Tuple + Send + Sync,
+        K: Tuple + Send + Sync,
+        FK: Fn(&T) -> K + Send + Sync + Clone + 'static,
+    {
+        let input_id = input.id;
+        let key_fn_clone = key_fn.clone();
+
+        let id = self.graph.create_derived::<(K, i64)>(
+            None,
+            vec![input.id],
+            Box::new(|_, _| {
+                (
+                    Box::new(Collection::<(K, i64)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Vec::<Change<(K, i64)>>::new()) as Box<dyn AnyChanges>,
+                )
+            }),
+            None,
+        );
+        self.ensure_recompute_fns_len(id);
+
+        // Store the recompute function
+        self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
+            let input_coll = graph
+                .get(input_id)
+                .state
+                .as_any()
+                .downcast_ref::<Collection<T>>()
+                .cloned()
+                .unwrap_or_default();
+            Box::new(operators::aggregate(
+                &input_coll,
+                &key_fn_clone,
+                |_| (),
+                |k, vals| operators::count(k, vals),
+            )) as Box<dyn AnyCollection>
+        }));
+
+        let input_coll = self
+            .graph
+            .get(input.id)
+            .state
+            .as_any()
+            .downcast_ref::<Collection<T>>()
+            .cloned()
+            .unwrap_or_default();
+        let output = operators::aggregate(&input_coll, &key_fn, |_| (), |k, vals| {
+            operators::count(k, vals)
+        });
+        self.graph.get_mut(id).state = Box::new(output);
+
+        Relation::new(id)
+    }
+
+    /// Compute the maximum value in a relation (convenience method).
+    ///
+    /// Returns a relation containing at most one tuple: the maximum value.
+    pub fn max<T>(&mut self, input: Relation<T>) -> Relation<T>
+    where
+        T: Tuple + Ord + Send + Sync,
+    {
+        // Use group_max with a constant key, then project out just the value
+        let with_key = self.group_max(input, |_| (), |t| t.clone());
+        self.map(with_key, |(_, v)| v.clone())
+    }
+
+    /// Compute the minimum value in a relation (convenience method).
+    ///
+    /// Returns a relation containing at most one tuple: the minimum value.
+    pub fn min<T>(&mut self, input: Relation<T>) -> Relation<T>
+    where
+        T: Tuple + Ord + Send + Sync,
+    {
+        // Use group_min with a constant key, then project out just the value
+        let with_key = self.group_min(input, |_| (), |t| t.clone());
+        self.map(with_key, |(_, v)| v.clone())
+    }
+
+    // ========================================================================
     // Feedback / Fixed-Point
     // ========================================================================
 
@@ -676,45 +997,30 @@ impl Database {
 
     /// Run stratified fixpoint computation for all feedback loops.
     ///
-    /// Feedbacks are processed in declaration order. Each feedback runs to fixpoint
-    /// before the next is applied. If a later feedback causes changes, earlier
-    /// feedbacks re-run to fixpoint.
+    /// Feedbacks are processed in declaration order. If any feedback produces
+    /// a change, we restart from the first feedback. This continues until
+    /// a full pass through all feedbacks produces no changes.
     fn run_stratified_fixpoint(&mut self) {
-        let mut total_iterations = 0;
+        let mut iterations = 0;
 
-        loop {
-            if total_iterations >= self.max_iterations {
+        'outer: loop {
+            if iterations >= self.max_iterations {
                 break;
             }
 
-            let mut any_changed = false;
-
-            // Process feedbacks in order - each must reach fixpoint before next
             for i in 0..self.feedback_loops.len() {
-                // Run feedback i to fixpoint
-                loop {
-                    if total_iterations >= self.max_iterations {
-                        break;
-                    }
+                let (new_state, changed) = (self.feedback_loops[i].compute_and_check)(&self.graph);
 
-                    let (new_state, changed) = (self.feedback_loops[i].compute_and_check)(&self.graph);
-
-                    if !changed {
-                        break;
-                    }
-
-                    any_changed = true;
+                if changed {
                     let var_id = self.feedback_loops[i].var_id;
                     self.graph.get_mut(var_id).state = new_state;
                     self.recompute_all();
-                    total_iterations += 1;
+                    iterations += 1;
+                    continue 'outer;
                 }
             }
 
-            // If no feedback changed in this full pass, we've reached global fixpoint
-            if !any_changed {
-                break;
-            }
+            break;
         }
 
         self.graph.clear_dirty();

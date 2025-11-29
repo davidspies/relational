@@ -206,85 +206,139 @@ fn test_feedback_immediate_fixpoint() {
 
 /// Test that feedback A runs to fixpoint between applications of feedback B.
 ///
-/// This test uses a truly non-monotonic setup where:
-/// - Feedback A: grows a set by adding n+1 (capped at 5)
-/// - Feedback B: observes A and tracks what it has "seen" via set difference
+/// # Setup
+/// We have ONE variable V with TWO separate feedback loops:
 ///
-/// The key insight: with non-monotonic operations, the ORDER matters.
-/// We use tuples (value, batch_number) to track WHEN values were observed.
+/// ```text
+/// v_max = max(v)
+/// a = v_max.map(|x| if x % 100 < 50 { x + 7 } else { x })
+/// b = v_max.map(|x| if x < 200 { x + 31 } else { x })
+/// feedback(a.difference(v), v)
+/// feedback(b.difference(v), v)
+/// ```
 ///
-/// With CORRECT stratified ordering (A reaches fixpoint before each B step):
-/// - A reaches {1,2,3,4,5} completely
-/// - B sees all values at once, so all get batch 1
+/// **Feedback A**: Adds 7 when (max % 100) < 50
+/// - When condition is true: produces max+7 (new value, added via difference)
+/// - When condition is false: produces max (already in v, difference removes it)
 ///
-/// With INCORRECT interleaved ordering (A and B step together):
-/// - Values would get different batch numbers depending on when B observed them
+/// **Feedback B**: Adds 31 when max < 200
+/// - When condition is true: produces max+31 (new value)
+/// - When condition is false: produces max (already in v, no change)
 ///
-/// The test asserts that all B values have the SAME batch number, proving
-/// A reached full fixpoint before B ever observed it.
+/// # Stratified Semantics
+/// ```text
+/// Start: v = {0}
+///
+/// A to fixpoint:
+///   max=0, 0%100=0 < 50, a=7, 7∉v, add 7. v={0,7}
+///   max=7, 7%100=7 < 50, a=14, add. v={0,7,14}
+///   ... → 21 → 28 → 35 → 42 → 49
+///   max=49, 49%100=49 < 50, a=56, add 56. v={...,49,56}
+///   max=56, 56%100=56 >= 50, a=56, 56∈v, no change. FIXPOINT at max=56.
+///
+/// B once:
+///   max=56, 56 < 200, b=87, add 87. v={...,56,87}
+///
+/// A to fixpoint:
+///   max=87, 87%100=87 >= 50, a=87, already in v. FIXPOINT.
+///
+/// B once:
+///   max=87, 87 < 200, b=118, add 118. v={...,87,118}
+///
+/// A to fixpoint:
+///   max=118, 118%100=18 < 50, a=125, add. → 132 → 139 → 146 → 153
+///   max=153, 153%100=53 >= 50, a=153, no change. FIXPOINT at max=153.
+///
+/// B once:
+///   max=153, 153 < 200, b=184, add 184. v={...,153,184}
+///
+/// A to fixpoint:
+///   max=184, 184%100=84 >= 50, no change.
+///
+/// B once:
+///   max=184, 184 < 200, b=215, add 215. v={...,184,215}
+///
+/// A to fixpoint:
+///   max=215, 215%100=15 < 50, a=222, add. → 229 → 236 → 243 → 250
+///   max=250, 250%100=50 >= 50, no change. FIXPOINT at max=250.
+///
+/// B once:
+///   max=250, 250 >= 200, b=250, no change. FIXPOINT.
+///
+/// Global fixpoint. Final max = 250.
+/// ```
+///
+/// # Round-Robin (Wrong) Semantics
+/// With A once, B once alternating, we get a different result.
+///
+/// **Stratified: 250, Round-robin: different**
 #[test]
 fn test_a_reaches_fixpoint_between_b_applications() {
     let mut db = Database::new();
 
-    // We'll use tuples (value, batch_number) to track WHEN values appeared
-    // Feedback A: produces values 1..=5 with their "discovery time"
-    let seeds = db.create_input::<(i32, i32)>("seeds");
+    let seeds = db.create_input::<i32>("seeds");
 
-    let (a_var, a_rel) = db.variable::<(i32, i32)>("a");
-    // Generate next value: (n, t) -> (n+1, t) if n+1 <= 5
-    let extended = db.map(a_rel, |(n, t)| (n + 1, *t));
-    let capped = db.filter(extended, |(n, _)| *n <= 5);
-    let a_all = db.union(seeds, capped);
+    // Variable V - the shared counter
+    let (v_var, v_rel) = db.variable::<i32>("v");
 
-    // Feedback B: snapshot what's in A, but with incremented batch
-    // This simulates "B observes A and records the observation time"
-    let (b_var, b_rel) = db.variable::<(i32, i32)>("b");
+    // v_max = max(v)
+    let v_max = db.max(v_rel);
 
-    // Get just the values from A (ignore the batch from A)
-    let a_vals = db.map(a_rel, |(v, _)| *v);
-    let b_vals = db.map(b_rel, |(v, _)| *v);
+    // a = v_max.map(|x| if x % 100 < 50 { x + 7 } else { x })
+    let a = db.map(v_max, |x| if x % 100 < 50 { x + 7 } else { *x });
 
-    // New values = values in A but not yet in B
-    let new_vals = db.difference(a_vals, b_vals);
+    // b = v_max.map(|x| if x < 200 { x + 31 } else { x })
+    let v_max_for_b = db.max(v_rel);
+    let b = db.map(v_max_for_b, |x| if *x < 200 { x + 31 } else { *x });
 
-    // Mark new values with batch 1 (simulating B's observation)
-    let new_with_batch = db.map(new_vals, |v| (*v, 1));
-    let b_all = db.union(b_rel, new_with_batch);
+    // a_new = a.difference(v) - only the NEW values from A
+    let a_new = db.difference(a, v_rel);
 
-    // Insert seed with batch 0
-    db.insert(seeds, (1, 0));
+    // b_new = b.difference(v) - only the NEW values from B
+    let b_new = db.difference(b, v_rel);
 
-    // Set up both feedbacks at once - they run in declaration order
-    db.feedback(a_var, seeds, a_all);
-    db.feedback(b_var, new_with_batch, b_all);
+    // For feedback, we need: v = v ∪ a_new  and  v = v ∪ b_new
+    let v_with_a = db.union(v_rel, a_new);
+    let v_with_b = db.union(v_rel, b_new);
 
-    // Check results
-    let a_result: Vec<_> = db.collect(a_rel);
-    let b_result: Vec<_> = db.collect(b_rel);
+    // Seed with 0
+    db.insert(seeds, 0);
 
-    // A should have {1,2,3,4,5} all with batch 0
-    assert_eq!(a_result.len(), 5, "A should have 5 elements");
-    for (v, batch) in &a_result {
-        assert_eq!(*batch, 0, "All A values should have batch 0, but {} has batch {}", v, batch);
-    }
+    // First feedback (A): v = v ∪ a_new
+    db.feedback(v_var, seeds, v_with_a);
 
-    // B should have {1,2,3,4,5} all with batch 1
-    // This is because A reached fixpoint FIRST, then B saw all values at once
-    assert_eq!(b_result.len(), 5, "B should have 5 elements");
-    for (v, batch) in &b_result {
-        assert_eq!(*batch, 1, "All B values should have batch 1, but {} has batch {}", v, batch);
-    }
+    println!("After A feedback:");
+    println!("  V = {:?}", db.collect::<i32>(v_rel));
+    let v_max_after_a = db.collect::<i32>(v_rel).into_iter().max().unwrap_or(-1);
+    println!("  max(V) = {}", v_max_after_a);
 
-    // The key assertion: all B values have the SAME batch number
-    // This proves A reached full fixpoint before B observed it
-    // If ordering were wrong, B would have observed partial states
-    // and values would have different batch numbers
-    let b_batches: std::collections::HashSet<i32> = b_result.iter().map(|(_, b)| *b).collect();
+    // Second feedback (B): v = v ∪ b_new
+    db.feedback(v_var, v_rel, v_with_b);
+
+    println!("\nAfter B feedback:");
+    println!("  V = {:?}", db.collect::<i32>(v_rel));
+
+    let v_result: Vec<_> = db.collect(v_rel);
+    let v_max_val = v_result.iter().max().copied().unwrap_or(-1);
+
+    println!("Final max(V) = {}", v_max_val);
+
+    // With stratified ordering (restart from first feedback on any change):
+    // - A: 0→7→...→56 (A keeps running while it produces changes)
+    // - B: 56→87 (B runs once, then restarts from A)
+    // - A: 87%100=87>=50, no change
+    // - B: 87→118 (restarts from A)
+    // - A: 118→125→...→153 (53>=50, stops)
+    // - B: 153→184 (restarts from A)
+    // - A: 84>=50, no change
+    // - B: 184→215 (restarts from A)
+    // - A: 215→222→...→250 (50>=50, stops)
+    // - B: 250>=200, no change
+    // - Done! max=250
     assert_eq!(
-        b_batches.len(),
-        1,
-        "All B values should have same batch - proves A fixpointed first. Batches: {:?}",
-        b_batches
+        v_max_val, 250,
+        "max(V) should be 250. Got V = {:?}",
+        v_result
     );
 }
 
