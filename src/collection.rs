@@ -30,14 +30,6 @@ impl<T: Tuple> Collection<T> {
         }
     }
 
-    /// Create a collection from an iterator of tuples (each with multiplicity 1).
-    pub fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut coll = Self::new();
-        for tuple in iter {
-            coll.insert(tuple);
-        }
-        coll
-    }
 
     /// Check if the collection is empty.
     pub fn is_empty(&self) -> bool {
@@ -113,7 +105,7 @@ impl<T: Tuple> Collection<T> {
     pub fn iter_flat(&self) -> impl Iterator<Item = &T> {
         self.data.iter().flat_map(|(tuple, diff)| {
             let count = if diff.is_positive() { diff.0 as usize } else { 0 };
-            std::iter::repeat(tuple).take(count)
+            std::iter::repeat_n(tuple, count)
         })
     }
 
@@ -163,7 +155,11 @@ impl<T: Tuple> Collection<T> {
 
 impl<T: Tuple> FromIterator<T> for Collection<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        Collection::from_iter(iter)
+        let mut coll = Collection::new();
+        for tuple in iter {
+            coll.insert(tuple);
+        }
+        coll
     }
 }
 

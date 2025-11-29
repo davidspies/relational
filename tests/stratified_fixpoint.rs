@@ -352,6 +352,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
 /// We model this as:
 /// - A: set of "even" numbers reachable from input
 /// - B: set of "odd" numbers reachable from A
+///
 /// And we feed B back into A's input.
 #[test]
 fn test_interleaved_mutual_fixpoint() {

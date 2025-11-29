@@ -77,8 +77,8 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
                 if let Some(start) = frame_starts.pop() {
                     // Mark all operations from start+1 to i-1 as not surviving
                     // (the Push and Pop themselves don't matter)
-                    for j in (start + 1)..i {
-                        surviving[j] = false;
+                    for item in surviving.iter_mut().take(i).skip(start + 1) {
+                        *item = false;
                     }
                 }
                 // If no frame to pop, the Pop is a no-op
@@ -197,8 +197,8 @@ fn apply_ops_replay_persistent_model(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
             }
             Op::Pop => {
                 if let Some(start) = frame_starts.pop() {
-                    for j in (start + 1)..i {
-                        surviving[j] = false;
+                    for item in surviving.iter_mut().take(i).skip(start + 1) {
+                        *item = false;
                     }
                 }
             }
@@ -295,7 +295,7 @@ fn test_multiple_feedbacks_with_pop() {
     db.insert(edges, (3, 4));
 
     let reach_during: Vec<_> = db.collect(reach);
-    let pairs_during: Vec<_> = db.collect(pairs);
+    let _pairs_during: Vec<_> = db.collect(pairs);
 
     // Pop
     db.pop();

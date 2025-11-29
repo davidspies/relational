@@ -13,6 +13,18 @@ use crate::Tuple;
 /// A type-erased recomputation function that reads input states and produces a new output.
 type RecomputeFn = Box<dyn Fn(&DataflowGraph) -> Box<dyn AnyCollection> + Send + Sync>;
 
+/// Data needed for feedback rollback during pop().
+struct FeedbackRollbackData {
+    /// Index into feedback_loops.
+    index: usize,
+    /// The variable node ID.
+    var_id: NodeId,
+    /// Outputs that were added during this checkpoint frame.
+    outputs: Option<Box<dyn AnyCollection>>,
+    /// Input deltas that were added to input_totals during this checkpoint frame.
+    input_deltas: Option<Box<dyn AnyCollection>>,
+}
+
 /// The main database type managing relations and queries.
 pub struct Database {
     graph: DataflowGraph,
@@ -35,7 +47,7 @@ struct FeedbackLoop {
     var_id: NodeId,
     /// Type-erased function to compute the input state (what's flowing into the feedback).
     /// Returns distinct(union(base, recursive)).
-    compute_input: Box<dyn Fn(&DataflowGraph) -> Box<dyn AnyCollection> + Send + Sync>,
+    compute_input: RecomputeFn,
     /// Cumulative input multiplicities (persists across all checkpoints).
     /// This is a Collection<T> storing the sum of all multiplicities ever received.
     input_totals: Box<dyn AnyCollection>,
@@ -293,10 +305,10 @@ impl Database {
     // ========================================================================
 
     /// Iterate over tuples in a relation.
-    pub fn iter<'a, T: Tuple + Send + Sync>(
-        &'a self,
+    pub fn iter<T: Tuple + Send + Sync>(
+        &self,
         rel: Relation<T>,
-    ) -> impl Iterator<Item = &'a T> {
+    ) -> impl Iterator<Item = &T> {
         self.graph
             .get(rel.id)
             .state
@@ -315,10 +327,10 @@ impl Database {
     ///
     /// This allows viewing the differential state of a relation,
     /// showing how many times each tuple appears.
-    pub fn iter_with_multiplicity<'a, T: Tuple + Send + Sync>(
-        &'a self,
+    pub fn iter_with_multiplicity<T: Tuple + Send + Sync>(
+        &self,
         rel: Relation<T>,
-    ) -> impl Iterator<Item = (&'a T, Diff)> {
+    ) -> impl Iterator<Item = (&T, Diff)> {
         self.graph
             .get(rel.id)
             .state
@@ -1349,27 +1361,28 @@ impl Database {
 
         // Step 2: For all feedbacks, send -1 for outputs AND subtract recorded input deltas
         // Collect the feedback data we need to process
-        let feedback_data: Vec<(usize, NodeId, Option<Box<dyn AnyCollection>>, Option<Box<dyn AnyCollection>>)> = self
+        let feedback_data: Vec<FeedbackRollbackData> = self
             .feedback_loops
             .iter()
             .enumerate()
-            .map(|(i, fl)| {
-                let outputs = frame.get_feedback_outputs(fl.var_id).map(|o| o.clone_box());
-                let input_deltas = frame.get_feedback_input_deltas(fl.var_id).map(|d| d.clone_box());
-                (i, fl.var_id, outputs, input_deltas)
+            .map(|(i, fl)| FeedbackRollbackData {
+                index: i,
+                var_id: fl.var_id,
+                outputs: frame.get_feedback_outputs(fl.var_id).map(|o| o.clone_box()),
+                input_deltas: frame.get_feedback_input_deltas(fl.var_id).map(|d| d.clone_box()),
             })
             .collect();
 
         // Apply -1 for each output we recorded, and subtract recorded input deltas from input_totals
-        for (i, var_id, outputs, input_deltas) in &feedback_data {
-            if let Some(outputs) = outputs {
-                self.feedback_loops[*i].ops.apply_output_removes(
-                    self.graph.get_mut(*var_id).state.as_mut(),
+        for data in &feedback_data {
+            if let Some(outputs) = &data.outputs {
+                self.feedback_loops[data.index].ops.apply_output_removes(
+                    self.graph.get_mut(data.var_id).state.as_mut(),
                     outputs.as_ref(),
                 );
             }
-            if let Some(input_deltas) = input_deltas {
-                let fl = &mut self.feedback_loops[*i];
+            if let Some(input_deltas) = &data.input_deltas {
+                let fl = &mut self.feedback_loops[data.index];
                 fl.ops.subtract_from_input_totals(
                     fl.input_totals.as_mut(),
                     input_deltas.as_ref(),
@@ -1383,24 +1396,24 @@ impl Database {
 
         // Step 4: For each feedback, check if any removed tuples should be re-added
         // (because input_totals is still positive for them after the subtraction)
-        for (i, var_id, outputs, _) in &feedback_data {
-            if let Some(outputs) = outputs {
-                let still_positive = self.feedback_loops[*i].ops.get_positive_in_totals(
-                    self.feedback_loops[*i].input_totals.as_ref(),
+        for data in &feedback_data {
+            if let Some(outputs) = &data.outputs {
+                let still_positive = self.feedback_loops[data.index].ops.get_positive_in_totals(
+                    self.feedback_loops[data.index].input_totals.as_ref(),
                     outputs.as_ref(),
                 );
 
                 if !still_positive.is_empty() {
                     // Re-add these tuples to output
-                    self.feedback_loops[*i].ops.apply_output_adds(
-                        self.graph.get_mut(*var_id).state.as_mut(),
+                    self.feedback_loops[data.index].ops.apply_output_adds(
+                        self.graph.get_mut(data.var_id).state.as_mut(),
                         still_positive.as_ref(),
                     );
 
                     // Record in parent frame (if exists)
                     self.checkpoint_stack.record_feedback_outputs_to_parent(
-                        *var_id,
-                        self.feedback_loops[*i].ops.clone_tuples(still_positive.as_ref()),
+                        data.var_id,
+                        self.feedback_loops[data.index].ops.clone_tuples(still_positive.as_ref()),
                     );
                 }
             }

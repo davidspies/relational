@@ -7,38 +7,22 @@
 
 use std::collections::HashMap;
 
-use crate::change::{Change, Diff};
+use crate::change::Change;
 use crate::collection::Collection;
 use crate::dataflow::NodeId;
 use crate::Tuple;
 
 /// Type-erased changes that can be manipulated.
 pub trait AnyChanges: Send + Sync {
-    /// Apply these changes to the given collection state.
-    fn apply(&self, state: &mut dyn crate::dataflow::AnyCollection);
     /// Unapply these changes (negate and apply).
     fn unapply(&self, state: &mut dyn crate::dataflow::AnyCollection);
     /// Clone into a box.
     fn clone_box(&self) -> Box<dyn AnyChanges>;
-    /// Negate all changes, returning a new boxed changes.
-    fn negate(&self) -> Box<dyn AnyChanges>;
-    /// Compute self - other (for correction calculation).
-    fn subtract(&self, other: &dyn AnyChanges) -> Box<dyn AnyChanges>;
-    /// Check if empty.
-    fn is_empty(&self) -> bool;
-    /// Downcast to Any for type checking.
-    fn as_any(&self) -> &dyn std::any::Any;
     /// Downcast to mutable Any for type checking.
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 impl<T: Tuple + Send + Sync> AnyChanges for Vec<Change<T>> {
-    fn apply(&self, state: &mut dyn crate::dataflow::AnyCollection) {
-        if let Some(coll) = state.as_any_mut().downcast_mut::<Collection<T>>() {
-            coll.apply_changes(self.iter().cloned());
-        }
-    }
-
     fn unapply(&self, state: &mut dyn crate::dataflow::AnyCollection) {
         if let Some(coll) = state.as_any_mut().downcast_mut::<Collection<T>>() {
             let negated: Vec<Change<T>> = self
@@ -54,60 +38,6 @@ impl<T: Tuple + Send + Sync> AnyChanges for Vec<Change<T>> {
 
     fn clone_box(&self) -> Box<dyn AnyChanges> {
         Box::new(self.clone())
-    }
-
-    fn negate(&self) -> Box<dyn AnyChanges> {
-        Box::new(
-            self.iter()
-                .map(|c| Change {
-                    tuple: c.tuple.clone(),
-                    diff: -c.diff,
-                })
-                .collect::<Vec<_>>(),
-        )
-    }
-
-    fn subtract(&self, other: &dyn AnyChanges) -> Box<dyn AnyChanges> {
-        // Try to downcast other to the same type
-        if let Some(other_vec) = other
-            .as_any()
-            .downcast_ref::<Vec<Change<T>>>()
-        {
-            // Build a map of tuple -> diff for other
-            let mut other_map: HashMap<T, Diff> = HashMap::new();
-            for c in other_vec {
-                *other_map.entry(c.tuple.clone()).or_insert(Diff(0)) += c.diff;
-            }
-
-            // Compute self - other
-            let mut result_map: HashMap<T, Diff> = HashMap::new();
-            for c in self {
-                *result_map.entry(c.tuple.clone()).or_insert(Diff(0)) += c.diff;
-            }
-            for (tuple, diff) in other_map {
-                *result_map.entry(tuple).or_insert(Diff(0)) -= diff;
-            }
-
-            // Convert back to Vec<Change<T>>
-            let result: Vec<Change<T>> = result_map
-                .into_iter()
-                .filter(|(_, d)| d.0 != 0)
-                .map(|(tuple, diff)| Change { tuple, diff })
-                .collect();
-
-            Box::new(result)
-        } else {
-            // Types don't match, return self unchanged
-            self.clone_box()
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.is_empty() || self.iter().all(|c| c.diff.0 == 0)
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
@@ -203,26 +133,6 @@ impl CheckpointFrame {
         self.input_changes.keys().copied()
     }
 
-    /// Get all feedback var_ids that have output additions.
-    pub fn feedback_var_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.feedback_outputs.keys().copied()
-    }
-
-    /// Take ownership of changes for a node.
-    pub fn take(&mut self, node_id: NodeId) -> Option<Box<dyn AnyChanges>> {
-        self.input_changes.remove(&node_id)
-    }
-
-    /// Get all node IDs that have changes.
-    pub fn changed_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.input_changes.keys().copied()
-    }
-
-    /// Iterate over all changes.
-    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &dyn AnyChanges)> + '_ {
-        self.input_changes.iter().map(|(k, v)| (*k, v.as_ref()))
-    }
-
     /// Check if this frame has any changes.
     pub fn has_changes(&self) -> bool {
         !self.input_changes.is_empty() || !self.feedback_outputs.is_empty()
@@ -316,11 +226,6 @@ impl CheckpointStack {
     /// Get the current stack depth.
     pub fn depth(&self) -> usize {
         self.frames.len()
-    }
-
-    /// Check if the stack is empty.
-    pub fn is_empty(&self) -> bool {
-        self.frames.is_empty()
     }
 
     /// Check if we're currently recording (have at least one frame).
