@@ -37,6 +37,9 @@ pub trait AnyCollection: Any + Send + Sync {
     fn is_empty(&self) -> bool;
     /// Merge tuples from another collection into this one (union).
     fn merge_from(&mut self, other: &dyn AnyCollection);
+    /// Compute the changes needed to go from `old` to `self`.
+    /// Returns (new - old) as insertions and (old - new) as deletions.
+    fn diff_from(&self, old: &dyn AnyCollection) -> Box<dyn AnyChanges>;
 }
 
 impl<T: Tuple + Send + Sync> AnyCollection for Multiset<T> {
@@ -66,6 +69,32 @@ impl<T: Tuple + Send + Sync> AnyCollection for Multiset<T> {
                 self.insert(tuple.clone());
             }
         }
+    }
+
+    fn diff_from(&self, old: &dyn AnyCollection) -> Box<dyn AnyChanges> {
+        use crate::change::{Change, Diff};
+        let mut changes = Vec::<Change<T>>::new();
+
+        if let Some(old_coll) = old.as_any().downcast_ref::<Multiset<T>>() {
+            // Find insertions: tuples in self but not in old (or with higher multiplicity)
+            for (tuple, new_mult) in self.iter_with_multiplicity() {
+                let old_mult = old_coll.get(tuple);
+                let diff = new_mult.0 - old_mult.0;
+                if diff > 0 {
+                    changes.push(Change::new(tuple.clone(), Diff(diff)));
+                }
+            }
+            // Find deletions: tuples in old but not in self (or with lower multiplicity)
+            for (tuple, old_mult) in old_coll.iter_with_multiplicity() {
+                let new_mult = self.get(tuple);
+                let diff = old_mult.0 - new_mult.0;
+                if diff > 0 {
+                    changes.push(Change::new(tuple.clone(), Diff(-diff)));
+                }
+            }
+        }
+
+        Box::new(changes)
     }
 }
 
@@ -364,59 +393,6 @@ impl DataflowGraph {
     }
 }
 
-impl DataflowGraph {
-    /// Get nodes that depend on the given node.
-    pub fn dependents(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
-        self.nodes.iter().filter_map(move |node| {
-            if node.inputs.contains(&id) {
-                Some(node.id)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Take pending changes from a node, leaving it empty.
-    pub fn take_pending_changes(&mut self, id: NodeId) -> Box<dyn AnyChanges> {
-        let node = &mut self.nodes[id.0];
-        let empty = node.pending_changes.clone_empty();
-        std::mem::replace(&mut node.pending_changes, empty)
-    }
-
-    /// Apply changes to a node's state.
-    pub fn apply_changes_to_state<T: crate::Tuple + Send + Sync>(
-        &mut self,
-        id: NodeId,
-        changes: &[Change<T>],
-    ) {
-        if let Some(state) = self.nodes[id.0]
-            .state
-            .as_any_mut()
-            .downcast_mut::<Multiset<T>>()
-        {
-            state.apply_changes(changes.iter().cloned());
-        }
-    }
-
-    /// Add pending changes to a node.
-    pub fn add_pending_changes<T: crate::Tuple + Send + Sync>(
-        &mut self,
-        id: NodeId,
-        changes: Vec<Change<T>>,
-    ) {
-        if changes.is_empty() {
-            return;
-        }
-        if let Some(pending) = self.nodes[id.0]
-            .pending_changes
-            .as_any_mut()
-            .downcast_mut::<Vec<Change<T>>>()
-        {
-            pending.extend(changes);
-        }
-        self.mark_dirty(id);
-    }
-}
 
 impl Default for DataflowGraph {
     fn default() -> Self {

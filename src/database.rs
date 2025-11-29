@@ -141,6 +141,13 @@ trait FeedbackOps: Send + Sync {
 
     /// Clone the tuples collection for storage in checkpoint frame.
     fn clone_tuples(&self, tuples: &dyn AnyCollection) -> Box<dyn AnyCollection>;
+
+    /// Append insert changes to the pending changes vector.
+    fn append_insert_changes(
+        &self,
+        pending: &mut dyn AnyChanges,
+        tuples: &dyn AnyCollection,
+    );
 }
 
 /// Concrete implementation of FeedbackOps for a specific tuple type.
@@ -284,6 +291,22 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
     fn clone_tuples(&self, tuples: &dyn AnyCollection) -> Box<dyn AnyCollection> {
         tuples.clone_box()
     }
+
+    fn append_insert_changes(&self, pending: &mut dyn AnyChanges, tuples: &dyn AnyCollection) {
+        // pending is Vec<Change<(T, CommitId)>>
+        // tuples is Collection<(T, CommitId)>
+        let pending_vec = pending
+            .as_any_mut()
+            .downcast_mut::<Vec<Change<(T, CommitId)>>>()
+            .unwrap();
+        let tuples_coll = tuples
+            .as_any()
+            .downcast_ref::<Multiset<(T, CommitId)>>()
+            .unwrap();
+        for tuple in tuples_coll.iter() {
+            pending_vec.push(Change::insert(tuple.clone()));
+        }
+    }
 }
 
 impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
@@ -373,6 +396,17 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
 
     fn clone_tuples(&self, tuples: &dyn AnyCollection) -> Box<dyn AnyCollection> {
         tuples.clone_box()
+    }
+
+    fn append_insert_changes(&self, pending: &mut dyn AnyChanges, tuples: &dyn AnyCollection) {
+        let pending_vec = pending
+            .as_any_mut()
+            .downcast_mut::<Vec<Change<T>>>()
+            .unwrap();
+        let tuples_coll = tuples.as_any().downcast_ref::<Multiset<T>>().unwrap();
+        for tuple in tuples_coll.iter() {
+            pending_vec.push(Change::insert(tuple.clone()));
+        }
     }
 }
 
@@ -908,7 +942,10 @@ impl Database {
         self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(L, R)>());
 
         // Store the incremental function
-        // Join requires state of both inputs to process changes from either side
+        // Join requires state of both inputs to process changes from either side.
+        // Input states are already updated (NEW state) when this runs.
+        // Correct formula: left_changes × old_right + new_left × right_changes
+        // This ensures left_changes × right_changes is counted exactly once.
         self.incremental_fns[id.index()] = Some(Box::new(
             move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
                 let left_changes = input_changes[0]
@@ -922,15 +959,15 @@ impl Database {
                     .map(|c| c.as_slice())
                     .unwrap_or(&[]);
 
-                // Get current states (BEFORE applying changes - states are updated after)
-                let left_state = graph
+                // Get current states (these are NEW states, already updated)
+                let new_left_state = graph
                     .get(left_id)
                     .state
                     .as_any()
                     .downcast_ref::<Multiset<L>>()
                     .cloned()
                     .unwrap_or_default();
-                let right_state = graph
+                let new_right_state = graph
                     .get(right_id)
                     .state
                     .as_any()
@@ -938,22 +975,30 @@ impl Database {
                     .cloned()
                     .unwrap_or_default();
 
+                // Compute old_right by reversing right_changes from new_right
+                let mut old_right_state = new_right_state;
+                for change in right_changes {
+                    // Reverse the change: negate the diff
+                    old_right_state.apply_change(change.negate());
+                }
+
                 let mut output = Vec::new();
 
-                // Process left changes against right state
+                // Process left changes against OLD right state
                 if !left_changes.is_empty() {
                     output.extend(operators::join_changes_left(
                         left_changes,
-                        &right_state,
+                        &old_right_state,
                         |l| kl_inc(l),
                         |r| kr_inc(r),
                     ));
                 }
 
-                // Process right changes against left state
+                // Process right changes against NEW left state
+                // This correctly includes (old_left + left_changes) × right_changes
                 if !right_changes.is_empty() {
                     output.extend(operators::join_changes_right(
-                        &left_state,
+                        &new_left_state,
                         right_changes,
                         |l| kl_inc(l),
                         |r| kr_inc(r),
@@ -1123,7 +1168,8 @@ impl Database {
         self.apply_fns[id.index()] = Some(Self::make_apply_fn::<T>());
 
         // Store the incremental function
-        // Distinct needs to track when multiplicities cross the 0 boundary
+        // Distinct needs to track when multiplicities cross the 0 boundary.
+        // Input state is already NEW (updated) when this runs.
         self.incremental_fns[id.index()] = Some(Box::new(
             move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
                 let changes = input_changes[0]
@@ -1132,8 +1178,8 @@ impl Database {
                     .map(|c| c.as_slice())
                     .unwrap_or(&[]);
 
-                // Get current input state (before changes are applied)
-                let old_input = graph
+                // Get current input state (this is NEW state, already updated)
+                let new_input = graph
                     .get(input_id)
                     .state
                     .as_any()
@@ -1141,9 +1187,11 @@ impl Database {
                     .cloned()
                     .unwrap_or_default();
 
-                // Compute new input state by applying changes
-                let mut new_input = old_input.clone();
-                new_input.apply_changes(changes.iter().cloned());
+                // Compute old input state by reversing changes from new state
+                let mut old_input = new_input.clone();
+                for change in changes {
+                    old_input.apply_change(change.negate());
+                }
 
                 // Use the distinct_changes helper
                 Box::new(operators::distinct_changes(&old_input, &new_input)) as Box<dyn AnyChanges>
@@ -1782,6 +1830,13 @@ impl Database {
                                 newly_positive.as_ref(),
                             );
 
+                            // Add pending changes for incremental propagation
+                            fl.ops.append_insert_changes(
+                                self.graph.get_mut(var_id).pending_changes.as_mut(),
+                                newly_positive.as_ref(),
+                            );
+                            self.graph.mark_dirty(var_id);
+
                             self.recompute_all();
                             iterations += 1;
                             continue 'outer;
@@ -1800,16 +1855,15 @@ impl Database {
         // Sync commit ID to graph so recompute functions can access it
         self.graph.set_commit_id(self.commit_id.0);
 
-        // TODO: Incremental propagation is not yet working correctly with feedback loops.
-        // The key issue is that recompute_all is called during feedback fixpoint iteration,
-        // and the incremental approach requires all inputs to have been updated first.
-        // For now, fall back to full recomputation until we fix the interaction with feedback.
-        //
-        // if self.propagate_deltas() {
-        //     return;
-        // }
+        // Try incremental propagation first - if there are pending changes from
+        // inputs or feedback nodes, propagate them through derived nodes.
+        if self.propagate_deltas() {
+            return;
+        }
 
-        // Full recomputation
+        // Fall back to full recomputation when there are no pending changes.
+        // This handles the case of initial state setup or when derived nodes
+        // need to be recomputed from their inputs' current state.
         let topo_order: Vec<NodeId> = self.graph.topo_order().to_vec();
 
         for &node_id in &topo_order {
@@ -1825,21 +1879,22 @@ impl Database {
     }
 
     /// Incrementally propagate deltas through the dataflow graph.
-    /// Returns true if successful, false if we should fall back to full recomputation.
+    /// Returns true if there were changes to propagate, false if nothing to do.
+    ///
+    /// This handles mixed incremental/recompute nodes by processing in topo order,
+    /// applying changes immediately so downstream nodes (whether incremental or
+    /// recompute) see updated states.
     fn propagate_deltas(&mut self) -> bool {
-        // Collect pending changes from input nodes
         let topo_order: Vec<NodeId> = self.graph.topo_order().to_vec();
 
         // Build a map of node_id -> pending changes for this propagation round
-        // We'll populate this as we go through the topological order
         let mut pending: std::collections::HashMap<NodeId, Box<dyn AnyChanges>> =
             std::collections::HashMap::new();
 
-        // First, collect pending changes from all input nodes
+        // First, collect pending changes from all input and feedback nodes
         for &node_id in &topo_order {
             let node = self.graph.get(node_id);
-            if node.is_input() && !node.pending_changes.is_empty() {
-                // Take the pending changes - we'll apply them as we propagate
+            if (node.is_input() || node.is_feedback()) && !node.pending_changes.is_empty() {
                 let changes = self.graph.get_mut(node_id).pending_changes.clone_empty();
                 let changes =
                     std::mem::replace(&mut self.graph.get_mut(node_id).pending_changes, changes);
@@ -1849,66 +1904,83 @@ impl Database {
             }
         }
 
-        // Now propagate through derived nodes in topological order
+        // If no pending changes, nothing to propagate
+        if pending.is_empty() {
+            return false;
+        }
+
+        // Track which nodes have been updated
+        let mut updated_nodes: std::collections::HashSet<NodeId> =
+            pending.keys().copied().collect();
+
+        // Process derived nodes in topological order
         for &node_id in &topo_order {
             let node = self.graph.get(node_id);
 
-            // Skip input and feedback nodes (they have their own update mechanisms)
+            // Skip input and feedback nodes
             if node.is_input() || node.is_feedback() {
                 continue;
             }
 
-            // Check if we have an incremental function for this node
-            if node_id.index() >= self.incremental_fns.len() {
+            // Check if any of this node's inputs were updated
+            let inputs = node.inputs.clone();
+            let any_input_updated = inputs.iter().any(|id| updated_nodes.contains(id));
+
+            if !any_input_updated {
                 continue;
             }
 
-            let incremental_fn = match &self.incremental_fns[node_id.index()] {
-                Some(f) => f,
-                None => continue, // Fall back to recompute for nodes without incremental
-            };
+            // Check if we have an incremental function
+            let has_incremental = node_id.index() < self.incremental_fns.len()
+                && self.incremental_fns[node_id.index()].is_some();
 
-            // Collect input changes for this node
-            let inputs = self.graph.get(node_id).inputs.clone();
-            let input_changes: Vec<&dyn AnyChanges> = inputs
-                .iter()
-                .filter_map(|&input_id| pending.get(&input_id).map(|c| c.as_ref()))
-                .collect();
+            if has_incremental {
+                let incremental_fn = self.incremental_fns[node_id.index()].as_ref().unwrap();
 
-            // Skip if no inputs have changes
-            if input_changes.is_empty() || input_changes.iter().all(|c| c.is_empty()) {
-                continue;
+                // Build input changes slice
+                let empty_changes: Vec<Box<dyn AnyChanges>> = inputs
+                    .iter()
+                    .map(|_| Box::new(Vec::<Change<()>>::new()) as Box<dyn AnyChanges>)
+                    .collect();
+
+                let input_refs: Vec<&dyn AnyChanges> = inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &input_id)| {
+                        pending
+                            .get(&input_id)
+                            .map(|c| c.as_ref())
+                            .unwrap_or(empty_changes[i].as_ref())
+                    })
+                    .collect();
+
+                // Run the incremental function
+                let output_changes = incremental_fn(&self.graph, &input_refs);
+
+                if !output_changes.is_empty() {
+                    // Apply changes immediately so downstream nodes see updated state
+                    self.apply_changes_to_node(node_id, output_changes.as_ref());
+                    pending.insert(node_id, output_changes);
+                    updated_nodes.insert(node_id);
+                }
+            } else {
+                // Recompute node - compute from current (updated) input states
+                if let Some(ref recompute_fn) =
+                    self.recompute_fns.get(node_id.index()).and_then(|f| f.as_ref())
+                {
+                    let new_state = recompute_fn(&self.graph);
+                    let old_state = &self.graph.get(node_id).state;
+                    let changes = new_state.diff_from(old_state.as_ref());
+
+                    // Update state immediately
+                    self.graph.get_mut(node_id).state = new_state;
+
+                    if !changes.is_empty() {
+                        pending.insert(node_id, changes);
+                        updated_nodes.insert(node_id);
+                    }
+                }
             }
-
-            // Build properly sized input_changes slice
-            let empty_changes: Vec<Box<dyn AnyChanges>> = inputs
-                .iter()
-                .map(|_| Box::new(Vec::<Change<()>>::new()) as Box<dyn AnyChanges>)
-                .collect();
-
-            let input_refs: Vec<&dyn AnyChanges> = inputs
-                .iter()
-                .enumerate()
-                .map(|(i, &input_id)| {
-                    pending
-                        .get(&input_id)
-                        .map(|c| c.as_ref())
-                        .unwrap_or(empty_changes[i].as_ref())
-                })
-                .collect();
-
-            // Run the incremental function
-            let output_changes = incremental_fn(&self.graph, &input_refs);
-
-            // Store output changes for dependent nodes
-            if !output_changes.is_empty() {
-                pending.insert(node_id, output_changes);
-            }
-        }
-
-        // Now apply all changes to update states
-        for (node_id, changes) in &pending {
-            self.apply_changes_to_node(*node_id, changes.as_ref());
         }
 
         // Clear all pending changes
@@ -1921,43 +1993,11 @@ impl Database {
 
     /// Apply type-erased changes to a node's state.
     fn apply_changes_to_node(&mut self, node_id: NodeId, changes: &dyn AnyChanges) {
-        // This is a type-erased operation - we need to figure out the type
-        // by trying each possible type that's used in the system.
-        // This is unfortunate but necessary due to type erasure.
-
-        // The actual application is handled by the state's own methods
-        // We'll create a helper trait for this
-        let node = self.graph.get_mut(node_id);
-
-        // Use the type info we have from pending_changes to apply correctly
-        // For now, we just need to get the changes applied to state
-        // The state and changes should be of compatible types
-
-        // Try common types - this is the cost of type erasure
-        macro_rules! try_apply {
-            ($t:ty) => {
-                if let (Some(state), Some(changes)) = (
-                    node.state.as_any_mut().downcast_mut::<Multiset<$t>>(),
-                    changes.as_any().downcast_ref::<Vec<Change<$t>>>(),
-                ) {
-                    state.apply_changes(changes.iter().cloned());
-                    return;
-                }
-            };
+        // Use the registered apply function for this node
+        if let Some(apply_fn) = self.apply_fns.get(node_id.index()).and_then(|f| f.as_ref()) {
+            let node = self.graph.get_mut(node_id);
+            apply_fn(node.state.as_mut(), changes);
         }
-
-        // Try common tuple types used in the system
-        try_apply!(i32);
-        try_apply!((i32, i32));
-        try_apply!(((i32, i32), (i32, i32)));
-        try_apply!((i32, CommitId));
-        try_apply!(((i32, i32), CommitId));
-        try_apply!((i32, i64));
-        try_apply!(((), i64));
-        try_apply!(((), i32));
-
-        // If no type matched, the changes won't be applied
-        // This is a limitation we'll need to address
     }
 
     /// Get an iterator over feedback loops (for pop operations).
@@ -2140,6 +2180,13 @@ impl Database {
                         still_positive.as_ref(),
                     );
 
+                    // Add pending changes for incremental propagation
+                    fl.ops.append_insert_changes(
+                        self.graph.get_mut(data.var_id).pending_changes.as_mut(),
+                        still_positive.as_ref(),
+                    );
+                    self.graph.mark_dirty(data.var_id);
+
                     // Record in parent frame (if exists)
                     self.checkpoint_stack.record_feedback_outputs_to_parent(
                         data.var_id,
@@ -2230,6 +2277,13 @@ impl Database {
                                 self.graph.get_mut(var_id).state.as_mut(),
                                 newly_positive.as_ref(),
                             );
+
+                            // Add pending changes for incremental propagation
+                            fl.ops.append_insert_changes(
+                                self.graph.get_mut(var_id).pending_changes.as_mut(),
+                                newly_positive.as_ref(),
+                            );
+                            self.graph.mark_dirty(var_id);
 
                             self.recompute_all();
                             iterations += 1;
