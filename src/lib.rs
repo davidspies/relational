@@ -108,7 +108,7 @@ mod relation;
 pub mod cdcl;
 
 pub use change::{Change, Diff};
-pub use collection::Collection;
+pub use collection::Multiset;
 pub use dataflow::{Node, NodeId};
 pub use database::{CommitId, Database};
 pub use checkpoint::Checkpoint;

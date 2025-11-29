@@ -4,7 +4,7 @@ use std::any::Any;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::change::Change;
-use crate::collection::Collection;
+use crate::collection::Multiset;
 use crate::Tuple;
 
 /// A unique identifier for a node in the dataflow graph.
@@ -39,7 +39,7 @@ pub trait AnyCollection: Any + Send + Sync {
     fn merge_from(&mut self, other: &dyn AnyCollection);
 }
 
-impl<T: Tuple + Send + Sync> AnyCollection for Collection<T> {
+impl<T: Tuple + Send + Sync> AnyCollection for Multiset<T> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -53,15 +53,15 @@ impl<T: Tuple + Send + Sync> AnyCollection for Collection<T> {
     }
 
     fn clear(&mut self) {
-        Collection::clear(self);
+        Multiset::clear(self);
     }
 
     fn is_empty(&self) -> bool {
-        Collection::is_empty(self)
+        Multiset::is_empty(self)
     }
 
     fn merge_from(&mut self, other: &dyn AnyCollection) {
-        if let Some(other_coll) = other.as_any().downcast_ref::<Collection<T>>() {
+        if let Some(other_coll) = other.as_any().downcast_ref::<Multiset<T>>() {
             for tuple in other_coll.iter() {
                 self.insert(tuple.clone());
             }
@@ -200,7 +200,7 @@ impl DataflowGraph {
             id,
             kind: NodeKind::Input { name: name.to_string() },
             inputs: Vec::new(),
-            state: Box::new(Collection::<T>::new()),
+            state: Box::new(Multiset::<T>::new()),
             pending_changes: Box::new(Vec::<Change<T>>::new()),
             operator: None,
             incremental_op: None,
@@ -226,7 +226,7 @@ impl DataflowGraph {
             id,
             kind: NodeKind::Derived { name: name.map(|s| s.to_string()) },
             inputs,
-            state: Box::new(Collection::<T>::new()),
+            state: Box::new(Multiset::<T>::new()),
             pending_changes: Box::new(Vec::<Change<T>>::new()),
             operator: Some(operator),
             incremental_op,
@@ -248,7 +248,7 @@ impl DataflowGraph {
             id,
             kind: NodeKind::Feedback { name: name.to_string() },
             inputs: Vec::new(),
-            state: Box::new(Collection::<T>::new()),
+            state: Box::new(Multiset::<T>::new()),
             pending_changes: Box::new(Vec::<Change<T>>::new()),
             operator: None,
             incremental_op: None,

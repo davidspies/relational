@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use crate::change::Change;
-use crate::collection::Collection;
+use crate::collection::Multiset;
 use crate::dataflow::NodeId;
 use crate::Tuple;
 
@@ -24,7 +24,7 @@ pub trait AnyChanges: Send + Sync {
 
 impl<T: Tuple + Send + Sync> AnyChanges for Vec<Change<T>> {
     fn unapply(&self, state: &mut dyn crate::dataflow::AnyCollection) {
-        if let Some(coll) = state.as_any_mut().downcast_mut::<Collection<T>>() {
+        if let Some(coll) = state.as_any_mut().downcast_mut::<Multiset<T>>() {
             let negated: Vec<Change<T>> = self
                 .iter()
                 .map(|c| Change {

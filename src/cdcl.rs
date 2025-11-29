@@ -176,8 +176,8 @@ pub struct Solver {
     /// Decision levels - we insert the current level here
     levels: Relation<Level>,
 
-    /// Decision assignments (lit, level) - inserted directly for decisions
-    decision_assignments: Relation<(Lit, Level)>,
+    /// Decision assignments (lit, level, clause_id) - inserted directly for decisions
+    decision_assignments: Relation<(Lit, Level, ClauseId)>,
 
     // === Derived/State Relations ===
     /// Current level = max(levels)
@@ -185,14 +185,18 @@ pub struct Solver {
     #[allow(dead_code)]
     current_level_rel: Relation<Level>,
 
-    /// Prep assignments from feedback_with_id: ((lit, level), commit_id)
-    /// This accumulates all discovered assignments with their discovery time
+    /// Prep assignments from feedback_with_id: ((lit, level, clause_id), commit_id)
+    /// This accumulates all discovered assignments with their discovery time and reason clause
     /// Note: Stored to keep the relation alive, accessed via the graph
     #[allow(dead_code)]
-    prep_assignments: Relation<((Lit, Level), CommitId)>,
+    prep_assignments: Relation<((Lit, Level, ClauseId), CommitId)>,
 
     /// Final assignments: (lit, level) - derived by taking min commit_id per lit
     assignments: Relation<(Lit, Level)>,
+
+    /// Causes: ((lit, commit_id), (clause_id, level)) - tracks all ways each literal was derived
+    /// Can be collected to HashMap<Lit, BTreeMap<CommitId, Multiset<(ClauseId, Level)>>>
+    causes: Relation<((Lit, CommitId), (ClauseId, Level))>,
 
     /// The "assigned" relation - just tracks which literals are assigned true
     assigned: Relation<Lit>,
@@ -230,8 +234,8 @@ impl Solver {
         // Levels input - we insert decision levels here
         let levels = db.create_input::<Level>("levels");
 
-        // Decision assignments - inserted directly for decisions
-        let decision_assignments = db.create_input::<(Lit, Level)>("decision_assignments");
+        // Decision assignments - inserted directly for decisions (with ClauseId::DECISION)
+        let decision_assignments = db.create_input::<(Lit, Level, ClauseId)>("decision_assignments");
 
         // Current level = max(levels)
         let current_level_rel = db.max(levels);
@@ -240,19 +244,25 @@ impl Solver {
         let all_clauses = db.union(clauses, learned);
 
         // === Feedback-based Unit Propagation ===
-        // prep_assignments accumulates ((Lit, Level), CommitId) via feedback_with_id
+        // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
         let (prep_var, prep_assignments) =
-            db.variable::<((Lit, Level), CommitId)>("prep_assignments");
+            db.variable::<((Lit, Level, ClauseId), CommitId)>("prep_assignments");
 
         // Final assignments: for each literal, take the entry with minimum CommitId
         // group_min groups by lit, and for each lit picks the (level, commit_id) with min commit_id
         let assignments_with_id = db.group_min(
             prep_assignments,
-            |((lit, _), _)| *lit,                    // group by lit
-            |((_, level), id)| (*level, *id),        // value is (level, commit_id)
+            |((lit, _, _), _)| *lit,                    // group by lit
+            |((_, level, _), id)| (*level, *id),        // value is (level, commit_id)
         );
         // Result is (Lit, (Level, CommitId)) - extract (Lit, Level)
         let assignments = db.map(assignments_with_id, |(lit, (level, _id))| (*lit, *level));
+
+        // Causes: tracks all ways each literal was derived
+        // Reshape prep_assignments from ((Lit, Level, ClauseId), CommitId) to ((Lit, CommitId), (ClauseId, Level))
+        let causes = db.map(prep_assignments, |((lit, level, cid), commit_id)| {
+            ((*lit, *commit_id), (*cid, *level))
+        });
 
         // Derived: which literals are assigned true
         let assigned = db.map(assignments, |(lit, _)| *lit);
@@ -352,15 +362,14 @@ impl Solver {
         db.interrupt(direct_conflict_enums);
 
         // === Set up the feedback loop ===
-        // unit_lits: just the literals from units (without clause id)
-        let unit_lits = db.map(units, |(_, lit)| *lit);
-
-        // Cartesian product of unit_lits with current_level (join on unit key)
-        let unit_with_level = db.join(unit_lits, current_level_rel, |_| (), |_| ());
-        let unit_lit_level = db.map(unit_with_level, |(lit, level)| (*lit, *level));
+        // Cartesian product of units with current_level (join on unit key)
+        // units is (ClauseId, Lit) - we want (Lit, Level, ClauseId)
+        let unit_with_level = db.join(units, current_level_rel, |_| (), |_| ());
+        let unit_lit_level_cid = db.map(unit_with_level, |((cid, lit), level)| (*lit, *level, *cid));
 
         // Combine with decision_assignments for the base case
-        let all_new_assignments = db.union(decision_assignments, unit_lit_level);
+        // decision_assignments is (Lit, Level, ClauseId) - already has DECISION as ClauseId
+        let all_new_assignments = db.union(decision_assignments, unit_lit_level_cid);
 
         // Set up the feedback: prep_assignments accumulates all assignments with timestamps
         db.feedback_with_id(prep_var, decision_assignments, all_new_assignments);
@@ -378,6 +387,7 @@ impl Solver {
             current_level_rel,
             prep_assignments,
             assignments,
+            causes,
             assigned,
             units,
             conflicts,
@@ -403,9 +413,9 @@ impl Solver {
         self.current_level.inc();
         self.decision_stack.push((self.current_level, lit, tried_opposite));
 
-        // Insert the new level and the decision assignment
+        // Insert the new level and the decision assignment (with ClauseId::DECISION)
         self.db.insert(self.levels, self.current_level);
-        self.db.insert(self.decision_assignments, (lit, self.current_level));
+        self.db.insert(self.decision_assignments, (lit, self.current_level, ClauseId::DECISION));
         self.db.commit();
         // The feedback loop will automatically propagate units
     }
@@ -497,6 +507,28 @@ impl Solver {
     /// Get current units (for debugging).
     pub fn get_units(&self) -> Vec<(ClauseId, Lit)> {
         self.db.collect(self.units)
+    }
+
+    /// Get the causes (implication graph) as a structured data type.
+    /// Returns HashMap<Lit, BTreeMap<CommitId, Vec<(ClauseId, Level)>>>
+    /// For each literal, this maps each CommitId to the list of (ClauseId, Level) that derived it at that commit.
+    /// The Vec acts as a multiset (there can be duplicates if the same clause/level appears multiple times).
+    pub fn get_causes(&self) -> std::collections::HashMap<Lit, std::collections::BTreeMap<CommitId, Vec<(ClauseId, Level)>>> {
+        use std::collections::{HashMap, BTreeMap};
+
+        let raw: Vec<((Lit, CommitId), (ClauseId, Level))> = self.db.collect(self.causes);
+        let mut result: HashMap<Lit, BTreeMap<CommitId, Vec<(ClauseId, Level)>>> = HashMap::new();
+
+        for ((lit, commit_id), (clause_id, level)) in raw {
+            result
+                .entry(lit)
+                .or_default()
+                .entry(commit_id)
+                .or_default()
+                .push((clause_id, level));
+        }
+
+        result
     }
 
     /// Main solve loop.

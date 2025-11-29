@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::change::{Change, Diff};
-use crate::collection::Collection;
+use crate::collection::Multiset;
 use crate::Tuple;
 
 // ============================================================================
@@ -15,10 +15,10 @@ use crate::Tuple;
 
 /// Map operator: transforms each tuple using a function.
 pub fn map<T: Tuple, U: Tuple, F: Fn(&T) -> U>(
-    input: &Collection<T>,
+    input: &Multiset<T>,
     f: F,
-) -> Collection<U> {
-    let mut output = Collection::new();
+) -> Multiset<U> {
+    let mut output = Multiset::new();
     for (tuple, diff) in input.iter_with_multiplicity() {
         output.apply_change(Change::new(f(tuple), diff));
     }
@@ -36,10 +36,10 @@ pub fn map_changes<T: Tuple, U: Tuple, F: Fn(&T) -> U>(
 
 /// Filter operator: keeps only tuples satisfying a predicate.
 pub fn filter<T: Tuple, F: Fn(&T) -> bool>(
-    input: &Collection<T>,
+    input: &Multiset<T>,
     f: F,
-) -> Collection<T> {
-    let mut output = Collection::new();
+) -> Multiset<T> {
+    let mut output = Multiset::new();
     for (tuple, diff) in input.iter_with_multiplicity() {
         if f(tuple) {
             output.apply_change(Change::new(tuple.clone(), diff));
@@ -62,10 +62,10 @@ pub fn filter_changes<T: Tuple, F: Fn(&T) -> bool>(
 
 /// Flat map operator: transforms each tuple into zero or more tuples.
 pub fn flat_map<T: Tuple, U: Tuple, I: IntoIterator<Item = U>, F: Fn(&T) -> I>(
-    input: &Collection<T>,
+    input: &Multiset<T>,
     f: F,
-) -> Collection<U> {
-    let mut output = Collection::new();
+) -> Multiset<U> {
+    let mut output = Multiset::new();
     for (tuple, diff) in input.iter_with_multiplicity() {
         for out in f(tuple) {
             output.apply_change(Change::new(out, diff));
@@ -90,7 +90,7 @@ pub fn flat_map_changes<T: Tuple, U: Tuple, I: IntoIterator<Item = U>, F: Fn(&T)
 }
 
 /// Union operator: combines two collections.
-pub fn union<T: Tuple>(a: &Collection<T>, b: &Collection<T>) -> Collection<T> {
+pub fn union<T: Tuple>(a: &Multiset<T>, b: &Multiset<T>) -> Multiset<T> {
     let mut output = a.clone();
     for (tuple, diff) in b.iter_with_multiplicity() {
         output.apply_change(Change::new(tuple.clone(), diff));
@@ -102,8 +102,8 @@ pub fn union<T: Tuple>(a: &Collection<T>, b: &Collection<T>) -> Collection<T> {
 /// Distinct operator: ensures each tuple has multiplicity at most 1.
 /// This is tricky for differential dataflow - we need to track when
 /// a tuple's count crosses the 0/1 boundary.
-pub fn distinct<T: Tuple>(input: &Collection<T>) -> Collection<T> {
-    let mut output = Collection::new();
+pub fn distinct<T: Tuple>(input: &Multiset<T>) -> Multiset<T> {
+    let mut output = Multiset::new();
     for (tuple, diff) in input.iter_with_multiplicity() {
         if diff.is_positive() {
             output.apply_change(Change::new(tuple.clone(), Diff::ONE));
@@ -114,8 +114,8 @@ pub fn distinct<T: Tuple>(input: &Collection<T>) -> Collection<T> {
 
 /// Incremental distinct: requires knowing the old and new multiplicities.
 pub fn distinct_changes<T: Tuple>(
-    old_state: &Collection<T>,
-    new_state: &Collection<T>,
+    old_state: &Multiset<T>,
+    new_state: &Multiset<T>,
 ) -> Vec<Change<T>> {
     let mut changes = Vec::new();
 
@@ -143,8 +143,8 @@ pub fn distinct_changes<T: Tuple>(
 }
 
 /// Negate operator: flips all multiplicities.
-pub fn negate<T: Tuple>(input: &Collection<T>) -> Collection<T> {
-    let mut output = Collection::new();
+pub fn negate<T: Tuple>(input: &Multiset<T>) -> Multiset<T> {
+    let mut output = Multiset::new();
     for (tuple, diff) in input.iter_with_multiplicity() {
         output.apply_change(Change::new(tuple.clone(), -diff));
     }
@@ -159,11 +159,11 @@ pub fn negate_changes<T: Tuple>(changes: &[Change<T>]) -> Vec<Change<T>> {
 /// Join operator for two collections with key extraction.
 /// join(A, B, key_a, key_b) produces (a, b) for all (a in A, b in B) where key_a(a) == key_b(b)
 pub fn join<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
-    left: &Collection<A>,
-    right: &Collection<B>,
+    left: &Multiset<A>,
+    right: &Multiset<B>,
     key_left: FA,
     key_right: FB,
-) -> Collection<(A, B)> {
+) -> Multiset<(A, B)> {
     // Build index on right side
     let mut right_index: HashMap<K, Vec<(B, Diff)>> = HashMap::new();
     for (tuple, diff) in right.iter_with_multiplicity() {
@@ -175,7 +175,7 @@ pub fn join<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
     }
 
     // Probe with left side
-    let mut output = Collection::new();
+    let mut output = Multiset::new();
     for (left_tuple, left_diff) in left.iter_with_multiplicity() {
         let key = key_left(left_tuple);
         if let Some(matches) = right_index.get(&key) {
@@ -196,7 +196,7 @@ pub fn join<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
 /// Requires maintaining the current state of both sides.
 pub fn join_changes_left<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
     left_changes: &[Change<A>],
-    right_state: &Collection<B>,
+    right_state: &Multiset<B>,
     key_left: FA,
     key_right: FB,
 ) -> Vec<Change<(A, B)>> {
@@ -225,7 +225,7 @@ pub fn join_changes_left<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&
 }
 
 pub fn join_changes_right<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
-    left_state: &Collection<A>,
+    left_state: &Multiset<A>,
     right_changes: &[Change<B>],
     key_left: FA,
     key_right: FB,
@@ -256,11 +256,11 @@ pub fn join_changes_right<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(
 
 /// Semijoin: keeps tuples from left that have a match in right.
 pub fn semijoin<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
-    left: &Collection<A>,
-    right: &Collection<B>,
+    left: &Multiset<A>,
+    right: &Multiset<B>,
     key_left: FA,
     key_right: FB,
-) -> Collection<A> {
+) -> Multiset<A> {
     // Get keys present in right
     let mut right_keys: HashMap<K, bool> = HashMap::new();
     for (tuple, diff) in right.iter_with_multiplicity() {
@@ -270,7 +270,7 @@ pub fn semijoin<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
     }
 
     // Filter left
-    let mut output = Collection::new();
+    let mut output = Multiset::new();
     for (tuple, diff) in left.iter_with_multiplicity() {
         if right_keys.contains_key(&key_left(tuple)) {
             output.apply_change(Change::new(tuple.clone(), diff));
@@ -281,11 +281,11 @@ pub fn semijoin<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
 
 /// Antijoin: keeps tuples from left that have NO match in right.
 pub fn antijoin<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
-    left: &Collection<A>,
-    right: &Collection<B>,
+    left: &Multiset<A>,
+    right: &Multiset<B>,
     key_left: FA,
     key_right: FB,
-) -> Collection<A> {
+) -> Multiset<A> {
     // Get keys present in right
     let mut right_keys: HashMap<K, bool> = HashMap::new();
     for (tuple, diff) in right.iter_with_multiplicity() {
@@ -295,7 +295,7 @@ pub fn antijoin<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
     }
 
     // Filter left (keep those NOT in right)
-    let mut output = Collection::new();
+    let mut output = Multiset::new();
     for (tuple, diff) in left.iter_with_multiplicity() {
         if !right_keys.contains_key(&key_left(tuple)) {
             output.apply_change(Change::new(tuple.clone(), diff));
@@ -307,11 +307,11 @@ pub fn antijoin<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
 /// Group and aggregate operator.
 /// Groups tuples by key and applies an aggregation function.
 pub fn aggregate<T: Tuple, K: Tuple, V: Tuple, A: Tuple, FK: Fn(&T) -> K, FV: Fn(&T) -> V, FA: Fn(K, &[(V, Diff)]) -> A>(
-    input: &Collection<T>,
+    input: &Multiset<T>,
     key_fn: FK,
     value_fn: FV,
     agg_fn: FA,
-) -> Collection<A> {
+) -> Multiset<A> {
     // Group by key
     let mut groups: HashMap<K, Vec<(V, Diff)>> = HashMap::new();
     for (tuple, diff) in input.iter_with_multiplicity() {
@@ -321,7 +321,7 @@ pub fn aggregate<T: Tuple, K: Tuple, V: Tuple, A: Tuple, FK: Fn(&T) -> K, FV: Fn
     }
 
     // Apply aggregation
-    let mut output = Collection::new();
+    let mut output = Multiset::new();
     for (key, values) in groups {
         let result = agg_fn(key, &values);
         output.insert(result);
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_map() {
-        let input: Collection<i32> = [1, 2, 3].into_iter().collect();
+        let input: Multiset<i32> = [1, 2, 3].into_iter().collect();
         let output = map(&input, |x| x * 2);
 
         assert!(output.contains(&2));
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn test_filter() {
-        let input: Collection<i32> = [1, 2, 3, 4, 5].into_iter().collect();
+        let input: Multiset<i32> = [1, 2, 3, 4, 5].into_iter().collect();
         let output = filter(&input, |x| x % 2 == 0);
 
         assert!(!output.contains(&1));
@@ -390,8 +390,8 @@ mod tests {
 
     #[test]
     fn test_join() {
-        let left: Collection<(i32, &str)> = [(1, "a"), (2, "b"), (3, "c")].into_iter().collect();
-        let right: Collection<(i32, i32)> = [(1, 10), (2, 20), (4, 40)].into_iter().collect();
+        let left: Multiset<(i32, &str)> = [(1, "a"), (2, "b"), (3, "c")].into_iter().collect();
+        let right: Multiset<(i32, i32)> = [(1, 10), (2, 20), (4, 40)].into_iter().collect();
 
         let joined = join(&left, &right, |(k, _)| *k, |(k, _)| *k);
 
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_distinct() {
-        let mut input = Collection::new();
+        let mut input = Multiset::new();
         input.insert(1);
         input.insert(1);
         input.insert(2);
@@ -415,8 +415,8 @@ mod tests {
 
     #[test]
     fn test_union() {
-        let a: Collection<i32> = [1, 2].into_iter().collect();
-        let b: Collection<i32> = [2, 3].into_iter().collect();
+        let a: Multiset<i32> = [1, 2].into_iter().collect();
+        let b: Multiset<i32> = [2, 3].into_iter().collect();
 
         let result = union(&a, &b);
 

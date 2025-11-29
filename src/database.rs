@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::change::{Change, Diff};
 use crate::checkpoint::{Checkpoint, CheckpointId, CheckpointManager, CheckpointStack, RestoreInfo};
-use crate::collection::Collection;
+use crate::collection::Multiset;
 use crate::dataflow::{AnyChanges, AnyCollection, DataflowGraph, NodeId};
 use crate::operators;
 use crate::relation::{Relation, Variable};
@@ -173,10 +173,10 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
         // input_totals is Collection<T> (the seen set, just like regular feedback)
         // input is Collection<T> (new tuples to consider)
         // output is Collection<(T, CommitId)> (newly seen tuples with their discovery time)
-        let totals = input_totals.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
-        let input_coll = input.as_any().downcast_ref::<Collection<T>>().unwrap();
+        let totals = input_totals.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
-        let mut newly_positive = Collection::<(T, CommitId)>::new();
+        let mut newly_positive = Multiset::<(T, CommitId)>::new();
 
         for (tuple, _diff) in input_coll.iter_with_multiplicity() {
             let old_total = totals.get(tuple);
@@ -198,8 +198,8 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
     ) {
         // input_totals is Collection<T>
         // input is Collection<(T, CommitId)> (the timestamped tuples we recorded)
-        let totals = input_totals.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
-        let input_coll = input.as_any().downcast_ref::<Collection<(T, CommitId)>>().unwrap();
+        let totals = input_totals.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Multiset<(T, CommitId)>>().unwrap();
 
         for ((tuple, _commit_id), diff) in input_coll.iter_with_multiplicity() {
             totals.apply_change(Change::new(tuple.clone(), -diff));
@@ -214,10 +214,10 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
         // input_totals is Collection<T>
         // input is Collection<(T, CommitId)>
         // Returns the subset of input where T is still positive in totals
-        let totals = input_totals.as_any().downcast_ref::<Collection<T>>().unwrap();
-        let input_coll = input.as_any().downcast_ref::<Collection<(T, CommitId)>>().unwrap();
+        let totals = input_totals.as_any().downcast_ref::<Multiset<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Multiset<(T, CommitId)>>().unwrap();
 
-        let mut positive = Collection::<(T, CommitId)>::new();
+        let mut positive = Multiset::<(T, CommitId)>::new();
         for ((tuple, commit_id), _) in input_coll.iter_with_multiplicity() {
             if totals.get(tuple).is_positive() {
                 positive.insert((tuple.clone(), *commit_id));
@@ -234,8 +234,8 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
     ) {
         // output is Collection<(T, CommitId)>
         // tuples is Collection<(T, CommitId)>
-        let out = output.as_any_mut().downcast_mut::<Collection<(T, CommitId)>>().unwrap();
-        let tuples_coll = tuples.as_any().downcast_ref::<Collection<(T, CommitId)>>().unwrap();
+        let out = output.as_any_mut().downcast_mut::<Multiset<(T, CommitId)>>().unwrap();
+        let tuples_coll = tuples.as_any().downcast_ref::<Multiset<(T, CommitId)>>().unwrap();
 
         for tuple in tuples_coll.iter() {
             out.insert(tuple.clone());
@@ -249,8 +249,8 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
     ) {
         // output is Collection<(T, CommitId)>
         // tuples is Collection<(T, CommitId)>
-        let out = output.as_any_mut().downcast_mut::<Collection<(T, CommitId)>>().unwrap();
-        let tuples_coll = tuples.as_any().downcast_ref::<Collection<(T, CommitId)>>().unwrap();
+        let out = output.as_any_mut().downcast_mut::<Multiset<(T, CommitId)>>().unwrap();
+        let tuples_coll = tuples.as_any().downcast_ref::<Multiset<(T, CommitId)>>().unwrap();
 
         for tuple in tuples_coll.iter() {
             out.delete(tuple.clone());
@@ -269,10 +269,10 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
         input: &dyn AnyCollection,
         _commit_id: CommitId,
     ) -> Box<dyn AnyCollection> {
-        let totals = input_totals.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
-        let input_coll = input.as_any().downcast_ref::<Collection<T>>().unwrap();
+        let totals = input_totals.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
-        let mut newly_positive = Collection::<T>::new();
+        let mut newly_positive = Multiset::<T>::new();
 
         // We only add tuples that are newly seen (not already in input_totals)
         // The input_totals acts as a "seen set" - once a tuple is seen (positive),
@@ -297,8 +297,8 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
         input_totals: &mut dyn AnyCollection,
         input: &dyn AnyCollection,
     ) {
-        let totals = input_totals.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
-        let input_coll = input.as_any().downcast_ref::<Collection<T>>().unwrap();
+        let totals = input_totals.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
         for (tuple, diff) in input_coll.iter_with_multiplicity() {
             totals.apply_change(Change::new(tuple.clone(), -diff));
@@ -310,10 +310,10 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
         input_totals: &dyn AnyCollection,
         input: &dyn AnyCollection,
     ) -> Box<dyn AnyCollection> {
-        let totals = input_totals.as_any().downcast_ref::<Collection<T>>().unwrap();
-        let input_coll = input.as_any().downcast_ref::<Collection<T>>().unwrap();
+        let totals = input_totals.as_any().downcast_ref::<Multiset<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
-        let mut positive = Collection::<T>::new();
+        let mut positive = Multiset::<T>::new();
         for (tuple, _) in input_coll.iter_with_multiplicity() {
             if totals.get(tuple).is_positive() {
                 positive.insert(tuple.clone());
@@ -328,8 +328,8 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
         output: &mut dyn AnyCollection,
         tuples: &dyn AnyCollection,
     ) {
-        let out = output.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
-        let tuples_coll = tuples.as_any().downcast_ref::<Collection<T>>().unwrap();
+        let out = output.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
+        let tuples_coll = tuples.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
         for tuple in tuples_coll.iter() {
             out.insert(tuple.clone());
@@ -341,8 +341,8 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
         output: &mut dyn AnyCollection,
         tuples: &dyn AnyCollection,
     ) {
-        let out = output.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
-        let tuples_coll = tuples.as_any().downcast_ref::<Collection<T>>().unwrap();
+        let out = output.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
+        let tuples_coll = tuples.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
         for tuple in tuples_coll.iter() {
             out.delete(tuple.clone());
@@ -427,7 +427,7 @@ impl Database {
             changes.push(Change::insert(tuple.clone()));
         }
 
-        if let Some(coll) = node.state.as_any_mut().downcast_mut::<Collection<T>>() {
+        if let Some(coll) = node.state.as_any_mut().downcast_mut::<Multiset<T>>() {
             coll.insert(tuple);
         }
 
@@ -449,7 +449,7 @@ impl Database {
             changes.push(Change::delete(tuple.clone()));
         }
 
-        if let Some(coll) = node.state.as_any_mut().downcast_mut::<Collection<T>>() {
+        if let Some(coll) = node.state.as_any_mut().downcast_mut::<Multiset<T>>() {
             coll.delete(tuple);
         }
 
@@ -488,7 +488,7 @@ impl Database {
             .get(rel.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .into_iter()
             .flat_map(|c| c.iter())
     }
@@ -510,7 +510,7 @@ impl Database {
             .get(rel.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .into_iter()
             .flat_map(|c| c.iter_with_multiplicity())
     }
@@ -521,7 +521,7 @@ impl Database {
             .get(rel.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .map(|c| c.get(tuple))
             .unwrap_or(Diff::ZERO)
     }
@@ -546,7 +546,7 @@ impl Database {
             vec![input.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<U>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<U>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<U>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -560,7 +560,7 @@ impl Database {
                 .get(input_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             Box::new(operators::map(&input_coll, |t| f_recompute(t))) as Box<dyn AnyCollection>
@@ -572,7 +572,7 @@ impl Database {
             .get(input.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let output = operators::map(&input_coll, |t| f(t));
@@ -596,7 +596,7 @@ impl Database {
             vec![input.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<(T, CommitId)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<(T, CommitId)>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<(T, CommitId)>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -611,7 +611,7 @@ impl Database {
                 .get(input_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
 
@@ -625,7 +625,7 @@ impl Database {
             .get(input.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let output = operators::map(&input_coll, |t| (t.clone(), commit_id));
@@ -649,7 +649,7 @@ impl Database {
             vec![input.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<T>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<T>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<T>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -663,7 +663,7 @@ impl Database {
                 .get(input_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             Box::new(operators::filter(&input_coll, |t| pred_recompute(t))) as Box<dyn AnyCollection>
@@ -674,7 +674,7 @@ impl Database {
             .get(input.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let output = operators::filter(&input_coll, |t| pred(t));
@@ -700,7 +700,7 @@ impl Database {
             vec![input.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<U>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<U>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<U>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -714,10 +714,10 @@ impl Database {
                 .get(input_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
-            let mut output = Collection::<U>::new();
+            let mut output = Multiset::<U>::new();
             for t in input_coll.iter() {
                 for u in f_recompute(t) {
                     output.insert(u);
@@ -732,11 +732,11 @@ impl Database {
             .get(input.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
 
-        let mut output = Collection::<U>::new();
+        let mut output = Multiset::<U>::new();
         for t in input_coll.iter() {
             for u in f(t) {
                 output.insert(u);
@@ -776,7 +776,7 @@ impl Database {
             vec![left.id, right.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<(L, R)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<(L, R)>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<(L, R)>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -790,14 +790,14 @@ impl Database {
                 .get(left_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<L>>()
+                .downcast_ref::<Multiset<L>>()
                 .cloned()
                 .unwrap_or_default();
             let right_coll = graph
                 .get(right_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<R>>()
+                .downcast_ref::<Multiset<R>>()
                 .cloned()
                 .unwrap_or_default();
             let output = operators::join(&left_coll, &right_coll, |l| kl_recompute(l), |r| kr_recompute(r));
@@ -810,7 +810,7 @@ impl Database {
             .get(left.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<L>>()
+            .downcast_ref::<Multiset<L>>()
             .cloned()
             .unwrap_or_default();
         let right_coll = self
@@ -818,7 +818,7 @@ impl Database {
             .get(right.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<R>>()
+            .downcast_ref::<Multiset<R>>()
             .cloned()
             .unwrap_or_default();
 
@@ -841,7 +841,7 @@ impl Database {
             vec![left.id, right.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<T>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<T>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<T>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -855,14 +855,14 @@ impl Database {
                 .get(left_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             let right_coll = graph
                 .get(right_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             Box::new(operators::union(&left_coll, &right_coll)) as Box<dyn AnyCollection>
@@ -873,7 +873,7 @@ impl Database {
             .get(left.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let right_coll = self
@@ -881,7 +881,7 @@ impl Database {
             .get(right.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
 
@@ -903,7 +903,7 @@ impl Database {
             vec![input.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<T>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<T>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<T>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -917,7 +917,7 @@ impl Database {
                 .get(input_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             Box::new(operators::distinct(&input_coll)) as Box<dyn AnyCollection>
@@ -928,7 +928,7 @@ impl Database {
             .get(input.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let output = operators::distinct(&input_coll);
@@ -950,7 +950,7 @@ impl Database {
             vec![left.id, right.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<T>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<T>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<T>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -964,14 +964,14 @@ impl Database {
                 .get(left_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             let right_coll = graph
                 .get(right_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             // Compute L - R
@@ -988,7 +988,7 @@ impl Database {
             .get(left.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let right_coll = self
@@ -996,7 +996,7 @@ impl Database {
             .get(right.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
 
@@ -1043,7 +1043,7 @@ impl Database {
             vec![input.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<(K, V)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<(K, V)>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<(K, V)>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -1057,7 +1057,7 @@ impl Database {
                 .get(input_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             let output = operators::aggregate(
@@ -1067,7 +1067,7 @@ impl Database {
                 |k, vals| operators::max(k, vals),
             );
             // Filter out None results and unwrap
-            let mut result = Collection::new();
+            let mut result = Multiset::new();
             for (opt, diff) in output.iter_with_multiplicity() {
                 if let Some(kv) = opt {
                     result.apply_change(Change::new(kv.clone(), diff));
@@ -1081,14 +1081,14 @@ impl Database {
             .get(input.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let output = operators::aggregate(&input_coll, &key_fn, &value_fn, |k, vals| {
             operators::max(k, vals)
         });
         // Filter out None results
-        let mut result = Collection::new();
+        let mut result = Multiset::new();
         for (opt, diff) in output.iter_with_multiplicity() {
             if let Some(kv) = opt {
                 result.apply_change(Change::new(kv.clone(), diff));
@@ -1125,7 +1125,7 @@ impl Database {
             vec![input.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<(K, V)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<(K, V)>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<(K, V)>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -1139,7 +1139,7 @@ impl Database {
                 .get(input_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             let output = operators::aggregate(
@@ -1149,7 +1149,7 @@ impl Database {
                 |k, vals| operators::min(k, vals),
             );
             // Filter out None results and unwrap
-            let mut result = Collection::new();
+            let mut result = Multiset::new();
             for (opt, diff) in output.iter_with_multiplicity() {
                 if let Some(kv) = opt {
                     result.apply_change(Change::new(kv.clone(), diff));
@@ -1163,14 +1163,14 @@ impl Database {
             .get(input.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let output = operators::aggregate(&input_coll, &key_fn, &value_fn, |k, vals| {
             operators::min(k, vals)
         });
         // Filter out None results
-        let mut result = Collection::new();
+        let mut result = Multiset::new();
         for (opt, diff) in output.iter_with_multiplicity() {
             if let Some(kv) = opt {
                 result.apply_change(Change::new(kv.clone(), diff));
@@ -1206,7 +1206,7 @@ impl Database {
             vec![input.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<(K, i64)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<(K, i64)>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<(K, i64)>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -1220,7 +1220,7 @@ impl Database {
                 .get(input_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             Box::new(operators::aggregate(
@@ -1236,7 +1236,7 @@ impl Database {
             .get(input.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let output = operators::aggregate(&input_coll, &key_fn, &value_fn, |k, vals| {
@@ -1269,7 +1269,7 @@ impl Database {
             vec![input.id],
             Box::new(|_, _| {
                 (
-                    Box::new(Collection::<(K, i64)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Multiset::<(K, i64)>::new()) as Box<dyn AnyCollection>,
                     Box::new(Vec::<Change<(K, i64)>>::new()) as Box<dyn AnyChanges>,
                 )
             }),
@@ -1283,7 +1283,7 @@ impl Database {
                 .get(input_id)
                 .state
                 .as_any()
-                .downcast_ref::<Collection<T>>()
+                .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
             Box::new(operators::aggregate(
@@ -1299,7 +1299,7 @@ impl Database {
             .get(input.id)
             .state
             .as_any()
-            .downcast_ref::<Collection<T>>()
+            .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
         let output = operators::aggregate(&input_coll, &key_fn, |_| (), |k, vals| {
@@ -1381,7 +1381,7 @@ impl Database {
                     .get(base_id)
                     .state
                     .as_any()
-                    .downcast_ref::<Collection<T>>()
+                    .downcast_ref::<Multiset<T>>()
                     .cloned()
                     .unwrap_or_default();
 
@@ -1389,7 +1389,7 @@ impl Database {
                     .get(recursive_id)
                     .state
                     .as_any()
-                    .downcast_ref::<Collection<T>>()
+                    .downcast_ref::<Multiset<T>>()
                     .cloned()
                     .unwrap_or_default();
 
@@ -1397,7 +1397,7 @@ impl Database {
                 Box::new(operators::distinct(&operators::union(&base_coll, &recursive_coll)))
                     as Box<dyn AnyCollection>
             }),
-            input_totals: Box::new(Collection::<T>::new()),
+            input_totals: Box::new(Multiset::<T>::new()),
             ops: Box::new(TypedFeedbackOps::<T>::new()),
         }));
 
@@ -1434,7 +1434,7 @@ impl Database {
                     .get(base_id)
                     .state
                     .as_any()
-                    .downcast_ref::<Collection<T>>()
+                    .downcast_ref::<Multiset<T>>()
                     .cloned()
                     .unwrap_or_default();
 
@@ -1442,7 +1442,7 @@ impl Database {
                     .get(recursive_id)
                     .state
                     .as_any()
-                    .downcast_ref::<Collection<T>>()
+                    .downcast_ref::<Multiset<T>>()
                     .cloned()
                     .unwrap_or_default();
 
@@ -1452,7 +1452,7 @@ impl Database {
                     as Box<dyn AnyCollection>
             }),
             // input_totals is Collection<T> (the seen set)
-            input_totals: Box::new(Collection::<T>::new()),
+            input_totals: Box::new(Multiset::<T>::new()),
             // TimestampedFeedbackOps handles the T -> (T, CommitId) conversion
             ops: Box::new(TimestampedFeedbackOps::<T>::new()),
         }));
@@ -1474,7 +1474,7 @@ impl Database {
                     .get(rel_id)
                     .state
                     .as_any()
-                    .downcast_ref::<Collection<T>>()
+                    .downcast_ref::<Multiset<T>>()
                     .map(|c| !c.is_empty())
                     .unwrap_or(false)
             }),

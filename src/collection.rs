@@ -11,21 +11,21 @@ use crate::Tuple;
 /// Multiplicities can be negative during intermediate computation but typically
 /// should be non-negative in final results.
 #[derive(Debug, Clone)]
-pub struct Collection<T: Tuple> {
+pub struct Multiset<T: Tuple> {
     /// The current state: tuple -> multiplicity
     data: HashMap<T, Diff>,
 }
 
-impl<T: Tuple> Default for Collection<T> {
+impl<T: Tuple> Default for Multiset<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Tuple> Collection<T> {
+impl<T: Tuple> Multiset<T> {
     /// Create an empty collection.
     pub fn new() -> Self {
-        Collection {
+        Multiset {
             data: HashMap::new(),
         }
     }
@@ -125,7 +125,7 @@ impl<T: Tuple> Collection<T> {
     }
 
     /// Compute the changes needed to transform from this collection to another.
-    pub fn diff(&self, other: &Collection<T>) -> Vec<Change<T>> {
+    pub fn diff(&self, other: &Multiset<T>) -> Vec<Change<T>> {
         let mut changes = Vec::new();
 
         // For each tuple in self, compute the difference
@@ -148,14 +148,14 @@ impl<T: Tuple> Collection<T> {
     }
 
     /// Create a snapshot of the current state.
-    pub fn snapshot(&self) -> Collection<T> {
+    pub fn snapshot(&self) -> Multiset<T> {
         self.clone()
     }
 }
 
-impl<T: Tuple> FromIterator<T> for Collection<T> {
+impl<T: Tuple> FromIterator<T> for Multiset<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut coll = Collection::new();
+        let mut coll = Multiset::new();
         for tuple in iter {
             coll.insert(tuple);
         }
@@ -163,9 +163,9 @@ impl<T: Tuple> FromIterator<T> for Collection<T> {
     }
 }
 
-impl<T: Tuple> FromIterator<Change<T>> for Collection<T> {
+impl<T: Tuple> FromIterator<Change<T>> for Multiset<T> {
     fn from_iter<I: IntoIterator<Item = Change<T>>>(iter: I) -> Self {
-        let mut coll = Collection::new();
+        let mut coll = Multiset::new();
         coll.apply_changes(iter);
         coll
     }
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_collection_basic() {
-        let mut coll = Collection::new();
+        let mut coll = Multiset::new();
         coll.insert(1);
         coll.insert(2);
         coll.insert(1);
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_collection_delete() {
-        let mut coll = Collection::new();
+        let mut coll = Multiset::new();
         coll.insert(1);
         coll.insert(1);
         coll.delete(1);
@@ -204,8 +204,8 @@ mod tests {
 
     #[test]
     fn test_collection_diff() {
-        let coll1: Collection<i32> = [1, 2, 3].into_iter().collect();
-        let coll2: Collection<i32> = [2, 3, 4].into_iter().collect();
+        let coll1: Multiset<i32> = [1, 2, 3].into_iter().collect();
+        let coll2: Multiset<i32> = [2, 3, 4].into_iter().collect();
 
         let changes = coll1.diff(&coll2);
         let mut result = coll1.clone();
