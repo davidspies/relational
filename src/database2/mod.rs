@@ -1,9 +1,11 @@
 //! Pull-based differential dataflow with feedback support.
 //!
-//! This module is organized in two layers:
+//! This module is organized in layers:
 //! - `relational`: Pull-based relational operators (map, filter, join, etc.)
-//! - `feedback`: Push-based feedback/fixpoint system built on top
+//! - `feedback`: Push-based feedback/fixpoint primitives
+//! - `db`: Central Database2 for coordinating commit, push/pop, and fixpoint
 
+mod db;
 pub mod feedback;
 pub mod relational;
 
@@ -14,4 +16,7 @@ mod tests;
 pub use relational::*;
 
 // Re-export feedback types
-pub use feedback::{fixpoint, Iteration, Variable};
+pub use feedback::Variable;
+
+// Re-export database
+pub use db::Database2;

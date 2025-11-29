@@ -6,7 +6,7 @@
 //! - Operators are generic over their input relation types
 //! - Use `.boxed()` to break type chains when needed
 
-mod input;
+pub(crate) mod input;
 mod ops_difference;
 mod ops_distinct;
 mod ops_filter;
@@ -19,8 +19,8 @@ mod ops_union;
 mod relation;
 mod saved;
 
-// Core types
-pub use input::{create_input, InputHandle, InputRelation};
+// Core types - InputHandle and InputRelation are created via Database2::create_input()
+pub use input::{InputHandle, InputRelation};
 pub use relation::Relation;
 pub use saved::{save, SavedGetter, SavedRelation};
 

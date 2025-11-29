@@ -6,6 +6,8 @@
 
 - **File size limit**: All non-test Rust files should be ≤ 200 lines of code. Break large files into submodules.
 - Test files (files named `tests.rs` or in a `tests/` directory) are exempt from this limit.
+- **Imports**: One `super::` is fine, but avoid chains like `super::super::`. Use absolute paths like `crate::module::item` instead.
+- **Module file naming**: Rust supports two styles: old-style (`a/mod.rs` + `a/b.rs`) and new-style (`a.rs` + `a/b.rs`). Use new-style until you need a submodule besides just tests, then switch to old-style.
 
 ### Error Handling: Fail Fast, Don't Hide Bugs
 
