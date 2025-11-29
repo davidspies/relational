@@ -168,7 +168,10 @@ pub fn join<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
     let mut right_index: HashMap<K, Vec<(B, Diff)>> = HashMap::new();
     for (tuple, diff) in right.iter_with_multiplicity() {
         let key = key_right(tuple);
-        right_index.entry(key).or_default().push((tuple.clone(), diff));
+        right_index
+            .entry(key)
+            .or_default()
+            .push((tuple.clone(), diff));
     }
 
     // Probe with left side

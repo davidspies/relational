@@ -35,6 +35,8 @@ pub trait AnyCollection: Any + Send + Sync {
     fn clone_box(&self) -> Box<dyn AnyCollection>;
     fn clear(&mut self);
     fn is_empty(&self) -> bool;
+    /// Merge tuples from another collection into this one (union).
+    fn merge_from(&mut self, other: &dyn AnyCollection);
 }
 
 impl<T: Tuple + Send + Sync> AnyCollection for Collection<T> {
@@ -56,6 +58,14 @@ impl<T: Tuple + Send + Sync> AnyCollection for Collection<T> {
 
     fn is_empty(&self) -> bool {
         Collection::is_empty(self)
+    }
+
+    fn merge_from(&mut self, other: &dyn AnyCollection) {
+        if let Some(other_coll) = other.as_any().downcast_ref::<Collection<T>>() {
+            for tuple in other_coll.iter() {
+                self.insert(tuple.clone());
+            }
+        }
     }
 }
 

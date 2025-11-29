@@ -33,9 +33,160 @@ pub struct Database {
 struct FeedbackLoop {
     /// The variable node that receives feedback.
     var_id: NodeId,
-    /// Type-erased function to compute new state and check for changes.
-    /// Returns (new_state, changed).
-    compute_and_check: Box<dyn Fn(&DataflowGraph) -> (Box<dyn AnyCollection>, bool) + Send + Sync>,
+    /// Type-erased function to compute the input state (what's flowing into the feedback).
+    /// Returns distinct(union(base, recursive)).
+    compute_input: Box<dyn Fn(&DataflowGraph) -> Box<dyn AnyCollection> + Send + Sync>,
+    /// Cumulative input multiplicities (persists across all checkpoints).
+    /// This is a Collection<T> storing the sum of all multiplicities ever received.
+    input_totals: Box<dyn AnyCollection>,
+    /// Type-erased operations for this feedback's tuple type.
+    ops: Box<dyn FeedbackOps + Send + Sync>,
+}
+
+/// Type-erased operations for a feedback loop.
+trait FeedbackOps: Send + Sync {
+    /// Update input_totals by adding the given input's multiplicities.
+    /// Returns tuples that are newly positive (went from <=0 to >0).
+    fn add_to_input_totals(
+        &self,
+        input_totals: &mut dyn AnyCollection,
+        input: &dyn AnyCollection,
+    ) -> Box<dyn AnyCollection>;
+
+    /// Update input_totals by subtracting the given input's multiplicities.
+    fn subtract_from_input_totals(
+        &self,
+        input_totals: &mut dyn AnyCollection,
+        input: &dyn AnyCollection,
+    );
+
+    /// Check which tuples in input have positive total in input_totals.
+    fn get_positive_in_totals(
+        &self,
+        input_totals: &dyn AnyCollection,
+        input: &dyn AnyCollection,
+    ) -> Box<dyn AnyCollection>;
+
+    /// Apply output additions (+1 for each tuple in the collection).
+    fn apply_output_adds(
+        &self,
+        output: &mut dyn AnyCollection,
+        tuples: &dyn AnyCollection,
+    );
+
+    /// Apply output removals (-1 for each tuple in the collection).
+    fn apply_output_removes(
+        &self,
+        output: &mut dyn AnyCollection,
+        tuples: &dyn AnyCollection,
+    );
+
+    /// Clone the tuples collection for storage in checkpoint frame.
+    fn clone_tuples(&self, tuples: &dyn AnyCollection) -> Box<dyn AnyCollection>;
+}
+
+/// Concrete implementation of FeedbackOps for a specific tuple type.
+struct TypedFeedbackOps<T: Tuple + Send + Sync> {
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl<T: Tuple + Send + Sync> TypedFeedbackOps<T> {
+    fn new() -> Self {
+        TypedFeedbackOps {
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
+    fn add_to_input_totals(
+        &self,
+        input_totals: &mut dyn AnyCollection,
+        input: &dyn AnyCollection,
+    ) -> Box<dyn AnyCollection> {
+        let totals = input_totals.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Collection<T>>().unwrap();
+
+        let mut newly_positive = Collection::<T>::new();
+
+        // We only add tuples that are newly seen (not already in input_totals)
+        // The input_totals acts as a "seen set" - once a tuple is seen (positive),
+        // we don't increment its count again. This matches the seen-set semantics
+        // where we only output +1 the first time we see a tuple.
+        for (tuple, _diff) in input_coll.iter_with_multiplicity() {
+            let old_total = totals.get(tuple);
+
+            // Only add if not already positive
+            if !old_total.is_positive() {
+                // Add with multiplicity 1 (seen once)
+                totals.insert(tuple.clone());
+                newly_positive.insert(tuple.clone());
+            }
+        }
+
+        Box::new(newly_positive)
+    }
+
+    fn subtract_from_input_totals(
+        &self,
+        input_totals: &mut dyn AnyCollection,
+        input: &dyn AnyCollection,
+    ) {
+        let totals = input_totals.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Collection<T>>().unwrap();
+
+        for (tuple, diff) in input_coll.iter_with_multiplicity() {
+            totals.apply_change(Change::new(tuple.clone(), -diff));
+        }
+    }
+
+    fn get_positive_in_totals(
+        &self,
+        input_totals: &dyn AnyCollection,
+        input: &dyn AnyCollection,
+    ) -> Box<dyn AnyCollection> {
+        let totals = input_totals.as_any().downcast_ref::<Collection<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Collection<T>>().unwrap();
+
+        let mut positive = Collection::<T>::new();
+        for (tuple, _) in input_coll.iter_with_multiplicity() {
+            if totals.get(tuple).is_positive() {
+                positive.insert(tuple.clone());
+            }
+        }
+
+        Box::new(positive)
+    }
+
+    fn apply_output_adds(
+        &self,
+        output: &mut dyn AnyCollection,
+        tuples: &dyn AnyCollection,
+    ) {
+        let out = output.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
+        let tuples_coll = tuples.as_any().downcast_ref::<Collection<T>>().unwrap();
+
+        for tuple in tuples_coll.iter() {
+            out.insert(tuple.clone());
+        }
+    }
+
+    fn apply_output_removes(
+        &self,
+        output: &mut dyn AnyCollection,
+        tuples: &dyn AnyCollection,
+    ) {
+        let out = output.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
+        let tuples_coll = tuples.as_any().downcast_ref::<Collection<T>>().unwrap();
+
+        for tuple in tuples_coll.iter() {
+            out.delete(tuple.clone());
+        }
+    }
+
+    fn clone_tuples(&self, tuples: &dyn AnyCollection) -> Box<dyn AnyCollection> {
+        tuples.clone_box()
+    }
 }
 
 impl Database {
@@ -960,7 +1111,10 @@ impl Database {
 
     /// Complete a feedback loop by connecting computed output back to variable.
     ///
-    /// This sets up: `variable = distinct(base ∪ recursive)` where recursive depends on variable.
+    /// The variable acts as a monotonically growing "seen set":
+    /// - Takes tuples with positive multiplicity from `base ∪ recursive`
+    /// - Adds them to the variable with multiplicity 1 if not already present
+    /// - Never removes tuples (except via pop)
     ///
     /// Feedback loops are evaluated in a stratified manner based on declaration order:
     /// - Each feedback runs to fixpoint before the next one is applied
@@ -982,7 +1136,7 @@ impl Database {
 
         self.feedback_loops.push(FeedbackLoop {
             var_id,
-            compute_and_check: Box::new(move |graph: &DataflowGraph| {
+            compute_input: Box::new(move |graph: &DataflowGraph| {
                 let base_coll = graph
                     .get(base_id)
                     .state
@@ -999,19 +1153,12 @@ impl Database {
                     .cloned()
                     .unwrap_or_default();
 
-                let new_state = operators::distinct(&operators::union(&base_coll, &recursive_coll));
-
-                let current = graph
-                    .get(var_id)
-                    .state
-                    .as_any()
-                    .downcast_ref::<Collection<T>>()
-                    .cloned()
-                    .unwrap_or_default();
-
-                let changed = !current.diff(&new_state).is_empty();
-                (Box::new(new_state) as Box<dyn AnyCollection>, changed)
+                // Compute the input: distinct(union(base, recursive))
+                Box::new(operators::distinct(&operators::union(&base_coll, &recursive_coll)))
+                    as Box<dyn AnyCollection>
             }),
+            input_totals: Box::new(Collection::<T>::new()),
+            ops: Box::new(TypedFeedbackOps::<T>::new()),
         });
 
         // Run stratified fixpoint for all feedback loops
@@ -1024,23 +1171,54 @@ impl Database {
     /// a change, we restart from the first feedback. This continues until
     /// a full pass through all feedbacks produces no changes.
     fn run_stratified_fixpoint(&mut self) {
+        // First recompute all derived nodes to reflect any input changes
+        self.recompute_all();
+
         let mut iterations = 0;
 
         'outer: loop {
             if iterations >= self.max_iterations {
-                break;
+                panic!(
+                    "Stratified fixpoint exceeded max_iterations ({}) - possible infinite loop or non-convergent feedback",
+                    self.max_iterations
+                );
             }
 
             for i in 0..self.feedback_loops.len() {
-                let (new_state, changed) = (self.feedback_loops[i].compute_and_check)(&self.graph);
+                // Compute what's flowing into this feedback
+                let input = (self.feedback_loops[i].compute_input)(&self.graph);
 
-                if changed {
-                    let var_id = self.feedback_loops[i].var_id;
+                // Update input_totals and get newly positive tuples
+                let (newly_positive, var_id) = {
+                    let fl = &mut self.feedback_loops[i];
+                    let np = fl.ops.add_to_input_totals(
+                        fl.input_totals.as_mut(),
+                        input.as_ref(),
+                    );
+                    (np, fl.var_id)
+                };
 
-                    // Record feedback changes for checkpoint stack
-                    self.record_feedback_change(var_id, new_state.as_ref());
+                if !newly_positive.is_empty() {
+                    // Record input deltas and output additions for checkpoint stack
+                    if self.checkpoint_stack.is_recording() {
+                        // Record what we added to input_totals (the newly positive tuples)
+                        self.checkpoint_stack.record_feedback_input_deltas(
+                            var_id,
+                            self.feedback_loops[i].ops.clone_tuples(newly_positive.as_ref()),
+                        );
+                        // Record output additions (same as newly positive)
+                        self.checkpoint_stack.record_feedback_outputs(
+                            var_id,
+                            self.feedback_loops[i].ops.clone_tuples(newly_positive.as_ref()),
+                        );
+                    }
 
-                    self.graph.get_mut(var_id).state = new_state;
+                    // Apply +1 to output for each newly positive tuple
+                    self.feedback_loops[i].ops.apply_output_adds(
+                        self.graph.get_mut(var_id).state.as_mut(),
+                        newly_positive.as_ref(),
+                    );
+
                     self.recompute_all();
                     iterations += 1;
                     continue 'outer;
@@ -1051,50 +1229,6 @@ impl Database {
         }
 
         self.graph.clear_dirty();
-    }
-
-    /// Record a feedback change for the checkpoint stack.
-    /// This computes the diff between the current state and new state.
-    fn record_feedback_change(&mut self, var_id: NodeId, new_state: &dyn AnyCollection) {
-        if !self.checkpoint_stack.is_recording() {
-            return;
-        }
-
-        // We need to compute the diff generically. The compute_and_check function
-        // already does the diff check, but we need the actual changes.
-
-        // Get the old state
-        let old_state = self.graph.get(var_id).state.as_ref();
-
-        // Try to downcast and compute diff for common types
-        // This is somewhat limited but covers the common cases
-        if let Some(changes) = Self::compute_diff_typed::<(i32, i32)>(old_state, new_state) {
-            self.checkpoint_stack.record(var_id, changes);
-        } else if let Some(changes) = Self::compute_diff_typed::<i32>(old_state, new_state) {
-            self.checkpoint_stack.record(var_id, changes);
-        } else if let Some(changes) = Self::compute_diff_typed::<i64>(old_state, new_state) {
-            self.checkpoint_stack.record(var_id, changes);
-        } else if let Some(changes) = Self::compute_diff_typed::<(i64, i64)>(old_state, new_state) {
-            self.checkpoint_stack.record(var_id, changes);
-        } else if let Some(changes) = Self::compute_diff_typed::<String>(old_state, new_state) {
-            self.checkpoint_stack.record(var_id, changes);
-        }
-    }
-
-    fn compute_diff_typed<T: Tuple + Send + Sync>(
-        old_state: &dyn AnyCollection,
-        new_state: &dyn AnyCollection
-    ) -> Option<Vec<Change<T>>> {
-        if let (Some(old_coll), Some(new_coll)) = (
-            old_state.as_any().downcast_ref::<Collection<T>>(),
-            new_state.as_any().downcast_ref::<Collection<T>>(),
-        ) {
-            let changes = old_coll.diff(new_coll);
-            if !changes.is_empty() {
-                return Some(changes);
-            }
-        }
-        None
     }
 
     fn recompute_all(&mut self) {
@@ -1185,10 +1319,15 @@ impl Database {
 
     /// Pop the top checkpoint frame, undoing all changes since the matching push.
     ///
-    /// This uses speculative execution to efficiently restore state:
-    /// 1. Simultaneously undo all recorded changes to inputs + feedbacks
-    /// 2. Resolve corrections in stratified order as recomputation reveals
-    ///    actual vs expected differences
+    /// Algorithm:
+    /// 1. Unapply all input changes
+    /// 2. For all feedbacks: send -1 for each tuple in this frame's output_additions
+    /// 3. For each feedback in stratified order:
+    ///    - Recompute derived nodes
+    ///    - Subtract the computed input from input_totals
+    ///    - For tuples where input_totals is still positive AND we just sent -1:
+    ///      re-send +1 and record in parent frame
+    ///    - Run fixpoint for feedbacks 0..=i
     ///
     /// Returns true if a frame was popped, false if the stack was empty.
     pub fn pop(&mut self) -> bool {
@@ -1201,44 +1340,75 @@ impl Database {
             return true;
         }
 
-        // Step 1: Apply all undos simultaneously to inputs and feedbacks
-        // This sets up the "expected" state for speculative execution
-        for node_id in frame.changed_nodes() {
+        // Step 1: Unapply all input changes
+        for node_id in frame.changed_input_nodes() {
             if let Some(changes) = frame.get(node_id) {
-                let node = self.graph.get(node_id);
-                if node.is_input() || node.is_feedback() {
-                    // Unapply the changes (negate and apply)
-                    changes.unapply(self.graph.get_mut(node_id).state.as_mut());
+                changes.unapply(self.graph.get_mut(node_id).state.as_mut());
+            }
+        }
+
+        // Step 2: For all feedbacks, send -1 for outputs AND subtract recorded input deltas
+        // Collect the feedback data we need to process
+        let feedback_data: Vec<(usize, NodeId, Option<Box<dyn AnyCollection>>, Option<Box<dyn AnyCollection>>)> = self
+            .feedback_loops
+            .iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                let outputs = frame.get_feedback_outputs(fl.var_id).map(|o| o.clone_box());
+                let input_deltas = frame.get_feedback_input_deltas(fl.var_id).map(|d| d.clone_box());
+                (i, fl.var_id, outputs, input_deltas)
+            })
+            .collect();
+
+        // Apply -1 for each output we recorded, and subtract recorded input deltas from input_totals
+        for (i, var_id, outputs, input_deltas) in &feedback_data {
+            if let Some(outputs) = outputs {
+                self.feedback_loops[*i].ops.apply_output_removes(
+                    self.graph.get_mut(*var_id).state.as_mut(),
+                    outputs.as_ref(),
+                );
+            }
+            if let Some(input_deltas) = input_deltas {
+                let fl = &mut self.feedback_loops[*i];
+                fl.ops.subtract_from_input_totals(
+                    fl.input_totals.as_mut(),
+                    input_deltas.as_ref(),
+                );
+            }
+        }
+
+        // Step 3: Recompute derived nodes and run fixpoint
+        // After subtracting the recorded input deltas, input_totals reflects the pre-push state
+        self.recompute_all();
+
+        // Step 4: For each feedback, check if any removed tuples should be re-added
+        // (because input_totals is still positive for them after the subtraction)
+        for (i, var_id, outputs, _) in &feedback_data {
+            if let Some(outputs) = outputs {
+                let still_positive = self.feedback_loops[*i].ops.get_positive_in_totals(
+                    self.feedback_loops[*i].input_totals.as_ref(),
+                    outputs.as_ref(),
+                );
+
+                if !still_positive.is_empty() {
+                    // Re-add these tuples to output
+                    self.feedback_loops[*i].ops.apply_output_adds(
+                        self.graph.get_mut(*var_id).state.as_mut(),
+                        still_positive.as_ref(),
+                    );
+
+                    // Record in parent frame (if exists)
+                    self.checkpoint_stack.record_feedback_outputs_to_parent(
+                        *var_id,
+                        self.feedback_loops[*i].ops.clone_tuples(still_positive.as_ref()),
+                    );
                 }
             }
         }
 
-        // Recompute all derived nodes based on restored inputs
-        self.recompute_all();
-
-        // Step 2: For each feedback in stratified order, resolve corrections
-        // The correction is: what we expected to see minus what we actually see
-        // If we expected a deletion but the tuple is still there, we need to delete it
-        // If we expected the tuple to remain but it's gone, we need to re-add it
-        for i in 0..self.feedback_loops.len() {
-            let var_id = self.feedback_loops[i].var_id;
-
-            // Get the expected change at this feedback (negated recorded change)
-            if let Some(recorded_changes) = frame.get(var_id) {
-                let expected_changes = recorded_changes.negate();
-
-                // Compute the actual state now
-                let (new_state, _) = (self.feedback_loops[i].compute_and_check)(&self.graph);
-
-                // The correction is: expected - actual
-                // If expected says "delete X" but actual shows X is still there,
-                // we need to apply that deletion
-                // This is handled by applying the expected changes
-                expected_changes.apply(self.graph.get_mut(var_id).state.as_mut());
-            }
-
-            // Run stratified fixpoint for feedbacks 0..=i
-            self.run_partial_stratified_fixpoint(i + 1);
+        // Step 5: Run fixpoint to handle any corrections
+        if !self.feedback_loops.is_empty() {
+            self.run_partial_stratified_fixpoint(self.feedback_loops.len());
         }
 
         true
@@ -1246,19 +1416,53 @@ impl Database {
 
     /// Run stratified fixpoint for the first `num_feedbacks` feedback loops.
     fn run_partial_stratified_fixpoint(&mut self, num_feedbacks: usize) {
+        self.recompute_all();
+
         let mut iterations = 0;
 
         'outer: loop {
             if iterations >= self.max_iterations {
-                break;
+                panic!(
+                    "Partial stratified fixpoint exceeded max_iterations ({}) - possible infinite loop",
+                    self.max_iterations
+                );
             }
 
             for i in 0..num_feedbacks.min(self.feedback_loops.len()) {
-                let (new_state, changed) = (self.feedback_loops[i].compute_and_check)(&self.graph);
+                // Compute what's flowing into this feedback
+                let input = (self.feedback_loops[i].compute_input)(&self.graph);
 
-                if changed {
-                    let var_id = self.feedback_loops[i].var_id;
-                    self.graph.get_mut(var_id).state = new_state;
+                // Update input_totals and get newly positive tuples
+                let (newly_positive, var_id) = {
+                    let fl = &mut self.feedback_loops[i];
+                    let np = fl.ops.add_to_input_totals(
+                        fl.input_totals.as_mut(),
+                        input.as_ref(),
+                    );
+                    (np, fl.var_id)
+                };
+
+                if !newly_positive.is_empty() {
+                    // Record input deltas and output additions for checkpoint stack
+                    if self.checkpoint_stack.is_recording() {
+                        // Record what we added to input_totals (the newly positive tuples)
+                        self.checkpoint_stack.record_feedback_input_deltas(
+                            var_id,
+                            self.feedback_loops[i].ops.clone_tuples(newly_positive.as_ref()),
+                        );
+                        // Record output additions (same as newly positive)
+                        self.checkpoint_stack.record_feedback_outputs(
+                            var_id,
+                            self.feedback_loops[i].ops.clone_tuples(newly_positive.as_ref()),
+                        );
+                    }
+
+                    // Apply +1 to output for each newly positive tuple
+                    self.feedback_loops[i].ops.apply_output_adds(
+                        self.graph.get_mut(var_id).state.as_mut(),
+                        newly_positive.as_ref(),
+                    );
+
                     self.recompute_all();
                     iterations += 1;
                     continue 'outer;
