@@ -268,7 +268,6 @@ impl Solver {
             |(cid, _)| *cid,
             |cid| *cid,
         );
-        let _satisfied_unit_clauses = db.map(unit_clause_sat_check, |((cid, _), _)| *cid);
         let units_from_sat = db.map(unit_clause_sat_check, |((cid, lit), _)| (*cid, *lit));
 
         // Units = potential_units where clause is NOT satisfied
@@ -315,6 +314,7 @@ impl Solver {
         for &lit in literals {
             self.db.insert(self.clauses, (clause_id, lit));
         }
+        self.db.commit();
     }
 
     /// Make a decision: assign a literal at a new decision level.
@@ -324,6 +324,7 @@ impl Solver {
         self.current_level.inc();
         self.decision_stack.push((self.current_level, lit, tried_opposite));
         self.db.insert(self.assignments, (lit, self.current_level, ClauseId::DECISION));
+        self.db.commit();
     }
 
     /// Make a decision: assign a literal at a new decision level.
@@ -370,6 +371,7 @@ impl Solver {
             // two units in the same batch contradict each other)
             let (reason, lit) = new_units[0];
             self.db.insert(self.assignments, (lit, self.current_level, reason));
+            self.db.commit();
         }
     }
 
@@ -389,6 +391,7 @@ impl Solver {
         for &lit in literals {
             self.db.insert(self.learned, (cid, lit));
         }
+        self.db.commit();
         cid
     }
 

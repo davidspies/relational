@@ -45,8 +45,14 @@ fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
 
     for op in ops {
         match op {
-            Op::InsertEdge(a, b) => db.insert(edges, (*a, *b)),
-            Op::DeleteEdge(a, b) => db.delete(edges, (*a, *b)),
+            Op::InsertEdge(a, b) => {
+                db.insert(edges, (*a, *b));
+                db.commit();
+            }
+            Op::DeleteEdge(a, b) => {
+                db.delete(edges, (*a, *b));
+                db.commit();
+            }
             Op::Push => { db.push(None); }
             Op::Pop => { db.pop(); }
         }
@@ -103,8 +109,14 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
             continue;
         }
         match op {
-            Op::InsertEdge(a, b) => db.insert(edges, (*a, *b)),
-            Op::DeleteEdge(a, b) => db.delete(edges, (*a, *b)),
+            Op::InsertEdge(a, b) => {
+                db.insert(edges, (*a, *b));
+                db.commit();
+            }
+            Op::DeleteEdge(a, b) => {
+                db.delete(edges, (*a, *b));
+                db.commit();
+            }
             Op::Push | Op::Pop => {} // Don't replay push/pop in the model
         }
     }
@@ -165,10 +177,12 @@ fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
             Op::InsertEdge(a, _) => {
                 db.insert(regular, *a);
                 db.insert(persistent, *a + 100);
+                db.commit();
             }
             Op::DeleteEdge(a, _) => {
                 db.delete(regular, *a);
                 db.delete(persistent, *a + 100);
+                db.commit();
             }
             Op::Push => { db.push(None); }
             Op::Pop => { db.pop(); }
@@ -219,12 +233,14 @@ fn apply_ops_replay_persistent_model(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
                 }
                 // Persistent: always
                 db.insert(persistent, *a + 100);
+                db.commit();
             }
             Op::DeleteEdge(a, _) => {
                 if surviving[i] {
                     db.delete(regular, *a);
                 }
                 db.delete(persistent, *a + 100);
+                db.commit();
             }
             Op::Push | Op::Pop => {}
         }
@@ -279,6 +295,7 @@ fn test_multiple_feedbacks_with_pop() {
     // Set up edges: 1 -> 2 -> 3
     db.insert(edges, (1, 2));
     db.insert(edges, (2, 3));
+    db.commit();
 
     db.feedback(reach_var, edges, all_reach);
 
@@ -293,6 +310,7 @@ fn test_multiple_feedbacks_with_pop() {
     // Push and add edge
     db.push(None);
     db.insert(edges, (3, 4));
+    db.commit();
 
     let reach_during: Vec<_> = db.collect(reach);
     let _pairs_during: Vec<_> = db.collect(pairs);

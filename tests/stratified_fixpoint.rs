@@ -42,6 +42,7 @@ fn test_stratified_two_feedbacks() {
     // Insert edges: 1 -> 2 -> 3
     db.insert(edges, (1, 2));
     db.insert(edges, (2, 3));
+    db.commit();
 
     // Set up first feedback (reach)
     db.feedback(reach_var, edges, all_reach);
@@ -93,6 +94,7 @@ fn test_incremental_after_feedback() {
     // Initial edges
     db.insert(edges, (1, 2));
     db.insert(edges, (2, 3));
+    db.commit();
 
     db.feedback(path_var, edges, all_paths);
 
@@ -103,6 +105,7 @@ fn test_incremental_after_feedback() {
 
     // Add another edge
     db.insert(edges, (3, 4));
+    db.commit();
 
     // The transitive closure should update
     let paths: Vec<_> = db.collect(path);
@@ -124,6 +127,7 @@ fn test_feedback_order_independence() {
     let edges = db.create_input::<(i32, i32)>("edges");
     db.insert(edges, (1, 2));
     db.insert(edges, (2, 3));
+    db.commit();
 
     // Transitive closure
     let (path_var, path) = db.variable::<(i32, i32)>("path");
@@ -148,6 +152,7 @@ fn test_three_feedbacks_chain() {
     // Level 0: base facts
     let facts = db.create_input::<i32>("facts");
     db.insert(facts, 1);
+    db.commit();
 
     // Level 1: double the facts
     let (doubled_var, doubled) = db.variable::<i32>("doubled");
@@ -192,6 +197,7 @@ fn test_feedback_immediate_fixpoint() {
     let items = db.create_input::<i32>("items");
     db.insert(items, 1);
     db.insert(items, 2);
+    db.commit();
 
     // Feedback that just passes through the input (identity)
     let (var, rel) = db.variable::<i32>("identity");
@@ -303,6 +309,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
 
     // Seed with 0
     db.insert(seeds, 0);
+    db.commit();
 
     // First feedback (A): v = v ∪ a_new
     db.feedback(v_var, seeds, v_with_a);
@@ -377,6 +384,7 @@ fn test_interleaved_mutual_fixpoint() {
 
     // Start with just 1
     db.insert(input, 1);
+    db.commit();
 
     // Set up A first
     db.feedback(a_var, a_combined, a_recursive);
@@ -432,6 +440,7 @@ fn test_diamond_dependency() {
 
     let input = db.create_input::<i32>("input");
     db.insert(input, 10);
+    db.commit();
 
     // B = input * 2
     let b = db.map(input, |x| x * 2);
@@ -467,6 +476,7 @@ fn test_push_pop_simple() {
     // Initial state
     db.insert(items, 1);
     db.insert(items, 2);
+    db.commit();
 
     assert_eq!(db.collect(items).len(), 2);
     assert_eq!(db.collect(doubled).len(), 2);
@@ -478,6 +488,7 @@ fn test_push_pop_simple() {
     // Make changes
     db.insert(items, 3);
     db.delete(items, 1);
+    db.commit();
 
     assert_eq!(db.collect(items).len(), 2); // {2, 3}
     let doubled_result: Vec<_> = db.collect(doubled);
@@ -507,14 +518,17 @@ fn test_push_pop_nested() {
     let items = db.create_input::<i32>("items");
 
     db.insert(items, 1);
+    db.commit();
 
     // First push
     db.push(Some("level1"));
     db.insert(items, 2);
+    db.commit();
 
     // Second push
     db.push(Some("level2"));
     db.insert(items, 3);
+    db.commit();
 
     assert_eq!(db.collect::<i32>(items).len(), 3); // {1, 2, 3}
     assert_eq!(db.stack_depth(), 2);
@@ -552,6 +566,7 @@ fn test_push_pop_with_feedback() {
     // Initial edges: 1 -> 2 -> 3
     db.insert(edges, (1, 2));
     db.insert(edges, (2, 3));
+    db.commit();
 
     db.feedback(path_var, edges, all_paths);
 
@@ -564,6 +579,7 @@ fn test_push_pop_with_feedback() {
     db.push(Some("before_new_edges"));
 
     db.insert(edges, (3, 4));
+    db.commit();
 
     // Now paths should include (3,4), (2,4), (1,4)
     let paths: Vec<_> = db.collect(path);
@@ -598,6 +614,7 @@ fn test_push_pop_no_changes() {
     let items = db.create_input::<i32>("items");
     db.insert(items, 1);
     db.insert(items, 2);
+    db.commit();
 
     db.push(Some("no_changes"));
     // No changes made
@@ -653,6 +670,7 @@ fn test_persistent_vs_regular_inputs() {
     // Insert initial data before any checkpoint
     db.insert(decisions, 1);
     db.insert(learned, 100);
+    db.commit();
 
     // Push checkpoint
     db.push(Some("decision_point"));
@@ -660,6 +678,7 @@ fn test_persistent_vs_regular_inputs() {
     // Make a decision and learn a clause
     db.insert(decisions, 2);
     db.insert(learned, 200);
+    db.commit();
 
     // Verify both have the new data
     let decisions_result: Vec<_> = db.collect(decisions);
@@ -699,16 +718,19 @@ fn test_persistent_nested_checkpoints() {
 
     db.insert(regular, 1);
     db.insert(persistent, 100);
+    db.commit();
 
     // Level 1
     db.push(Some("level1"));
     db.insert(regular, 2);
     db.insert(persistent, 200);
+    db.commit();
 
     // Level 2
     db.push(Some("level2"));
     db.insert(regular, 3);
     db.insert(persistent, 300);
+    db.commit();
 
     // Verify current state
     assert_eq!(db.collect::<i32>(regular).len(), 3); // {1, 2, 3}
@@ -754,11 +776,13 @@ fn test_persistent_with_derived() {
 
     db.insert(regular, 1);
     db.insert(persistent, 100);
+    db.commit();
 
     db.push(Some("checkpoint"));
 
     db.insert(regular, 2);
     db.insert(persistent, 200);
+    db.commit();
 
     // Combined should have all 4
     let combined_result: Vec<_> = db.collect(combined);
@@ -785,11 +809,13 @@ fn test_persistent_delete() {
 
     db.insert(persistent, 100);
     db.insert(persistent, 200);
+    db.commit();
 
     db.push(Some("before_delete"));
 
     // Delete from persistent - this should also persist (not be undone)
     db.delete(persistent, 100);
+    db.commit();
 
     let result: Vec<_> = db.collect(persistent);
     assert_eq!(result.len(), 1);
@@ -802,4 +828,122 @@ fn test_persistent_delete() {
     assert_eq!(result.len(), 1);
     assert!(result.contains(&200));
     assert!(!result.contains(&100), "Delete on persistent should survive pop");
+}
+
+/// Test feedback_with_id with persistent inputs and pop.
+///
+/// Scenario:
+/// 1. Set up feedback_with_id with a persistent base input
+/// 2. Push checkpoint
+/// 3. Add edge to persistent input, triggering discovery of new paths
+/// 4. Pop - the persistent edge survives, so the derived paths should too
+///
+/// Note: CommitIds may be reassigned on pop when tuples survive due to persistent inputs.
+/// This is acceptable for now - the important thing is that the tuples themselves survive.
+#[test]
+fn test_feedback_with_id_with_persistent_input_and_pop() {
+    use relational::CommitId;
+
+    let mut db = Database::new();
+
+    // Persistent edges - survive pop
+    let edges = db.create_persistent_input::<(i32, i32)>("edges");
+
+    // Initial edge
+    db.insert(edges, (1, 2));
+    db.commit();
+
+    // Create timestamped path variable
+    let (path_var, path) = db.variable::<((i32, i32), CommitId)>("path");
+
+    // Strip CommitId for recursive computation
+    let path_tuples = db.map(path, |((a, b), _)| (*a, *b));
+
+    // path(a, c) :- path(a, b), edges(b, c)
+    let extended = db.join(path_tuples, edges, |(_, b)| *b, |(b, _)| *b);
+    let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
+    let all_paths = db.union(edges, new_paths);
+
+    // Wire up timestamped feedback
+    db.feedback_with_id(path_var, edges, all_paths);
+
+    // Initial state: path (1,2) discovered at some commit ID
+    let paths_before: Vec<_> = db.collect(path);
+    assert_eq!(paths_before.len(), 1);
+    let (_, initial_commit_id) = paths_before
+        .iter()
+        .find(|((a, b), _)| *a == 1 && *b == 2)
+        .expect("Should have path 1->2");
+    let initial_commit_id = *initial_commit_id;
+
+    // Push checkpoint
+    db.push(None);
+
+    // Add edge to persistent input - this survives pop!
+    db.insert(edges, (2, 3));
+    db.commit();
+
+    // Now we should have:
+    // - (1,2) with original commit ID
+    // - (2,3) with new commit ID
+    // - (1,3) with even newer commit ID (derived from 1->2->3)
+    let paths_during: Vec<_> = db.collect(path);
+    assert_eq!(paths_during.len(), 3);
+
+    let get_commit_id = |paths: &[((i32, i32), CommitId)], from: i32, to: i32| -> CommitId {
+        paths
+            .iter()
+            .find(|((a, b), _)| *a == from && *b == to)
+            .map(|(_, id)| *id)
+            .unwrap_or_else(|| panic!("Should have path {}->{}", from, to))
+    };
+
+    let commit_1_2_during = get_commit_id(&paths_during, 1, 2);
+    let commit_2_3_during = get_commit_id(&paths_during, 2, 3);
+    let commit_1_3_during = get_commit_id(&paths_during, 1, 3);
+
+    // (1,2) should still have original commit ID
+    assert_eq!(
+        commit_1_2_during, initial_commit_id,
+        "(1,2) should retain original commit ID"
+    );
+
+    // (2,3) should have higher commit ID (discovered later)
+    assert!(
+        commit_2_3_during > initial_commit_id,
+        "(2,3) should have higher commit ID than (1,2)"
+    );
+
+    // (1,3) should have same or higher commit ID as (2,3)
+    assert!(
+        commit_1_3_during >= commit_2_3_during,
+        "(1,3) should have commit ID >= (2,3)"
+    );
+
+    // Pop - but edges is persistent, so (2,3) survives!
+    db.pop();
+
+    // All three paths should still exist (because the persistent edge survived)
+    let paths_after: Vec<_> = db.collect(path);
+    assert_eq!(
+        paths_after.len(),
+        3,
+        "All paths should survive because edge is persistent"
+    );
+
+    // Verify the tuples exist (CommitIds may be reassigned on pop)
+    let has_path = |paths: &[((i32, i32), CommitId)], from: i32, to: i32| -> bool {
+        paths.iter().any(|((a, b), _)| *a == from && *b == to)
+    };
+
+    assert!(has_path(&paths_after, 1, 2), "Should have path 1->2 after pop");
+    assert!(has_path(&paths_after, 2, 3), "Should have path 2->3 after pop");
+    assert!(has_path(&paths_after, 1, 3), "Should have path 1->3 after pop");
+
+    // (1,2) should retain its commit ID since it was not in the popped frame
+    let commit_1_2_after = get_commit_id(&paths_after, 1, 2);
+    assert_eq!(
+        commit_1_2_after, commit_1_2_during,
+        "(1,2) commit ID should be retained after pop (it wasn't in the popped frame)"
+    );
 }

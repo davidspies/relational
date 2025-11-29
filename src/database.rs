@@ -10,6 +10,28 @@ use crate::operators;
 use crate::relation::{Relation, Variable};
 use crate::Tuple;
 
+/// A monotonically increasing commit ID that tracks database mutations.
+///
+/// This counter is incremented:
+/// - When a feedback loop produces new tuples
+/// - During the global-undo step of a pop operation
+///
+/// The counter never decreases, even during backtracking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct CommitId(u64);
+
+impl CommitId {
+    /// Create a new CommitId from a raw value.
+    pub fn new(id: u64) -> Self {
+        CommitId(id)
+    }
+
+    /// Get the raw u64 value.
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+}
+
 /// A type-erased recomputation function that reads input states and produces a new output.
 type RecomputeFn = Box<dyn Fn(&DataflowGraph) -> Box<dyn AnyCollection> + Send + Sync>;
 
@@ -39,6 +61,8 @@ pub struct Database {
     stratified_ops: Vec<StratifiedOp>,
     /// Whether the last fixpoint was interrupted.
     interrupted: bool,
+    /// Monotonically increasing commit counter, incremented on feedback changes and pop undo.
+    commit_id: CommitId,
 }
 
 /// An operation in the stratified fixpoint computation.
@@ -71,10 +95,12 @@ struct FeedbackLoop {
 trait FeedbackOps: Send + Sync {
     /// Update input_totals by adding the given input's multiplicities.
     /// Returns tuples that are newly positive (went from <=0 to >0).
+    /// The commit_id is used for timestamped variants to record when tuples are first seen.
     fn add_to_input_totals(
         &self,
         input_totals: &mut dyn AnyCollection,
         input: &dyn AnyCollection,
+        commit_id: CommitId,
     ) -> Box<dyn AnyCollection>;
 
     /// Update input_totals by subtracting the given input's multiplicities.
@@ -122,11 +148,126 @@ impl<T: Tuple + Send + Sync> TypedFeedbackOps<T> {
     }
 }
 
+/// Feedback operations for a variable that tracks discovery time.
+/// The variable holds (T, CommitId) where CommitId is when T was first seen.
+/// Input is T, output is (T, CommitId).
+struct TimestampedFeedbackOps<T: Tuple + Send + Sync> {
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl<T: Tuple + Send + Sync> TimestampedFeedbackOps<T> {
+    fn new() -> Self {
+        TimestampedFeedbackOps {
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
+    fn add_to_input_totals(
+        &self,
+        input_totals: &mut dyn AnyCollection,
+        input: &dyn AnyCollection,
+        commit_id: CommitId,
+    ) -> Box<dyn AnyCollection> {
+        // input_totals is Collection<T> (the seen set, just like regular feedback)
+        // input is Collection<T> (new tuples to consider)
+        // output is Collection<(T, CommitId)> (newly seen tuples with their discovery time)
+        let totals = input_totals.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Collection<T>>().unwrap();
+
+        let mut newly_positive = Collection::<(T, CommitId)>::new();
+
+        for (tuple, _diff) in input_coll.iter_with_multiplicity() {
+            let old_total = totals.get(tuple);
+
+            if !old_total.is_positive() {
+                totals.insert(tuple.clone());
+                // Stamp with current commit ID
+                newly_positive.insert((tuple.clone(), commit_id));
+            }
+        }
+
+        Box::new(newly_positive)
+    }
+
+    fn subtract_from_input_totals(
+        &self,
+        input_totals: &mut dyn AnyCollection,
+        input: &dyn AnyCollection,
+    ) {
+        // input_totals is Collection<T>
+        // input is Collection<(T, CommitId)> (the timestamped tuples we recorded)
+        let totals = input_totals.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Collection<(T, CommitId)>>().unwrap();
+
+        for ((tuple, _commit_id), diff) in input_coll.iter_with_multiplicity() {
+            totals.apply_change(Change::new(tuple.clone(), -diff));
+        }
+    }
+
+    fn get_positive_in_totals(
+        &self,
+        input_totals: &dyn AnyCollection,
+        input: &dyn AnyCollection,
+    ) -> Box<dyn AnyCollection> {
+        // input_totals is Collection<T>
+        // input is Collection<(T, CommitId)>
+        // Returns the subset of input where T is still positive in totals
+        let totals = input_totals.as_any().downcast_ref::<Collection<T>>().unwrap();
+        let input_coll = input.as_any().downcast_ref::<Collection<(T, CommitId)>>().unwrap();
+
+        let mut positive = Collection::<(T, CommitId)>::new();
+        for ((tuple, commit_id), _) in input_coll.iter_with_multiplicity() {
+            if totals.get(tuple).is_positive() {
+                positive.insert((tuple.clone(), *commit_id));
+            }
+        }
+
+        Box::new(positive)
+    }
+
+    fn apply_output_adds(
+        &self,
+        output: &mut dyn AnyCollection,
+        tuples: &dyn AnyCollection,
+    ) {
+        // output is Collection<(T, CommitId)>
+        // tuples is Collection<(T, CommitId)>
+        let out = output.as_any_mut().downcast_mut::<Collection<(T, CommitId)>>().unwrap();
+        let tuples_coll = tuples.as_any().downcast_ref::<Collection<(T, CommitId)>>().unwrap();
+
+        for tuple in tuples_coll.iter() {
+            out.insert(tuple.clone());
+        }
+    }
+
+    fn apply_output_removes(
+        &self,
+        output: &mut dyn AnyCollection,
+        tuples: &dyn AnyCollection,
+    ) {
+        // output is Collection<(T, CommitId)>
+        // tuples is Collection<(T, CommitId)>
+        let out = output.as_any_mut().downcast_mut::<Collection<(T, CommitId)>>().unwrap();
+        let tuples_coll = tuples.as_any().downcast_ref::<Collection<(T, CommitId)>>().unwrap();
+
+        for tuple in tuples_coll.iter() {
+            out.delete(tuple.clone());
+        }
+    }
+
+    fn clone_tuples(&self, tuples: &dyn AnyCollection) -> Box<dyn AnyCollection> {
+        tuples.clone_box()
+    }
+}
+
 impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
     fn add_to_input_totals(
         &self,
         input_totals: &mut dyn AnyCollection,
         input: &dyn AnyCollection,
+        _commit_id: CommitId,
     ) -> Box<dyn AnyCollection> {
         let totals = input_totals.as_any_mut().downcast_mut::<Collection<T>>().unwrap();
         let input_coll = input.as_any().downcast_ref::<Collection<T>>().unwrap();
@@ -224,7 +365,19 @@ impl Database {
             recompute_fns: Vec::new(),
             stratified_ops: Vec::new(),
             interrupted: false,
+            commit_id: CommitId(0),
         }
+    }
+
+    /// Get the current commit ID.
+    pub fn commit_id(&self) -> CommitId {
+        self.commit_id
+    }
+
+    /// Increment the commit ID and return the new value.
+    fn next_commit_id(&mut self) -> CommitId {
+        self.commit_id = CommitId(self.commit_id.0 + 1);
+        self.commit_id
     }
 
     /// Set the maximum iterations for fixed-point computation.
@@ -260,6 +413,8 @@ impl Database {
     }
 
     /// Insert a tuple into a relation.
+    ///
+    /// The change is staged but not propagated until `commit()` is called.
     pub fn insert<T: Tuple + Send + Sync>(&mut self, rel: Relation<T>, tuple: T) {
         // Record the change for checkpoint stack if recording (skip persistent inputs)
         if self.checkpoint_stack.is_recording() && !self.graph.get(rel.id).is_persistent() {
@@ -277,10 +432,11 @@ impl Database {
         }
 
         self.graph.mark_dirty(rel.id);
-        self.propagate_changes();
     }
 
     /// Delete a tuple from a relation.
+    ///
+    /// The change is staged but not propagated until `commit()` is called.
     pub fn delete<T: Tuple + Send + Sync>(&mut self, rel: Relation<T>, tuple: T) {
         // Record the change for checkpoint stack if recording (skip persistent inputs)
         if self.checkpoint_stack.is_recording() && !self.graph.get(rel.id).is_persistent() {
@@ -298,11 +454,12 @@ impl Database {
         }
 
         self.graph.mark_dirty(rel.id);
-        self.propagate_changes();
     }
 
-    /// Propagate changes through the dataflow graph.
-    fn propagate_changes(&mut self) {
+    /// Commit staged changes and propagate through the dataflow graph.
+    ///
+    /// This runs fixpoint computation for any feedback loops.
+    pub fn commit(&mut self) {
         if self.stratified_ops.is_empty() {
             // No feedback loops or interrupts - just recompute derived relations
             self.recompute_all();
@@ -419,6 +576,59 @@ impl Database {
             .cloned()
             .unwrap_or_default();
         let output = operators::map(&input_coll, |t| f(t));
+        self.graph.get_mut(id).state = Box::new(output);
+
+        Relation::new(id)
+    }
+
+    /// Attach the current commit ID to each tuple.
+    ///
+    /// This transforms `T` into `(T, CommitId)`, where the CommitId is the
+    /// value at the time the tuple flows through during recomputation.
+    pub fn with_id<T>(&mut self, input: Relation<T>) -> Relation<(T, CommitId)>
+    where
+        T: Tuple + Send + Sync,
+    {
+        let input_id = input.id;
+
+        let id = self.graph.create_derived::<(T, CommitId)>(
+            None,
+            vec![input.id],
+            Box::new(|_, _| {
+                (
+                    Box::new(Collection::<(T, CommitId)>::new()) as Box<dyn AnyCollection>,
+                    Box::new(Vec::<Change<(T, CommitId)>>::new()) as Box<dyn AnyChanges>,
+                )
+            }),
+            None,
+        );
+        self.ensure_recompute_fns_len(id);
+
+        // Store the recompute function - captures current commit ID from graph
+        self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
+            let commit_id = CommitId(graph.commit_id());
+            let input_coll = graph
+                .get(input_id)
+                .state
+                .as_any()
+                .downcast_ref::<Collection<T>>()
+                .cloned()
+                .unwrap_or_default();
+
+            Box::new(operators::map(&input_coll, |t| (t.clone(), commit_id))) as Box<dyn AnyCollection>
+        }));
+
+        // Compute initial state
+        let commit_id = self.commit_id;
+        let input_coll = self
+            .graph
+            .get(input.id)
+            .state
+            .as_any()
+            .downcast_ref::<Collection<T>>()
+            .cloned()
+            .unwrap_or_default();
+        let output = operators::map(&input_coll, |t| (t.clone(), commit_id));
         self.graph.get_mut(id).state = Box::new(output);
 
         Relation::new(id)
@@ -1195,6 +1405,62 @@ impl Database {
         self.run_stratified_fixpoint();
     }
 
+    /// Complete a feedback loop that tracks discovery time.
+    ///
+    /// Like `feedback`, but the variable holds `(T, CommitId)` where the CommitId
+    /// records when each tuple was first discovered. This allows deriving relations
+    /// that depend on discovery order (e.g., taking the tuple with minimum CommitId).
+    ///
+    /// The input `base` and `recursive` are `Relation<T>`, but the variable holds
+    /// `(T, CommitId)`. When a tuple T is first seen, it's added to the variable
+    /// with the current commit ID.
+    pub fn feedback_with_id<T: Tuple + Send + Sync>(
+        &mut self,
+        var: Variable<(T, CommitId)>,
+        base: Relation<T>,
+        recursive: Relation<T>,
+    ) {
+        let node = self.graph.get_mut(var.id);
+        node.inputs = vec![base.id, recursive.id];
+
+        let var_id = var.id;
+        let base_id = base.id;
+        let recursive_id = recursive.id;
+
+        self.stratified_ops.push(StratifiedOp::Feedback(FeedbackLoop {
+            var_id,
+            compute_input: Box::new(move |graph: &DataflowGraph| {
+                let base_coll = graph
+                    .get(base_id)
+                    .state
+                    .as_any()
+                    .downcast_ref::<Collection<T>>()
+                    .cloned()
+                    .unwrap_or_default();
+
+                let recursive_coll = graph
+                    .get(recursive_id)
+                    .state
+                    .as_any()
+                    .downcast_ref::<Collection<T>>()
+                    .cloned()
+                    .unwrap_or_default();
+
+                // Compute the input: distinct(union(base, recursive))
+                // This is Collection<T>, not Collection<(T, CommitId)>
+                Box::new(operators::distinct(&operators::union(&base_coll, &recursive_coll)))
+                    as Box<dyn AnyCollection>
+            }),
+            // input_totals is Collection<T> (the seen set)
+            input_totals: Box::new(Collection::<T>::new()),
+            // TimestampedFeedbackOps handles the T -> (T, CommitId) conversion
+            ops: Box::new(TimestampedFeedbackOps::<T>::new()),
+        }));
+
+        // Run stratified fixpoint for all feedback loops
+        self.run_stratified_fixpoint();
+    }
+
     /// Add an interrupt that stops fixpoint propagation when the relation is non-empty.
     ///
     /// Interrupts are checked in declaration order along with feedbacks.
@@ -1259,6 +1525,8 @@ impl Database {
                         };
 
                         // Update input_totals and get newly positive tuples
+                        // We pass the *next* commit ID (what it will be if there are changes)
+                        let next_commit = CommitId::new(self.commit_id.0 + 1);
                         let newly_positive = {
                             let fl = match &mut self.stratified_ops[i] {
                                 StratifiedOp::Feedback(fl) => fl,
@@ -1267,10 +1535,14 @@ impl Database {
                             fl.ops.add_to_input_totals(
                                 fl.input_totals.as_mut(),
                                 input.as_ref(),
+                                next_commit,
                             )
                         };
 
                         if !newly_positive.is_empty() {
+                            // Actually increment commit ID now that we know there are changes
+                            self.commit_id = next_commit;
+
                             // Record and apply the changes
                             let fl = match &self.stratified_ops[i] {
                                 StratifiedOp::Feedback(fl) => fl,
@@ -1308,6 +1580,9 @@ impl Database {
     }
 
     fn recompute_all(&mut self) {
+        // Sync commit ID to graph so recompute functions can access it
+        self.graph.set_commit_id(self.commit_id.0);
+
         let topo_order: Vec<NodeId> = self.graph.topo_order().to_vec();
 
         for &node_id in &topo_order {
@@ -1426,6 +1701,9 @@ impl Database {
         if !frame.has_changes() {
             return true;
         }
+
+        // Increment commit ID for the global-undo step
+        self.next_commit_id();
 
         // Step 1: Unapply all input changes
         for node_id in frame.changed_input_nodes() {
@@ -1552,6 +1830,9 @@ impl Database {
                             ((fl.compute_input)(&self.graph), fl.var_id)
                         };
 
+                        // Update input_totals and get newly positive tuples
+                        // We pass the *next* commit ID (what it will be if there are changes)
+                        let next_commit = CommitId::new(self.commit_id.0 + 1);
                         let newly_positive = {
                             let fl = match &mut self.stratified_ops[i] {
                                 StratifiedOp::Feedback(fl) => fl,
@@ -1560,10 +1841,14 @@ impl Database {
                             fl.ops.add_to_input_totals(
                                 fl.input_totals.as_mut(),
                                 input.as_ref(),
+                                next_commit,
                             )
                         };
 
                         if !newly_positive.is_empty() {
+                            // Actually increment commit ID now that we know there are changes
+                            self.commit_id = next_commit;
+
                             let fl = match &self.stratified_ops[i] {
                                 StratifiedOp::Feedback(fl) => fl,
                                 _ => unreachable!(),
@@ -1651,8 +1936,10 @@ mod tests {
         db.insert(nums, 1);
         db.insert(nums, 2);
         db.insert(nums, 3);
+        db.commit();
 
         let doubled = db.map(nums, |x| x * 2);
+        db.commit();
 
         let result: Vec<_> = db.collect(doubled);
         assert!(result.contains(&2));
@@ -1670,9 +1957,11 @@ mod tests {
         db.insert(edges, (2, 3));
         db.insert(labels, (1, "one"));
         db.insert(labels, (2, "two"));
+        db.commit();
 
         // Join edges with labels on the source node
         let joined = db.join(edges, labels, |(src, _)| *src, |(id, _)| *id);
+        db.commit();
 
         let result: Vec<_> = db.collect(joined);
         assert_eq!(result.len(), 2);
@@ -1687,6 +1976,7 @@ mod tests {
         db.insert(edges, (1, 2));
         db.insert(edges, (2, 3));
         db.insert(edges, (3, 4));
+        db.commit();
 
         // path = edges ∪ (path ⋈ edges).map(|(p, e)| (p.0, e.1))
         let (path_var, path) = db.variable::<(i32, i32)>("path");
@@ -1739,11 +2029,12 @@ mod tests {
     fn test_checkpoint_and_restore() {
         let mut db = Database::new();
         let numbers = db.create_input::<i32>("numbers");
-        let doubled = db.map(numbers, |n| n * 2);
-
-        // Initial state
         db.insert(numbers, 1);
         db.insert(numbers, 2);
+        db.commit();
+
+        let doubled = db.map(numbers, |n| n * 2);
+        db.commit();
 
         // Create checkpoint
         let cp = db.checkpoint(Some("initial"));
@@ -1756,6 +2047,7 @@ mod tests {
         // Make changes
         db.insert(numbers, 3);
         db.delete(numbers, 1);
+        db.commit();
 
         // Verify current state
         assert_eq!(db.collect(numbers).len(), 2); // {2, 3}
@@ -1775,5 +2067,250 @@ mod tests {
         // The 'doubled' relation was restored to checkpoint state (2, 4)
         // But since numbers was NOT restored, the states may be inconsistent
         // until we propagate changes or fix inputs manually
+    }
+
+    #[test]
+    fn test_commit_id_and_with_id() {
+        let mut db = Database::new();
+
+        // Initial commit ID is 0
+        assert_eq!(db.commit_id(), CommitId(0));
+
+        // Create a feedback loop to generate commit ID increments
+        let edges = db.create_input::<(i32, i32)>("edges");
+        let (path_var, path) = db.variable::<(i32, i32)>("path");
+
+        // Track when each path tuple was discovered
+        let paths_with_commit = db.with_id(path);
+
+        // path(a, c) :- path(a, b), edge(b, c)
+        let extended = db.join(path, edges, |(_, b)| *b, |(b, _)| *b);
+        let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
+        let all_paths = db.union(edges, new_paths);
+
+        db.feedback(path_var, edges, all_paths);
+
+        // Add edges: 1->2->3
+        // This triggers feedback iterations, incrementing commit ID
+        db.insert(edges, (1, 2));
+        db.insert(edges, (2, 3));
+        db.commit();
+
+        // Commit ID should have advanced (once per feedback iteration)
+        let commit_after_insert = db.commit_id();
+        assert!(commit_after_insert > CommitId(0), "Commit ID should advance during feedback");
+
+        // Check the paths_with_commit relation
+        let paths_with_ids: Vec<_> = db.collect(paths_with_commit);
+
+        // All paths should exist: (1,2), (2,3), (1,3)
+        let paths_only: Vec<_> = paths_with_ids.iter().map(|(p, _)| *p).collect();
+        assert!(paths_only.contains(&(1, 2)));
+        assert!(paths_only.contains(&(2, 3)));
+        assert!(paths_only.contains(&(1, 3)));
+
+        // The derived path (1,3) was discovered via feedback
+        let derived_id = paths_with_ids
+            .iter()
+            .find(|(p, _)| *p == (1, 3))
+            .map(|(_, id)| *id);
+
+        // All tuples get the same ID in with_id since it's recomputed each time
+        // The interesting part is that commit_id advances during feedback
+        assert!(derived_id.is_some());
+
+        // Test that pop increments commit ID
+        db.push(None);
+        db.insert(edges, (3, 4));
+        db.commit();
+        let commit_before_pop = db.commit_id();
+
+        db.pop();
+        let commit_after_pop = db.commit_id();
+
+        assert!(
+            commit_after_pop > commit_before_pop,
+            "Commit ID should advance on pop: {} vs {}",
+            commit_after_pop.raw(),
+            commit_before_pop.raw()
+        );
+    }
+
+    #[test]
+    fn test_commit_id_monotonic_through_backtracking() {
+        let mut db = Database::new();
+        let items = db.create_input::<i32>("items");
+
+        // Track commit IDs through push/pop cycles
+        let mut seen_ids = vec![db.commit_id()];
+
+        db.push(None);
+        db.insert(items, 1);
+        db.commit();
+        seen_ids.push(db.commit_id());
+
+        db.push(None);
+        db.insert(items, 2);
+        db.commit();
+        seen_ids.push(db.commit_id());
+
+        // Pop should increment commit ID
+        db.pop();
+        seen_ids.push(db.commit_id());
+
+        db.pop();
+        seen_ids.push(db.commit_id());
+
+        // All commit IDs should be monotonically non-decreasing
+        for i in 1..seen_ids.len() {
+            assert!(
+                seen_ids[i] >= seen_ids[i - 1],
+                "Commit IDs should be monotonic: {:?}",
+                seen_ids
+            );
+        }
+
+        // After pops, the ID should have advanced
+        assert!(
+            seen_ids.last().unwrap() > seen_ids.first().unwrap(),
+            "Final commit ID should be greater than initial"
+        );
+    }
+
+    #[test]
+    fn test_commit_id_advances_per_feedback_iteration() {
+        // Build a chain: 1 -> 2 -> 3 -> 4 -> 5
+        // Each feedback iteration discovers paths one hop longer.
+        // We verify the commit ID advances once per iteration by counting
+        // how many times it advances for a chain of length N.
+
+        let mut db = Database::new();
+        let edges = db.create_input::<(i32, i32)>("edges");
+
+        let initial_commit = db.commit_id();
+
+        // Create the feedback variable for paths
+        let (path_var, path) = db.variable::<(i32, i32)>("path");
+
+        // path(a, c) :- path(a, b), edges(b, c)
+        let extended = db.join(path, edges, |(_, b)| *b, |(b, _)| *b);
+        let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
+        let all_paths = db.union(edges, new_paths);
+
+        // Wire up the feedback
+        db.feedback(path_var, edges, all_paths);
+
+        let after_feedback_setup = db.commit_id();
+
+        // Feedback setup shouldn't advance commit ID (no data yet)
+        assert_eq!(
+            initial_commit, after_feedback_setup,
+            "No commit ID change without data"
+        );
+
+        // Add chain edges: 1->2->3->4->5
+        // This creates paths of lengths 1, 2, 3, and 4
+        // Iteration 1: discover (1,2), (2,3), (3,4), (4,5) - length 1
+        // Iteration 2: discover (1,3), (2,4), (3,5) - length 2
+        // Iteration 3: discover (1,4), (2,5) - length 3
+        // Iteration 4: discover (1,5) - length 4
+        // That's 4 feedback iterations = 4 commit ID increments
+        db.insert(edges, (1, 2));
+        db.insert(edges, (2, 3));
+        db.insert(edges, (3, 4));
+        db.insert(edges, (4, 5));
+        db.commit();
+
+        let after_inserts = db.commit_id();
+
+        // We should have advanced exactly 4 times (once per path length)
+        let expected_advances = 4u64;
+        let actual_advances = after_inserts.raw() - after_feedback_setup.raw();
+
+        assert_eq!(
+            actual_advances, expected_advances,
+            "Expected {} commit ID advances for chain of length 4, got {}",
+            expected_advances, actual_advances
+        );
+
+        // Verify all paths were discovered
+        let paths: Vec<_> = db.collect(path);
+        assert_eq!(paths.len(), 10); // 4 + 3 + 2 + 1 paths
+
+        // Check specific paths exist
+        assert!(paths.contains(&(1, 5)), "Should have path 1->5");
+        assert!(paths.contains(&(1, 4)), "Should have path 1->4");
+        assert!(paths.contains(&(2, 5)), "Should have path 2->5");
+    }
+
+    #[test]
+    fn test_feedback_with_id_discovery_order() {
+        // Test that feedback_with_id correctly tracks when tuples are discovered.
+        // Longer paths should have higher commit IDs than shorter paths.
+        let mut db = Database::new();
+        let edges = db.create_input::<(i32, i32)>("edges");
+
+        // Add all edges BEFORE setting up feedback, so they're all discovered together
+        db.insert(edges, (1, 2));
+        db.insert(edges, (2, 3));
+        db.insert(edges, (3, 4));
+        db.commit();
+
+        // Create a timestamped path variable
+        let (path_var, path) = db.variable::<((i32, i32), CommitId)>("path");
+
+        // To build the recursive relation, we need to strip the CommitId,
+        // join with edges, then the feedback mechanism re-stamps with new CommitId
+        let path_tuples = db.map(path, |((a, b), _)| (*a, *b));
+
+        // path(a, c) :- path(a, b), edges(b, c)
+        let extended = db.join(path_tuples, edges, |(_, b)| *b, |(b, _)| *b);
+        let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
+        let all_paths = db.union(edges, new_paths);
+
+        // Wire up the timestamped feedback - this runs fixpoint and discovers all paths
+        db.feedback_with_id(path_var, edges, all_paths);
+
+        // Collect paths with their discovery times
+        let paths_with_times: Vec<_> = db.collect(path);
+
+        // Extract commit IDs for paths of different lengths
+        let get_commit_id = |from: i32, to: i32| -> Option<CommitId> {
+            paths_with_times
+                .iter()
+                .find(|((a, b), _)| *a == from && *b == to)
+                .map(|(_, id)| *id)
+        };
+
+        // Length 1 paths: (1,2), (2,3), (3,4)
+        let id_1_2 = get_commit_id(1, 2).expect("Should have path 1->2");
+        let id_2_3 = get_commit_id(2, 3).expect("Should have path 2->3");
+        let id_3_4 = get_commit_id(3, 4).expect("Should have path 3->4");
+
+        // Length 2 paths: (1,3), (2,4)
+        let id_1_3 = get_commit_id(1, 3).expect("Should have path 1->3");
+        let id_2_4 = get_commit_id(2, 4).expect("Should have path 2->4");
+
+        // Length 3 path: (1,4)
+        let id_1_4 = get_commit_id(1, 4).expect("Should have path 1->4");
+
+        // All length-1 paths should have the same commit ID (discovered in same iteration)
+        assert_eq!(id_1_2, id_2_3, "Length-1 paths should have same commit ID");
+        assert_eq!(id_2_3, id_3_4, "Length-1 paths should have same commit ID");
+
+        // Length-2 paths should have higher commit ID than length-1
+        assert!(
+            id_1_3 > id_1_2,
+            "Length-2 path should be discovered after length-1: {:?} vs {:?}",
+            id_1_3, id_1_2
+        );
+        assert_eq!(id_1_3, id_2_4, "Length-2 paths should have same commit ID");
+
+        // Length-3 path should have higher commit ID than length-2
+        assert!(
+            id_1_4 > id_1_3,
+            "Length-3 path should be discovered after length-2: {:?} vs {:?}",
+            id_1_4, id_1_3
+        );
     }
 }

@@ -110,7 +110,7 @@ pub mod cdcl;
 pub use change::{Change, Diff};
 pub use collection::Collection;
 pub use dataflow::{Node, NodeId};
-pub use database::Database;
+pub use database::{CommitId, Database};
 pub use checkpoint::Checkpoint;
 pub use relation::{Relation, Variable};
 pub use cdcl::Solver;

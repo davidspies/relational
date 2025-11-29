@@ -158,6 +158,8 @@ pub struct DataflowGraph {
     dirty_nodes: HashSet<NodeId>,
     /// Topological order for propagation (computed lazily).
     topo_order: Option<Vec<NodeId>>,
+    /// Current commit ID (mirrored from Database for use by recompute functions).
+    commit_id: u64,
 }
 
 impl DataflowGraph {
@@ -167,7 +169,18 @@ impl DataflowGraph {
             name_to_id: HashMap::new(),
             dirty_nodes: HashSet::new(),
             topo_order: None,
+            commit_id: 0,
         }
+    }
+
+    /// Get the current commit ID.
+    pub fn commit_id(&self) -> u64 {
+        self.commit_id
+    }
+
+    /// Set the current commit ID (called by Database to sync).
+    pub fn set_commit_id(&mut self, id: u64) {
+        self.commit_id = id;
     }
 
     /// Create a new input node.
