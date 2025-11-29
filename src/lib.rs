@@ -98,22 +98,22 @@
 //! // info.manual_input_nodes tells you which inputs weren't restored
 //! ```
 
-mod change;
-mod collection;
-mod dataflow;
-mod database;
-pub mod operators;
-mod checkpoint;
-mod relation;
 pub mod cdcl;
+mod change;
+mod checkpoint;
+mod collection;
+mod database;
+mod dataflow;
+pub mod operators;
+mod relation;
 
-pub use change::{Change, Diff};
-pub use collection::Multiset;
-pub use dataflow::{Node, NodeId};
-pub use database::{CommitId, Database};
-pub use checkpoint::Checkpoint;
-pub use relation::{Relation, Variable};
 pub use cdcl::Solver;
+pub use change::{Change, Diff};
+pub use checkpoint::Checkpoint;
+pub use collection::Multiset;
+pub use database::{CommitId, Database};
+pub use dataflow::{Node, NodeId};
+pub use relation::{Relation, Variable};
 
 /// A trait for types that can be used as tuples in relations.
 pub trait Tuple: Clone + Eq + std::hash::Hash + std::fmt::Debug + 'static {}

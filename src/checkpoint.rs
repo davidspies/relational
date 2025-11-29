@@ -7,10 +7,10 @@
 
 use std::collections::HashMap;
 
+use crate::Tuple;
 use crate::change::Change;
 use crate::collection::Multiset;
 use crate::dataflow::NodeId;
-use crate::Tuple;
 
 /// Type-erased changes that can be manipulated.
 pub trait AnyChanges: Send + Sync {
@@ -114,7 +114,10 @@ impl CheckpointFrame {
     }
 
     /// Get the recorded feedback input deltas for a node.
-    pub fn get_feedback_input_deltas(&self, var_id: NodeId) -> Option<&dyn crate::dataflow::AnyCollection> {
+    pub fn get_feedback_input_deltas(
+        &self,
+        var_id: NodeId,
+    ) -> Option<&dyn crate::dataflow::AnyCollection> {
         self.feedback_input_deltas.get(&var_id).map(|b| b.as_ref())
     }
 
@@ -124,7 +127,10 @@ impl CheckpointFrame {
     }
 
     /// Get the recorded feedback outputs for a node.
-    pub fn get_feedback_outputs(&self, var_id: NodeId) -> Option<&dyn crate::dataflow::AnyCollection> {
+    pub fn get_feedback_outputs(
+        &self,
+        var_id: NodeId,
+    ) -> Option<&dyn crate::dataflow::AnyCollection> {
         self.feedback_outputs.get(&var_id).map(|b| b.as_ref())
     }
 

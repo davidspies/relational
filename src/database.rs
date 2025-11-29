@@ -2,18 +2,21 @@
 
 use std::sync::Arc;
 
+use crate::Tuple;
 use crate::change::{Change, Diff};
-use crate::checkpoint::{Checkpoint, CheckpointId, CheckpointManager, CheckpointStack, RestoreInfo};
+use crate::checkpoint::{
+    Checkpoint, CheckpointId, CheckpointManager, CheckpointStack, RestoreInfo,
+};
 use crate::collection::Multiset;
 use crate::dataflow::{AnyChanges, AnyCollection, DataflowGraph, NodeId};
 use crate::operators;
 use crate::relation::{Relation, Variable};
-use crate::Tuple;
 
 /// Type-erased incremental operator function.
 /// Takes: input node IDs, graph (for reading states and pending changes) -> output changes
 /// The function is responsible for reading its inputs' states and pending changes.
-type IncrementalFn = Box<dyn Fn(&DataflowGraph, &[&dyn AnyChanges]) -> Box<dyn AnyChanges> + Send + Sync>;
+type IncrementalFn =
+    Box<dyn Fn(&DataflowGraph, &[&dyn AnyChanges]) -> Box<dyn AnyChanges> + Send + Sync>;
 
 /// Type-erased function to apply changes to a node's state.
 type ApplyFn = Box<dyn Fn(&mut dyn AnyCollection, &dyn AnyChanges) + Send + Sync>;
@@ -90,7 +93,6 @@ enum StratifiedOp {
     },
 }
 
-
 /// A feedback loop for stratified fixpoint computation.
 struct FeedbackLoop {
     /// The variable node that receives feedback.
@@ -132,18 +134,10 @@ trait FeedbackOps: Send + Sync {
     ) -> Box<dyn AnyCollection>;
 
     /// Apply output additions (+1 for each tuple in the collection).
-    fn apply_output_adds(
-        &self,
-        output: &mut dyn AnyCollection,
-        tuples: &dyn AnyCollection,
-    );
+    fn apply_output_adds(&self, output: &mut dyn AnyCollection, tuples: &dyn AnyCollection);
 
     /// Apply output removals (-1 for each tuple in the collection).
-    fn apply_output_removes(
-        &self,
-        output: &mut dyn AnyCollection,
-        tuples: &dyn AnyCollection,
-    );
+    fn apply_output_removes(&self, output: &mut dyn AnyCollection, tuples: &dyn AnyCollection);
 
     /// Clone the tuples collection for storage in checkpoint frame.
     fn clone_tuples(&self, tuples: &dyn AnyCollection) -> Box<dyn AnyCollection>;
@@ -187,7 +181,10 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
         // input_totals is Collection<T> (the seen set, just like regular feedback)
         // input is Collection<T> (new tuples to consider)
         // output is Collection<(T, CommitId)> (newly seen tuples with their discovery time)
-        let totals = input_totals.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
+        let totals = input_totals
+            .as_any_mut()
+            .downcast_mut::<Multiset<T>>()
+            .unwrap();
         let input_coll = input.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
         let mut newly_positive = Multiset::<(T, CommitId)>::new();
@@ -212,8 +209,14 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
     ) {
         // input_totals is Collection<T>
         // input is Collection<(T, CommitId)> (the timestamped tuples we recorded)
-        let totals = input_totals.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
-        let input_coll = input.as_any().downcast_ref::<Multiset<(T, CommitId)>>().unwrap();
+        let totals = input_totals
+            .as_any_mut()
+            .downcast_mut::<Multiset<T>>()
+            .unwrap();
+        let input_coll = input
+            .as_any()
+            .downcast_ref::<Multiset<(T, CommitId)>>()
+            .unwrap();
 
         for ((tuple, _commit_id), diff) in input_coll.iter_with_multiplicity() {
             totals.apply_change(Change::new(tuple.clone(), -diff));
@@ -229,7 +232,10 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
         // input is Collection<(T, CommitId)>
         // Returns the subset of input where T is still positive in totals
         let totals = input_totals.as_any().downcast_ref::<Multiset<T>>().unwrap();
-        let input_coll = input.as_any().downcast_ref::<Multiset<(T, CommitId)>>().unwrap();
+        let input_coll = input
+            .as_any()
+            .downcast_ref::<Multiset<(T, CommitId)>>()
+            .unwrap();
 
         let mut positive = Multiset::<(T, CommitId)>::new();
         for ((tuple, commit_id), _) in input_coll.iter_with_multiplicity() {
@@ -241,30 +247,34 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TimestampedFeedbackOps<T> {
         Box::new(positive)
     }
 
-    fn apply_output_adds(
-        &self,
-        output: &mut dyn AnyCollection,
-        tuples: &dyn AnyCollection,
-    ) {
+    fn apply_output_adds(&self, output: &mut dyn AnyCollection, tuples: &dyn AnyCollection) {
         // output is Collection<(T, CommitId)>
         // tuples is Collection<(T, CommitId)>
-        let out = output.as_any_mut().downcast_mut::<Multiset<(T, CommitId)>>().unwrap();
-        let tuples_coll = tuples.as_any().downcast_ref::<Multiset<(T, CommitId)>>().unwrap();
+        let out = output
+            .as_any_mut()
+            .downcast_mut::<Multiset<(T, CommitId)>>()
+            .unwrap();
+        let tuples_coll = tuples
+            .as_any()
+            .downcast_ref::<Multiset<(T, CommitId)>>()
+            .unwrap();
 
         for tuple in tuples_coll.iter() {
             out.insert(tuple.clone());
         }
     }
 
-    fn apply_output_removes(
-        &self,
-        output: &mut dyn AnyCollection,
-        tuples: &dyn AnyCollection,
-    ) {
+    fn apply_output_removes(&self, output: &mut dyn AnyCollection, tuples: &dyn AnyCollection) {
         // output is Collection<(T, CommitId)>
         // tuples is Collection<(T, CommitId)>
-        let out = output.as_any_mut().downcast_mut::<Multiset<(T, CommitId)>>().unwrap();
-        let tuples_coll = tuples.as_any().downcast_ref::<Multiset<(T, CommitId)>>().unwrap();
+        let out = output
+            .as_any_mut()
+            .downcast_mut::<Multiset<(T, CommitId)>>()
+            .unwrap();
+        let tuples_coll = tuples
+            .as_any()
+            .downcast_ref::<Multiset<(T, CommitId)>>()
+            .unwrap();
 
         for tuple in tuples_coll.iter() {
             out.delete(tuple.clone());
@@ -283,7 +293,10 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
         input: &dyn AnyCollection,
         _commit_id: CommitId,
     ) -> Box<dyn AnyCollection> {
-        let totals = input_totals.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
+        let totals = input_totals
+            .as_any_mut()
+            .downcast_mut::<Multiset<T>>()
+            .unwrap();
         let input_coll = input.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
         let mut newly_positive = Multiset::<T>::new();
@@ -311,7 +324,10 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
         input_totals: &mut dyn AnyCollection,
         input: &dyn AnyCollection,
     ) {
-        let totals = input_totals.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
+        let totals = input_totals
+            .as_any_mut()
+            .downcast_mut::<Multiset<T>>()
+            .unwrap();
         let input_coll = input.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
         for (tuple, diff) in input_coll.iter_with_multiplicity() {
@@ -337,11 +353,7 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
         Box::new(positive)
     }
 
-    fn apply_output_adds(
-        &self,
-        output: &mut dyn AnyCollection,
-        tuples: &dyn AnyCollection,
-    ) {
+    fn apply_output_adds(&self, output: &mut dyn AnyCollection, tuples: &dyn AnyCollection) {
         let out = output.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
         let tuples_coll = tuples.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
@@ -350,11 +362,7 @@ impl<T: Tuple + Send + Sync> FeedbackOps for TypedFeedbackOps<T> {
         }
     }
 
-    fn apply_output_removes(
-        &self,
-        output: &mut dyn AnyCollection,
-        tuples: &dyn AnyCollection,
-    ) {
+    fn apply_output_removes(&self, output: &mut dyn AnyCollection, tuples: &dyn AnyCollection) {
         let out = output.as_any_mut().downcast_mut::<Multiset<T>>().unwrap();
         let tuples_coll = tuples.as_any().downcast_ref::<Multiset<T>>().unwrap();
 
@@ -454,12 +462,17 @@ impl Database {
     pub fn insert<T: Tuple + Send + Sync>(&mut self, rel: Relation<T>, tuple: T) {
         // Record the change for checkpoint stack if recording (skip persistent inputs)
         if self.checkpoint_stack.is_recording() && !self.graph.get(rel.id).is_persistent() {
-            self.checkpoint_stack.record(rel.id, vec![Change::insert(tuple.clone())]);
+            self.checkpoint_stack
+                .record(rel.id, vec![Change::insert(tuple.clone())]);
         }
 
         let node = self.graph.get_mut(rel.id);
 
-        if let Some(changes) = node.pending_changes.as_any_mut().downcast_mut::<Vec<Change<T>>>() {
+        if let Some(changes) = node
+            .pending_changes
+            .as_any_mut()
+            .downcast_mut::<Vec<Change<T>>>()
+        {
             changes.push(Change::insert(tuple.clone()));
         }
 
@@ -476,12 +489,17 @@ impl Database {
     pub fn delete<T: Tuple + Send + Sync>(&mut self, rel: Relation<T>, tuple: T) {
         // Record the change for checkpoint stack if recording (skip persistent inputs)
         if self.checkpoint_stack.is_recording() && !self.graph.get(rel.id).is_persistent() {
-            self.checkpoint_stack.record(rel.id, vec![Change::delete(tuple.clone())]);
+            self.checkpoint_stack
+                .record(rel.id, vec![Change::delete(tuple.clone())]);
         }
 
         let node = self.graph.get_mut(rel.id);
 
-        if let Some(changes) = node.pending_changes.as_any_mut().downcast_mut::<Vec<Change<T>>>() {
+        if let Some(changes) = node
+            .pending_changes
+            .as_any_mut()
+            .downcast_mut::<Vec<Change<T>>>()
+        {
             changes.push(Change::delete(tuple.clone()));
         }
 
@@ -516,10 +534,7 @@ impl Database {
     // ========================================================================
 
     /// Iterate over tuples in a relation.
-    pub fn iter<T: Tuple + Send + Sync>(
-        &self,
-        rel: Relation<T>,
-    ) -> impl Iterator<Item = &T> {
+    pub fn iter<T: Tuple + Send + Sync>(&self, rel: Relation<T>) -> impl Iterator<Item = &T> {
         self.graph
             .get(rel.id)
             .state
@@ -595,14 +610,16 @@ impl Database {
         self.apply_fns[id.index()] = Some(Self::make_apply_fn::<U>());
 
         // Store the incremental function - map is purely local, no state needed
-        self.incremental_fns[id.index()] = Some(Box::new(move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
-            let changes = input_changes[0]
-                .as_any()
-                .downcast_ref::<Vec<Change<T>>>()
-                .map(|c| c.as_slice())
-                .unwrap_or(&[]);
-            Box::new(operators::map_changes(changes, |t| f_inc(t))) as Box<dyn AnyChanges>
-        }));
+        self.incremental_fns[id.index()] = Some(Box::new(
+            move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+                let changes = input_changes[0]
+                    .as_any()
+                    .downcast_ref::<Vec<Change<T>>>()
+                    .map(|c| c.as_slice())
+                    .unwrap_or(&[]);
+                Box::new(operators::map_changes(changes, |t| f_inc(t))) as Box<dyn AnyChanges>
+            },
+        ));
 
         // Store the recompute function (for initial state and fallback)
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -658,15 +675,18 @@ impl Database {
         self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(T, CommitId)>());
 
         // Store the incremental function - stamps with current commit ID
-        self.incremental_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
-            let changes = input_changes[0]
-                .as_any()
-                .downcast_ref::<Vec<Change<T>>>()
-                .map(|c| c.as_slice())
-                .unwrap_or(&[]);
-            let commit_id = CommitId(graph.commit_id());
-            Box::new(operators::map_changes(changes, |t| (t.clone(), commit_id))) as Box<dyn AnyChanges>
-        }));
+        self.incremental_fns[id.index()] = Some(Box::new(
+            move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+                let changes = input_changes[0]
+                    .as_any()
+                    .downcast_ref::<Vec<Change<T>>>()
+                    .map(|c| c.as_slice())
+                    .unwrap_or(&[]);
+                let commit_id = CommitId(graph.commit_id());
+                Box::new(operators::map_changes(changes, |t| (t.clone(), commit_id)))
+                    as Box<dyn AnyChanges>
+            },
+        ));
 
         // Store the recompute function - captures current commit ID from graph
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -679,7 +699,8 @@ impl Database {
                 .cloned()
                 .unwrap_or_default();
 
-            Box::new(operators::map(&input_coll, |t| (t.clone(), commit_id))) as Box<dyn AnyCollection>
+            Box::new(operators::map(&input_coll, |t| (t.clone(), commit_id)))
+                as Box<dyn AnyCollection>
         }));
 
         // Compute initial state
@@ -726,14 +747,16 @@ impl Database {
         self.apply_fns[id.index()] = Some(Self::make_apply_fn::<T>());
 
         // Store the incremental function - filter is purely local
-        self.incremental_fns[id.index()] = Some(Box::new(move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
-            let changes = input_changes[0]
-                .as_any()
-                .downcast_ref::<Vec<Change<T>>>()
-                .map(|c| c.as_slice())
-                .unwrap_or(&[]);
-            Box::new(operators::filter_changes(changes, |t| pred_inc(t))) as Box<dyn AnyChanges>
-        }));
+        self.incremental_fns[id.index()] = Some(Box::new(
+            move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+                let changes = input_changes[0]
+                    .as_any()
+                    .downcast_ref::<Vec<Change<T>>>()
+                    .map(|c| c.as_slice())
+                    .unwrap_or(&[]);
+                Box::new(operators::filter_changes(changes, |t| pred_inc(t))) as Box<dyn AnyChanges>
+            },
+        ));
 
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -744,7 +767,8 @@ impl Database {
                 .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
-            Box::new(operators::filter(&input_coll, |t| pred_recompute(t))) as Box<dyn AnyCollection>
+            Box::new(operators::filter(&input_coll, |t| pred_recompute(t)))
+                as Box<dyn AnyCollection>
         }));
 
         let input_coll = self
@@ -791,14 +815,16 @@ impl Database {
         self.apply_fns[id.index()] = Some(Self::make_apply_fn::<U>());
 
         // Store the incremental function - flat_map is purely local
-        self.incremental_fns[id.index()] = Some(Box::new(move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
-            let changes = input_changes[0]
-                .as_any()
-                .downcast_ref::<Vec<Change<T>>>()
-                .map(|c| c.as_slice())
-                .unwrap_or(&[]);
-            Box::new(operators::flat_map_changes(changes, |t| f_inc(t))) as Box<dyn AnyChanges>
-        }));
+        self.incremental_fns[id.index()] = Some(Box::new(
+            move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+                let changes = input_changes[0]
+                    .as_any()
+                    .downcast_ref::<Vec<Change<T>>>()
+                    .map(|c| c.as_slice())
+                    .unwrap_or(&[]);
+                Box::new(operators::flat_map_changes(changes, |t| f_inc(t))) as Box<dyn AnyChanges>
+            },
+        ));
 
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -883,58 +909,60 @@ impl Database {
 
         // Store the incremental function
         // Join requires state of both inputs to process changes from either side
-        self.incremental_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
-            let left_changes = input_changes[0]
-                .as_any()
-                .downcast_ref::<Vec<Change<L>>>()
-                .map(|c| c.as_slice())
-                .unwrap_or(&[]);
-            let right_changes = input_changes[1]
-                .as_any()
-                .downcast_ref::<Vec<Change<R>>>()
-                .map(|c| c.as_slice())
-                .unwrap_or(&[]);
+        self.incremental_fns[id.index()] = Some(Box::new(
+            move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+                let left_changes = input_changes[0]
+                    .as_any()
+                    .downcast_ref::<Vec<Change<L>>>()
+                    .map(|c| c.as_slice())
+                    .unwrap_or(&[]);
+                let right_changes = input_changes[1]
+                    .as_any()
+                    .downcast_ref::<Vec<Change<R>>>()
+                    .map(|c| c.as_slice())
+                    .unwrap_or(&[]);
 
-            // Get current states (BEFORE applying changes - states are updated after)
-            let left_state = graph
-                .get(left_id)
-                .state
-                .as_any()
-                .downcast_ref::<Multiset<L>>()
-                .cloned()
-                .unwrap_or_default();
-            let right_state = graph
-                .get(right_id)
-                .state
-                .as_any()
-                .downcast_ref::<Multiset<R>>()
-                .cloned()
-                .unwrap_or_default();
+                // Get current states (BEFORE applying changes - states are updated after)
+                let left_state = graph
+                    .get(left_id)
+                    .state
+                    .as_any()
+                    .downcast_ref::<Multiset<L>>()
+                    .cloned()
+                    .unwrap_or_default();
+                let right_state = graph
+                    .get(right_id)
+                    .state
+                    .as_any()
+                    .downcast_ref::<Multiset<R>>()
+                    .cloned()
+                    .unwrap_or_default();
 
-            let mut output = Vec::new();
+                let mut output = Vec::new();
 
-            // Process left changes against right state
-            if !left_changes.is_empty() {
-                output.extend(operators::join_changes_left(
-                    left_changes,
-                    &right_state,
-                    |l| kl_inc(l),
-                    |r| kr_inc(r),
-                ));
-            }
+                // Process left changes against right state
+                if !left_changes.is_empty() {
+                    output.extend(operators::join_changes_left(
+                        left_changes,
+                        &right_state,
+                        |l| kl_inc(l),
+                        |r| kr_inc(r),
+                    ));
+                }
 
-            // Process right changes against left state
-            if !right_changes.is_empty() {
-                output.extend(operators::join_changes_right(
-                    &left_state,
-                    right_changes,
-                    |l| kl_inc(l),
-                    |r| kr_inc(r),
-                ));
-            }
+                // Process right changes against left state
+                if !right_changes.is_empty() {
+                    output.extend(operators::join_changes_right(
+                        &left_state,
+                        right_changes,
+                        |l| kl_inc(l),
+                        |r| kr_inc(r),
+                    ));
+                }
 
-            Box::new(output) as Box<dyn AnyChanges>
-        }));
+                Box::new(output) as Box<dyn AnyChanges>
+            },
+        ));
 
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -952,7 +980,12 @@ impl Database {
                 .downcast_ref::<Multiset<R>>()
                 .cloned()
                 .unwrap_or_default();
-            let output = operators::join(&left_coll, &right_coll, |l| kl_recompute(l), |r| kr_recompute(r));
+            let output = operators::join(
+                &left_coll,
+                &right_coll,
+                |l| kl_recompute(l),
+                |r| kr_recompute(r),
+            );
             Box::new(output) as Box<dyn AnyCollection>
         }));
 
@@ -1005,22 +1038,24 @@ impl Database {
         self.apply_fns[id.index()] = Some(Self::make_apply_fn::<T>());
 
         // Store the incremental function - union just combines changes
-        self.incremental_fns[id.index()] = Some(Box::new(move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
-            let left_changes = input_changes[0]
-                .as_any()
-                .downcast_ref::<Vec<Change<T>>>()
-                .cloned()
-                .unwrap_or_default();
-            let right_changes = input_changes[1]
-                .as_any()
-                .downcast_ref::<Vec<Change<T>>>()
-                .cloned()
-                .unwrap_or_default();
+        self.incremental_fns[id.index()] = Some(Box::new(
+            move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+                let left_changes = input_changes[0]
+                    .as_any()
+                    .downcast_ref::<Vec<Change<T>>>()
+                    .cloned()
+                    .unwrap_or_default();
+                let right_changes = input_changes[1]
+                    .as_any()
+                    .downcast_ref::<Vec<Change<T>>>()
+                    .cloned()
+                    .unwrap_or_default();
 
-            let mut output = left_changes;
-            output.extend(right_changes);
-            Box::new(output) as Box<dyn AnyChanges>
-        }));
+                let mut output = left_changes;
+                output.extend(right_changes);
+                Box::new(output) as Box<dyn AnyChanges>
+            },
+        ));
 
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -1089,29 +1124,31 @@ impl Database {
 
         // Store the incremental function
         // Distinct needs to track when multiplicities cross the 0 boundary
-        self.incremental_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
-            let changes = input_changes[0]
-                .as_any()
-                .downcast_ref::<Vec<Change<T>>>()
-                .map(|c| c.as_slice())
-                .unwrap_or(&[]);
+        self.incremental_fns[id.index()] = Some(Box::new(
+            move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+                let changes = input_changes[0]
+                    .as_any()
+                    .downcast_ref::<Vec<Change<T>>>()
+                    .map(|c| c.as_slice())
+                    .unwrap_or(&[]);
 
-            // Get current input state (before changes are applied)
-            let old_input = graph
-                .get(input_id)
-                .state
-                .as_any()
-                .downcast_ref::<Multiset<T>>()
-                .cloned()
-                .unwrap_or_default();
+                // Get current input state (before changes are applied)
+                let old_input = graph
+                    .get(input_id)
+                    .state
+                    .as_any()
+                    .downcast_ref::<Multiset<T>>()
+                    .cloned()
+                    .unwrap_or_default();
 
-            // Compute new input state by applying changes
-            let mut new_input = old_input.clone();
-            new_input.apply_changes(changes.iter().cloned());
+                // Compute new input state by applying changes
+                let mut new_input = old_input.clone();
+                new_input.apply_changes(changes.iter().cloned());
 
-            // Use the distinct_changes helper
-            Box::new(operators::distinct_changes(&old_input, &new_input)) as Box<dyn AnyChanges>
-        }));
+                // Use the distinct_changes helper
+                Box::new(operators::distinct_changes(&old_input, &new_input)) as Box<dyn AnyChanges>
+            },
+        ));
 
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -1267,7 +1304,8 @@ impl Database {
                 .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
-            let (_, output) = operators::group_max_init(&input_coll, &key_fn_clone, &value_fn_clone);
+            let (_, output) =
+                operators::group_max_init(&input_coll, &key_fn_clone, &value_fn_clone);
             Box::new(output) as Box<dyn AnyCollection>
         }));
 
@@ -1332,7 +1370,8 @@ impl Database {
                 .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
-            let (_, output) = operators::group_min_init(&input_coll, &key_fn_clone, &value_fn_clone);
+            let (_, output) =
+                operators::group_min_init(&input_coll, &key_fn_clone, &value_fn_clone);
             Box::new(output) as Box<dyn AnyCollection>
         }));
 
@@ -1423,11 +1462,7 @@ impl Database {
     ///
     /// For each distinct key K, outputs (K, count) where count is the number
     /// of tuples with that key (weighted by multiplicity).
-    pub fn group_count<T, K, FK>(
-        &mut self,
-        input: Relation<T>,
-        key_fn: FK,
-    ) -> Relation<(K, i64)>
+    pub fn group_count<T, K, FK>(&mut self, input: Relation<T>, key_fn: FK) -> Relation<(K, i64)>
     where
         T: Tuple + Send + Sync,
         K: Tuple + Send + Sync,
@@ -1474,9 +1509,12 @@ impl Database {
             .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
-        let output = operators::aggregate(&input_coll, &key_fn, |_| (), |k, vals| {
-            operators::count(k, vals)
-        });
+        let output = operators::aggregate(
+            &input_coll,
+            &key_fn,
+            |_| (),
+            |k, vals| operators::count(k, vals),
+        );
         self.graph.get_mut(id).state = Box::new(output);
         self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(K, i64)>());
 
@@ -1547,32 +1585,35 @@ impl Database {
         let base_id = base.id;
         let recursive_id = recursive.id;
 
-        self.stratified_ops.push(StratifiedOp::Feedback(FeedbackLoop {
-            var_id,
-            compute_input: Box::new(move |graph: &DataflowGraph| {
-                let base_coll = graph
-                    .get(base_id)
-                    .state
-                    .as_any()
-                    .downcast_ref::<Multiset<T>>()
-                    .cloned()
-                    .unwrap_or_default();
+        self.stratified_ops
+            .push(StratifiedOp::Feedback(FeedbackLoop {
+                var_id,
+                compute_input: Box::new(move |graph: &DataflowGraph| {
+                    let base_coll = graph
+                        .get(base_id)
+                        .state
+                        .as_any()
+                        .downcast_ref::<Multiset<T>>()
+                        .cloned()
+                        .unwrap_or_default();
 
-                let recursive_coll = graph
-                    .get(recursive_id)
-                    .state
-                    .as_any()
-                    .downcast_ref::<Multiset<T>>()
-                    .cloned()
-                    .unwrap_or_default();
+                    let recursive_coll = graph
+                        .get(recursive_id)
+                        .state
+                        .as_any()
+                        .downcast_ref::<Multiset<T>>()
+                        .cloned()
+                        .unwrap_or_default();
 
-                // Compute the input: distinct(union(base, recursive))
-                Box::new(operators::distinct(&operators::union(&base_coll, &recursive_coll)))
-                    as Box<dyn AnyCollection>
-            }),
-            input_totals: Box::new(Multiset::<T>::new()),
-            ops: Box::new(TypedFeedbackOps::<T>::new()),
-        }));
+                    // Compute the input: distinct(union(base, recursive))
+                    Box::new(operators::distinct(&operators::union(
+                        &base_coll,
+                        &recursive_coll,
+                    ))) as Box<dyn AnyCollection>
+                }),
+                input_totals: Box::new(Multiset::<T>::new()),
+                ops: Box::new(TypedFeedbackOps::<T>::new()),
+            }));
 
         // Run stratified fixpoint for all feedback loops
         self.run_stratified_fixpoint();
@@ -1600,35 +1641,38 @@ impl Database {
         let base_id = base.id;
         let recursive_id = recursive.id;
 
-        self.stratified_ops.push(StratifiedOp::Feedback(FeedbackLoop {
-            var_id,
-            compute_input: Box::new(move |graph: &DataflowGraph| {
-                let base_coll = graph
-                    .get(base_id)
-                    .state
-                    .as_any()
-                    .downcast_ref::<Multiset<T>>()
-                    .cloned()
-                    .unwrap_or_default();
+        self.stratified_ops
+            .push(StratifiedOp::Feedback(FeedbackLoop {
+                var_id,
+                compute_input: Box::new(move |graph: &DataflowGraph| {
+                    let base_coll = graph
+                        .get(base_id)
+                        .state
+                        .as_any()
+                        .downcast_ref::<Multiset<T>>()
+                        .cloned()
+                        .unwrap_or_default();
 
-                let recursive_coll = graph
-                    .get(recursive_id)
-                    .state
-                    .as_any()
-                    .downcast_ref::<Multiset<T>>()
-                    .cloned()
-                    .unwrap_or_default();
+                    let recursive_coll = graph
+                        .get(recursive_id)
+                        .state
+                        .as_any()
+                        .downcast_ref::<Multiset<T>>()
+                        .cloned()
+                        .unwrap_or_default();
 
-                // Compute the input: distinct(union(base, recursive))
-                // This is Collection<T>, not Collection<(T, CommitId)>
-                Box::new(operators::distinct(&operators::union(&base_coll, &recursive_coll)))
-                    as Box<dyn AnyCollection>
-            }),
-            // input_totals is Collection<T> (the seen set)
-            input_totals: Box::new(Multiset::<T>::new()),
-            // TimestampedFeedbackOps handles the T -> (T, CommitId) conversion
-            ops: Box::new(TimestampedFeedbackOps::<T>::new()),
-        }));
+                    // Compute the input: distinct(union(base, recursive))
+                    // This is Collection<T>, not Collection<(T, CommitId)>
+                    Box::new(operators::distinct(&operators::union(
+                        &base_coll,
+                        &recursive_coll,
+                    ))) as Box<dyn AnyCollection>
+                }),
+                // input_totals is Collection<T> (the seen set)
+                input_totals: Box::new(Multiset::<T>::new()),
+                // TimestampedFeedbackOps handles the T -> (T, CommitId) conversion
+                ops: Box::new(TimestampedFeedbackOps::<T>::new()),
+            }));
 
         // Run stratified fixpoint for all feedback loops
         self.run_stratified_fixpoint();
@@ -1797,7 +1841,8 @@ impl Database {
             if node.is_input() && !node.pending_changes.is_empty() {
                 // Take the pending changes - we'll apply them as we propagate
                 let changes = self.graph.get_mut(node_id).pending_changes.clone_empty();
-                let changes = std::mem::replace(&mut self.graph.get_mut(node_id).pending_changes, changes);
+                let changes =
+                    std::mem::replace(&mut self.graph.get_mut(node_id).pending_changes, changes);
                 if !changes.is_empty() {
                     pending.insert(node_id, changes);
                 }
@@ -1845,7 +1890,8 @@ impl Database {
                 .iter()
                 .enumerate()
                 .map(|(i, &input_id)| {
-                    pending.get(&input_id)
+                    pending
+                        .get(&input_id)
                         .map(|c| c.as_ref())
                         .unwrap_or(empty_changes[i].as_ref())
                 })
@@ -1892,7 +1938,7 @@ impl Database {
             ($t:ty) => {
                 if let (Some(state), Some(changes)) = (
                     node.state.as_any_mut().downcast_mut::<Multiset<$t>>(),
-                    changes.as_any().downcast_ref::<Vec<Change<$t>>>()
+                    changes.as_any().downcast_ref::<Vec<Change<$t>>>(),
                 ) {
                     state.apply_changes(changes.iter().cloned());
                     return;
@@ -1916,14 +1962,14 @@ impl Database {
 
     /// Get an iterator over feedback loops (for pop operations).
     fn feedback_iter(&self) -> impl Iterator<Item = (usize, &FeedbackLoop)> {
-        self.stratified_ops.iter().enumerate().filter_map(|(i, op)| {
-            match op {
+        self.stratified_ops
+            .iter()
+            .enumerate()
+            .filter_map(|(i, op)| match op {
                 StratifiedOp::Feedback(fl) => Some((i, fl)),
                 StratifiedOp::Interrupt { .. } => None,
-            }
-        })
+            })
     }
-
 
     // ========================================================================
     // Checkpoints
@@ -2037,7 +2083,9 @@ impl Database {
                 index: i,
                 var_id: fl.var_id,
                 outputs: frame.get_feedback_outputs(fl.var_id).map(|o| o.clone_box()),
-                input_deltas: frame.get_feedback_input_deltas(fl.var_id).map(|d| d.clone_box()),
+                input_deltas: frame
+                    .get_feedback_input_deltas(fl.var_id)
+                    .map(|d| d.clone_box()),
             })
             .collect();
 
@@ -2059,10 +2107,8 @@ impl Database {
                     StratifiedOp::Feedback(fl) => fl,
                     _ => unreachable!(),
                 };
-                fl.ops.subtract_from_input_totals(
-                    fl.input_totals.as_mut(),
-                    input_deltas.as_ref(),
-                );
+                fl.ops
+                    .subtract_from_input_totals(fl.input_totals.as_mut(), input_deltas.as_ref());
             }
         }
 
@@ -2079,10 +2125,8 @@ impl Database {
                         StratifiedOp::Feedback(fl) => fl,
                         _ => unreachable!(),
                     };
-                    fl.ops.get_positive_in_totals(
-                        fl.input_totals.as_ref(),
-                        outputs.as_ref(),
-                    )
+                    fl.ops
+                        .get_positive_in_totals(fl.input_totals.as_ref(), outputs.as_ref())
                 };
 
                 if !still_positive.is_empty() {
@@ -2415,7 +2459,10 @@ mod tests {
 
         // Commit ID should have advanced (once per feedback iteration)
         let commit_after_insert = db.commit_id();
-        assert!(commit_after_insert > CommitId(0), "Commit ID should advance during feedback");
+        assert!(
+            commit_after_insert > CommitId(0),
+            "Commit ID should advance during feedback"
+        );
 
         // Check the paths_with_commit relation
         let paths_with_ids: Vec<_> = db.collect(paths_with_commit);
@@ -2619,7 +2666,8 @@ mod tests {
         assert!(
             id_1_3 > id_1_2,
             "Length-2 path should be discovered after length-1: {:?} vs {:?}",
-            id_1_3, id_1_2
+            id_1_3,
+            id_1_2
         );
         assert_eq!(id_1_3, id_2_4, "Length-2 paths should have same commit ID");
 
@@ -2627,7 +2675,8 @@ mod tests {
         assert!(
             id_1_4 > id_1_3,
             "Length-3 path should be discovered after length-2: {:?} vs {:?}",
-            id_1_4, id_1_3
+            id_1_4,
+            id_1_3
         );
     }
 }

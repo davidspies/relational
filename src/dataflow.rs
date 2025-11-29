@@ -3,9 +3,9 @@
 use std::any::Any;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::Tuple;
 use crate::change::Change;
 use crate::collection::Multiset;
-use crate::Tuple;
 
 /// A unique identifier for a node in the dataflow graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -107,11 +107,19 @@ impl<T: Tuple + Send + Sync> AnyChanges for Vec<Change<T>> {
 }
 
 /// A type-erased operator function.
-pub type OperatorFn = Box<dyn Fn(&[&dyn Any], &dyn AnyCollection) -> (Box<dyn AnyCollection>, Box<dyn AnyChanges>) + Send + Sync>;
+pub type OperatorFn = Box<
+    dyn Fn(&[&dyn Any], &dyn AnyCollection) -> (Box<dyn AnyCollection>, Box<dyn AnyChanges>)
+        + Send
+        + Sync,
+>;
 
 /// A type-erased incremental operator function.
 /// Takes: input changes, input states, output state -> output changes
-pub type IncrementalOpFn = Box<dyn Fn(&[&dyn AnyChanges], &[&dyn AnyCollection], &dyn AnyCollection) -> Box<dyn AnyChanges> + Send + Sync>;
+pub type IncrementalOpFn = Box<
+    dyn Fn(&[&dyn AnyChanges], &[&dyn AnyCollection], &dyn AnyCollection) -> Box<dyn AnyChanges>
+        + Send
+        + Sync,
+>;
 
 /// A node in the dataflow graph.
 pub struct Node {
@@ -200,11 +208,17 @@ impl DataflowGraph {
         self.create_input_internal::<T>(name, true)
     }
 
-    fn create_input_internal<T: Tuple + Send + Sync>(&mut self, name: &str, persistent: bool) -> NodeId {
+    fn create_input_internal<T: Tuple + Send + Sync>(
+        &mut self,
+        name: &str,
+        persistent: bool,
+    ) -> NodeId {
         let id = NodeId(self.nodes.len());
         let node = Node {
             id,
-            kind: NodeKind::Input { name: name.to_string() },
+            kind: NodeKind::Input {
+                name: name.to_string(),
+            },
             inputs: Vec::new(),
             state: Box::new(Multiset::<T>::new()),
             pending_changes: Box::new(Vec::<Change<T>>::new()),
@@ -230,7 +244,9 @@ impl DataflowGraph {
         let id = NodeId(self.nodes.len());
         let node = Node {
             id,
-            kind: NodeKind::Derived { name: name.map(|s| s.to_string()) },
+            kind: NodeKind::Derived {
+                name: name.map(|s| s.to_string()),
+            },
             inputs,
             state: Box::new(Multiset::<T>::new()),
             pending_changes: Box::new(Vec::<Change<T>>::new()),
@@ -252,7 +268,9 @@ impl DataflowGraph {
         let id = NodeId(self.nodes.len());
         let node = Node {
             id,
-            kind: NodeKind::Feedback { name: name.to_string() },
+            kind: NodeKind::Feedback {
+                name: name.to_string(),
+            },
             inputs: Vec::new(),
             state: Box::new(Multiset::<T>::new()),
             pending_changes: Box::new(Vec::<Change<T>>::new()),
@@ -371,7 +389,11 @@ impl DataflowGraph {
         id: NodeId,
         changes: &[Change<T>],
     ) {
-        if let Some(state) = self.nodes[id.0].state.as_any_mut().downcast_mut::<Multiset<T>>() {
+        if let Some(state) = self.nodes[id.0]
+            .state
+            .as_any_mut()
+            .downcast_mut::<Multiset<T>>()
+        {
             state.apply_changes(changes.iter().cloned());
         }
     }
@@ -385,7 +407,11 @@ impl DataflowGraph {
         if changes.is_empty() {
             return;
         }
-        if let Some(pending) = self.nodes[id.0].pending_changes.as_any_mut().downcast_mut::<Vec<Change<T>>>() {
+        if let Some(pending) = self.nodes[id.0]
+            .pending_changes
+            .as_any_mut()
+            .downcast_mut::<Vec<Change<T>>>()
+        {
             pending.extend(changes);
         }
         self.mark_dirty(id);

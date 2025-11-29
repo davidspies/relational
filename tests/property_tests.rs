@@ -53,8 +53,12 @@ fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
                 db.delete(edges, (*a, *b));
                 db.commit();
             }
-            Op::Push => { db.push(None); }
-            Op::Pop => { db.pop(); }
+            Op::Push => {
+                db.push(None);
+            }
+            Op::Pop => {
+                db.pop();
+            }
         }
     }
 
@@ -184,8 +188,12 @@ fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
                 db.delete(persistent, *a + 100);
                 db.commit();
             }
-            Op::Push => { db.push(None); }
-            Op::Pop => { db.pop(); }
+            Op::Push => {
+                db.push(None);
+            }
+            Op::Pop => {
+                db.pop();
+            }
         }
     }
 
@@ -263,9 +271,9 @@ fn test_nested_pop_specific_case() {
         Op::InsertEdge(2, 3),
         Op::Push,
         Op::InsertEdge(3, 4),
-        Op::Pop, // Should undo (3,4)
+        Op::Pop,              // Should undo (3,4)
         Op::InsertEdge(2, 4), // This survives
-        Op::Pop, // Should undo (2,3) and (2,4)
+        Op::Pop,              // Should undo (2,3) and (2,4)
     ];
 
     let pop_result = apply_ops_with_pop(&ops);

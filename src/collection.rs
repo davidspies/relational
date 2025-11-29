@@ -30,7 +30,6 @@ impl<T: Eq + Hash> Multiset<T> {
         }
     }
 
-
     /// Check if the collection is empty.
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
@@ -104,7 +103,11 @@ impl<T: Eq + Hash> Multiset<T> {
     /// Iterate over tuples, repeating each one by its positive multiplicity.
     pub fn iter_flat(&self) -> impl Iterator<Item = &T> {
         self.data.iter().flat_map(|(tuple, diff)| {
-            let count = if diff.is_positive() { diff.0 as usize } else { 0 };
+            let count = if diff.is_positive() {
+                diff.0 as usize
+            } else {
+                0
+            };
             std::iter::repeat_n(tuple, count)
         })
     }

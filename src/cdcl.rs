@@ -8,9 +8,9 @@
 
 use std::fmt;
 
+use crate::Database;
 use crate::database::CommitId;
 use crate::relation::Relation;
-use crate::Database;
 
 /// A literal is a variable with a sign (positive or negative).
 /// Positive values represent the variable, negative values represent its negation.
@@ -235,7 +235,8 @@ impl Solver {
         let levels = db.create_input::<Level>("levels");
 
         // Decision assignments - inserted directly for decisions (with ClauseId::DECISION)
-        let decision_assignments = db.create_input::<(Lit, Level, ClauseId)>("decision_assignments");
+        let decision_assignments =
+            db.create_input::<(Lit, Level, ClauseId)>("decision_assignments");
 
         // Current level = max(levels)
         let current_level_rel = db.max(levels);
@@ -252,8 +253,8 @@ impl Solver {
         // group_min groups by lit, and for each lit picks the (level, commit_id) with min commit_id
         let assignments_with_id = db.group_min(
             prep_assignments,
-            |((lit, _, _), _)| *lit,                    // group by lit
-            |((_, level, _), id)| (*level, *id),        // value is (level, commit_id)
+            |((lit, _, _), _)| *lit,             // group by lit
+            |((_, level, _), id)| (*level, *id), // value is (level, commit_id)
         );
         // Result is (Lit, (Level, CommitId)) - extract (Lit, Level)
         let assignments = db.map(assignments_with_id, |(lit, (level, _id))| (*lit, *level));
@@ -269,12 +270,7 @@ impl Solver {
 
         // === Compute Units ===
         // Literals that are true (in assigned)
-        let clause_lit_true = db.join(
-            all_clauses,
-            assigned,
-            |(_, lit)| *lit,
-            |lit| *lit,
-        );
+        let clause_lit_true = db.join(all_clauses, assigned, |(_, lit)| *lit, |lit| *lit);
         let satisfied_clauses = db.map(clause_lit_true, |((cid, _), _)| *cid);
 
         // Literals that are assigned (either true or false)
@@ -282,13 +278,10 @@ impl Solver {
 
         // For each clause literal, check if its variable is assigned
         let clause_lit_with_var = db.map(all_clauses, |(cid, lit)| (*cid, *lit, var(*lit)));
-        let clause_assigned_lits = db.join(
-            clause_lit_with_var,
-            assigned_vars,
-            |(_, _, v)| *v,
-            |v| *v,
-        );
-        let clause_assigned_lit_ids = db.map(clause_assigned_lits, |((cid, lit, _), _)| (*cid, *lit));
+        let clause_assigned_lits =
+            db.join(clause_lit_with_var, assigned_vars, |(_, _, v)| *v, |v| *v);
+        let clause_assigned_lit_ids =
+            db.map(clause_assigned_lits, |((cid, lit, _), _)| (*cid, *lit));
 
         // Unassigned literals in clauses
         let clause_unassigned_lits = db.difference(all_clauses, clause_assigned_lit_ids);
@@ -311,12 +304,8 @@ impl Solver {
 
         // Filter out satisfied clauses
         let satisfied_set = db.map(satisfied_clauses, |cid| *cid);
-        let unit_clause_sat_check = db.join(
-            potential_units,
-            satisfied_set,
-            |(cid, _)| *cid,
-            |cid| *cid,
-        );
+        let unit_clause_sat_check =
+            db.join(potential_units, satisfied_set, |(cid, _)| *cid, |cid| *cid);
         let units_from_sat = db.map(unit_clause_sat_check, |((cid, lit), _)| (*cid, *lit));
 
         // Units = potential_units where clause is NOT satisfied
@@ -327,7 +316,8 @@ impl Solver {
         let all_clause_ids = db.map(all_clauses, |(cid, _)| *cid);
         let all_clause_ids_distinct = db.distinct(all_clause_ids);
         let clauses_with_unassigned = db.map(unassigned_count, |(cid, _)| *cid);
-        let fully_assigned_clauses = db.difference(all_clause_ids_distinct, clauses_with_unassigned);
+        let fully_assigned_clauses =
+            db.difference(all_clause_ids_distinct, clauses_with_unassigned);
         let satisfied_distinct = db.distinct(satisfied_set);
         let clause_conflicts = db.difference(fully_assigned_clauses, satisfied_distinct);
 
@@ -349,7 +339,9 @@ impl Solver {
 
         // Map conflicts to Conflict enum
         let clause_conflict_enums = db.map(clause_conflicts, |cid| Conflict::EmptyClause(*cid));
-        let direct_conflict_enums = db.map(direct_conflict_vars_distinct, |v| Conflict::DirectConflict(*v));
+        let direct_conflict_enums = db.map(direct_conflict_vars_distinct, |v| {
+            Conflict::DirectConflict(*v)
+        });
 
         // All conflicts
         let conflicts = db.union(clause_conflict_enums, direct_conflict_enums);
@@ -365,7 +357,8 @@ impl Solver {
         // Cartesian product of units with current_level (join on unit key)
         // units is (ClauseId, Lit) - we want (Lit, Level, ClauseId)
         let unit_with_level = db.join(units, current_level_rel, |_| (), |_| ());
-        let unit_lit_level_cid = db.map(unit_with_level, |((cid, lit), level)| (*lit, *level, *cid));
+        let unit_lit_level_cid =
+            db.map(unit_with_level, |((cid, lit), level)| (*lit, *level, *cid));
 
         // Combine with decision_assignments for the base case
         // decision_assignments is (Lit, Level, ClauseId) - already has DECISION as ClauseId
@@ -411,11 +404,15 @@ impl Solver {
     fn decide_internal(&mut self, lit: Lit, tried_opposite: bool) {
         self.db.push(None);
         self.current_level.inc();
-        self.decision_stack.push((self.current_level, lit, tried_opposite));
+        self.decision_stack
+            .push((self.current_level, lit, tried_opposite));
 
         // Insert the new level and the decision assignment (with ClauseId::DECISION)
         self.db.insert(self.levels, self.current_level);
-        self.db.insert(self.decision_assignments, (lit, self.current_level, ClauseId::DECISION));
+        self.db.insert(
+            self.decision_assignments,
+            (lit, self.current_level, ClauseId::DECISION),
+        );
         self.db.commit();
         // The feedback loop will automatically propagate units
     }
@@ -472,13 +469,15 @@ impl Solver {
 
     /// Check if a variable is assigned.
     pub fn is_assigned(&self, v: Var) -> bool {
-        let assigned: std::collections::HashSet<_> = self.db.collect(self.assigned).into_iter().collect();
+        let assigned: std::collections::HashSet<_> =
+            self.db.collect(self.assigned).into_iter().collect();
         assigned.contains(&Lit::pos(v)) || assigned.contains(&Lit::neg(v))
     }
 
     /// Get the truth value of a variable, if assigned.
     pub fn value(&self, v: Var) -> Option<bool> {
-        let assigned: std::collections::HashSet<_> = self.db.collect(self.assigned).into_iter().collect();
+        let assigned: std::collections::HashSet<_> =
+            self.db.collect(self.assigned).into_iter().collect();
         if assigned.contains(&Lit::pos(v)) {
             Some(true)
         } else if assigned.contains(&Lit::neg(v)) {
@@ -512,12 +511,18 @@ impl Solver {
     /// Get the causes (implication graph) as a structured data type.
     /// Returns HashMap<Lit, BTreeMap<CommitId, Multiset<(ClauseId, Level)>>>
     /// For each literal, this maps each CommitId to the multiset of (ClauseId, Level) that derived it at that commit.
-    pub fn get_causes(&self) -> std::collections::HashMap<Lit, std::collections::BTreeMap<CommitId, crate::Multiset<(ClauseId, Level)>>> {
-        use std::collections::{HashMap, BTreeMap};
+    pub fn get_causes(
+        &self,
+    ) -> std::collections::HashMap<
+        Lit,
+        std::collections::BTreeMap<CommitId, crate::Multiset<(ClauseId, Level)>>,
+    > {
         use crate::Multiset;
+        use std::collections::{BTreeMap, HashMap};
 
         let raw: Vec<((Lit, CommitId), (ClauseId, Level))> = self.db.collect(self.causes);
-        let mut result: HashMap<Lit, BTreeMap<CommitId, Multiset<(ClauseId, Level)>>> = HashMap::new();
+        let mut result: HashMap<Lit, BTreeMap<CommitId, Multiset<(ClauseId, Level)>>> =
+            HashMap::new();
 
         for ((lit, commit_id), (clause_id, level)) in raw {
             result
@@ -559,7 +564,8 @@ impl Solver {
                         }
 
                         // Get the decision at current level
-                        let (_, decision_lit, tried_both) = self.decision_stack.last().copied().unwrap();
+                        let (_, decision_lit, tried_both) =
+                            self.decision_stack.last().copied().unwrap();
 
                         // Calculate previous level
                         let prev_level = Level::new(self.current_level.raw().saturating_sub(1));
@@ -579,7 +585,6 @@ impl Solver {
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -601,8 +606,8 @@ mod tests {
         // (x1 OR x2) AND (x1 OR NOT x2)
         // SAT: x1 = true
         let mut solver = Solver::new(Var::new(2));
-        solver.add_clause(cid(1), &[lit(1), lit(2)]);   // x1 OR x2
-        solver.add_clause(cid(2), &[lit(1), lit(-2)]);  // x1 OR NOT x2
+        solver.add_clause(cid(1), &[lit(1), lit(2)]); // x1 OR x2
+        solver.add_clause(cid(2), &[lit(1), lit(-2)]); // x1 OR NOT x2
 
         assert!(solver.solve());
         assert_eq!(solver.value(Var::new(1)), Some(true));
@@ -613,8 +618,8 @@ mod tests {
         // (x1) AND (NOT x1)
         // UNSAT
         let mut solver = Solver::new(Var::new(1));
-        solver.add_clause(cid(1), &[lit(1)]);   // x1
-        solver.add_clause(cid(2), &[lit(-1)]);  // NOT x1
+        solver.add_clause(cid(1), &[lit(1)]); // x1
+        solver.add_clause(cid(2), &[lit(-1)]); // NOT x1
 
         assert!(!solver.solve());
     }
@@ -624,9 +629,9 @@ mod tests {
         // (x1) AND (NOT x1 OR x2) AND (NOT x2 OR x3)
         // Unit prop: x1=T -> x2=T -> x3=T
         let mut solver = Solver::new(Var::new(3));
-        solver.add_clause(cid(1), &[lit(1)]);              // x1
-        solver.add_clause(cid(2), &[lit(-1), lit(2)]);     // NOT x1 OR x2
-        solver.add_clause(cid(3), &[lit(-2), lit(3)]);     // NOT x2 OR x3
+        solver.add_clause(cid(1), &[lit(1)]); // x1
+        solver.add_clause(cid(2), &[lit(-1), lit(2)]); // NOT x1 OR x2
+        solver.add_clause(cid(3), &[lit(-2), lit(3)]); // NOT x2 OR x3
 
         assert!(solver.solve());
         assert_eq!(solver.value(Var::new(1)), Some(true));
@@ -639,10 +644,10 @@ mod tests {
         // (x1 OR x2) AND (NOT x1 OR x2) AND (x1 OR NOT x2) AND (NOT x1 OR NOT x2)
         // This is UNSAT (pigeon hole for 2 pigeons, 1 hole)
         let mut solver = Solver::new(Var::new(2));
-        solver.add_clause(cid(1), &[lit(1), lit(2)]);      // x1 OR x2
-        solver.add_clause(cid(2), &[lit(-1), lit(2)]);     // NOT x1 OR x2
-        solver.add_clause(cid(3), &[lit(1), lit(-2)]);     // x1 OR NOT x2
-        solver.add_clause(cid(4), &[lit(-1), lit(-2)]);    // NOT x1 OR NOT x2
+        solver.add_clause(cid(1), &[lit(1), lit(2)]); // x1 OR x2
+        solver.add_clause(cid(2), &[lit(-1), lit(2)]); // NOT x1 OR x2
+        solver.add_clause(cid(3), &[lit(1), lit(-2)]); // x1 OR NOT x2
+        solver.add_clause(cid(4), &[lit(-1), lit(-2)]); // NOT x1 OR NOT x2
 
         assert!(!solver.solve());
     }

@@ -695,7 +695,10 @@ fn test_persistent_vs_regular_inputs() {
     // Decisions should be restored (2 removed)
     let decisions_result: Vec<_> = db.collect(decisions);
     assert!(decisions_result.contains(&1));
-    assert!(!decisions_result.contains(&2), "Decision 2 should be undone");
+    assert!(
+        !decisions_result.contains(&2),
+        "Decision 2 should be undone"
+    );
     assert_eq!(decisions_result.len(), 1);
 
     // Learned clauses should persist (200 kept)
@@ -827,7 +830,10 @@ fn test_persistent_delete() {
     let result: Vec<_> = db.collect(persistent);
     assert_eq!(result.len(), 1);
     assert!(result.contains(&200));
-    assert!(!result.contains(&100), "Delete on persistent should survive pop");
+    assert!(
+        !result.contains(&100),
+        "Delete on persistent should survive pop"
+    );
 }
 
 /// Test feedback_with_id with persistent inputs and pop.
@@ -936,9 +942,18 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
         paths.iter().any(|((a, b), _)| *a == from && *b == to)
     };
 
-    assert!(has_path(&paths_after, 1, 2), "Should have path 1->2 after pop");
-    assert!(has_path(&paths_after, 2, 3), "Should have path 2->3 after pop");
-    assert!(has_path(&paths_after, 1, 3), "Should have path 1->3 after pop");
+    assert!(
+        has_path(&paths_after, 1, 2),
+        "Should have path 1->2 after pop"
+    );
+    assert!(
+        has_path(&paths_after, 2, 3),
+        "Should have path 2->3 after pop"
+    );
+    assert!(
+        has_path(&paths_after, 1, 3),
+        "Should have path 1->3 after pop"
+    );
 
     // (1,2) should retain its commit ID since it was not in the popped frame
     let commit_1_2_after = get_commit_id(&paths_after, 1, 2);

@@ -5,19 +5,16 @@
 
 use std::collections::HashMap;
 
+use crate::Tuple;
 use crate::change::{Change, Diff};
 use crate::collection::Multiset;
-use crate::Tuple;
 
 // ============================================================================
 // Operator Definitions (non-trait based for simplicity)
 // ============================================================================
 
 /// Map operator: transforms each tuple using a function.
-pub fn map<T: Tuple, U: Tuple, F: Fn(&T) -> U>(
-    input: &Multiset<T>,
-    f: F,
-) -> Multiset<U> {
+pub fn map<T: Tuple, U: Tuple, F: Fn(&T) -> U>(input: &Multiset<T>, f: F) -> Multiset<U> {
     let mut output = Multiset::new();
     for (tuple, diff) in input.iter_with_multiplicity() {
         output.apply_change(Change::new(f(tuple), diff));
@@ -31,14 +28,14 @@ pub fn map_changes<T: Tuple, U: Tuple, F: Fn(&T) -> U>(
     changes: &[Change<T>],
     f: F,
 ) -> Vec<Change<U>> {
-    changes.iter().map(|c| Change::new(f(&c.tuple), c.diff)).collect()
+    changes
+        .iter()
+        .map(|c| Change::new(f(&c.tuple), c.diff))
+        .collect()
 }
 
 /// Filter operator: keeps only tuples satisfying a predicate.
-pub fn filter<T: Tuple, F: Fn(&T) -> bool>(
-    input: &Multiset<T>,
-    f: F,
-) -> Multiset<T> {
+pub fn filter<T: Tuple, F: Fn(&T) -> bool>(input: &Multiset<T>, f: F) -> Multiset<T> {
     let mut output = Multiset::new();
     for (tuple, diff) in input.iter_with_multiplicity() {
         if f(tuple) {
@@ -49,15 +46,8 @@ pub fn filter<T: Tuple, F: Fn(&T) -> bool>(
 }
 
 /// Incremental filter: given input changes, produce output changes.
-pub fn filter_changes<T: Tuple, F: Fn(&T) -> bool>(
-    changes: &[Change<T>],
-    f: F,
-) -> Vec<Change<T>> {
-    changes
-        .iter()
-        .filter(|c| f(&c.tuple))
-        .cloned()
-        .collect()
+pub fn filter_changes<T: Tuple, F: Fn(&T) -> bool>(changes: &[Change<T>], f: F) -> Vec<Change<T>> {
+    changes.iter().filter(|c| f(&c.tuple)).cloned().collect()
 }
 
 /// Flat map operator: transforms each tuple into zero or more tuples.
@@ -204,7 +194,10 @@ pub fn join_changes_left<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&
     let mut right_index: HashMap<K, Vec<(B, Diff)>> = HashMap::new();
     for (tuple, diff) in right_state.iter_with_multiplicity() {
         let key = key_right(tuple);
-        right_index.entry(key).or_default().push((tuple.clone(), diff));
+        right_index
+            .entry(key)
+            .or_default()
+            .push((tuple.clone(), diff));
     }
 
     // Process left changes
@@ -234,7 +227,10 @@ pub fn join_changes_right<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(
     let mut left_index: HashMap<K, Vec<(A, Diff)>> = HashMap::new();
     for (tuple, diff) in left_state.iter_with_multiplicity() {
         let key = key_left(tuple);
-        left_index.entry(key).or_default().push((tuple.clone(), diff));
+        left_index
+            .entry(key)
+            .or_default()
+            .push((tuple.clone(), diff));
     }
 
     // Process right changes
@@ -306,7 +302,15 @@ pub fn antijoin<A: Tuple, B: Tuple, K: Tuple, FA: Fn(&A) -> K, FB: Fn(&B) -> K>(
 
 /// Group and aggregate operator.
 /// Groups tuples by key and applies an aggregation function.
-pub fn aggregate<T: Tuple, K: Tuple, V: Tuple, A: Tuple, FK: Fn(&T) -> K, FV: Fn(&T) -> V, FA: Fn(K, &[(V, Diff)]) -> A>(
+pub fn aggregate<
+    T: Tuple,
+    K: Tuple,
+    V: Tuple,
+    A: Tuple,
+    FK: Fn(&T) -> K,
+    FV: Fn(&T) -> V,
+    FA: Fn(K, &[(V, Diff)]) -> A,
+>(
     input: &Multiset<T>,
     key_fn: FK,
     value_fn: FV,
