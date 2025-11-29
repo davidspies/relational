@@ -11,7 +11,7 @@ where
     T: Tuple,
     U: Tuple,
     I: IntoIterator<Item = U>,
-    F: Fn(&T) -> I,
+    F: Fn(T) -> I,
     R: Relation<T>,
 {
     inner: R,
@@ -24,14 +24,14 @@ where
     T: Tuple + 'static,
     U: Tuple + 'static,
     I: IntoIterator<Item = U> + 'static,
-    F: Fn(&T) -> I + 'static,
+    F: Fn(T) -> I + 'static,
     R: Relation<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(&U, Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut(U, Diff)) {
         let f = &self.f;
         self.inner.foreach(&mut |t, diff| {
             for u in f(t) {
-                consumer(&u, diff);
+                consumer(u, diff);
             }
         });
     }
@@ -43,7 +43,7 @@ where
     T: Tuple + 'static,
     U: Tuple + 'static,
     I: IntoIterator<Item = U> + 'static,
-    F: Fn(&T) -> I + 'static,
+    F: Fn(T) -> I + 'static,
     R: Relation<T>,
 {
     FlatMapRelation {

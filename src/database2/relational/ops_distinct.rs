@@ -25,14 +25,14 @@ where
     T: Tuple + 'static,
     R: Relation<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(&T, Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
         let counts = &mut self.counts;
         self.inner.foreach(&mut |t, diff| {
-            let old_count = *counts.get(t).unwrap_or(&0);
+            let old_count = *counts.get(&t).unwrap_or(&0);
             let new_count = old_count + diff.0;
 
             if new_count == 0 {
-                counts.remove(t);
+                counts.remove(&t);
             } else {
                 counts.insert(t.clone(), new_count);
             }

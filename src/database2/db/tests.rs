@@ -19,7 +19,7 @@ fn test_db_create_input_and_commit() {
     db.commit();
     rel.foreach(&mut |t, diff| {
         assert!(diff.0 > 0);
-        assert!(*t == 1 || *t == 2);
+        assert!(t == 1 || t == 2);
         count += 1;
     });
     assert_eq!(count, 2);
@@ -36,7 +36,7 @@ fn test_db_push_pop_simple() {
 
     // Drain initial changes
     let mut values = Vec::new();
-    rel.foreach(&mut |t, _| values.push(*t));
+    rel.foreach(&mut |t, _| values.push(t));
     assert_eq!(values, vec![1]);
 
     // Push checkpoint
@@ -49,7 +49,7 @@ fn test_db_push_pop_simple() {
 
     // Verify changes are there
     values.clear();
-    rel.foreach(&mut |t, _| values.push(*t));
+    rel.foreach(&mut |t, _| values.push(t));
     values.sort();
     assert_eq!(values, vec![2, 3]);
 
@@ -59,7 +59,7 @@ fn test_db_push_pop_simple() {
     // Pull the undo changes
     let mut undos = Vec::new();
     rel.foreach(&mut |t, diff| {
-        undos.push((*t, diff.0));
+        undos.push((t, diff.0));
     });
     undos.sort();
     assert_eq!(undos, vec![(2, -1), (3, -1)]);

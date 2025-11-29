@@ -37,14 +37,14 @@ where
     FV: Fn(&T) -> V + 'static,
     R: Relation<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(&(K, V), Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
         let key_fn = &self.key_fn;
         let val_fn = &self.val_fn;
         let values = &mut self.values;
 
         self.inner.foreach(&mut |t, diff| {
-            let k = key_fn(t);
-            let v = val_fn(t);
+            let k = key_fn(&t);
+            let v = val_fn(&t);
 
             let key_values = values.entry(k.clone()).or_default();
 
@@ -69,10 +69,10 @@ where
             // Output changes if max changed
             if old_max != new_max {
                 if let Some(old) = old_max {
-                    consumer(&(k.clone(), old), Diff(-1));
+                    consumer((k.clone(), old), Diff(-1));
                 }
                 if let Some(new) = new_max {
-                    consumer(&(k, new), Diff(1));
+                    consumer((k, new), Diff(1));
                 }
             }
         });

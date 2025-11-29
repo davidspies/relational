@@ -22,7 +22,7 @@ where
     T: Tuple + 'static,
     R: Relation<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(&T, Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
         self.inner.foreach(&mut |t, diff| {
             consumer(t, Diff(-diff.0));
         });
@@ -69,7 +69,7 @@ where
     L: Relation<T>,
     R: Relation<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(&T, Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
         self.left.foreach(consumer);
         self.right.foreach(consumer);
     }
@@ -81,7 +81,7 @@ where
     L: Relation<T>,
     R: Relation<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(&T, Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
         self.inner.foreach(consumer);
     }
 }

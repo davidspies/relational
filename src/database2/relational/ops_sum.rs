@@ -37,14 +37,14 @@ where
     FV: Fn(&T) -> V + 'static,
     R: Relation<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(&(K, V), Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
         let key_fn = &self.key_fn;
         let val_fn = &self.val_fn;
         let sums = &mut self.sums;
 
         self.inner.foreach(&mut |t, diff| {
-            let k = key_fn(t);
-            let v = val_fn(t);
+            let k = key_fn(&t);
+            let v = val_fn(&t);
             let delta = v * diff.0;
 
             let old_sum = sums.get(&k).cloned().unwrap_or_default();
@@ -59,10 +59,10 @@ where
 
             // Output: delete old (key, sum), insert new (key, sum)
             if old_sum != zero {
-                consumer(&(k.clone(), old_sum), Diff(-1));
+                consumer((k.clone(), old_sum), Diff(-1));
             }
             if new_sum != zero {
-                consumer(&(k, new_sum), Diff(1));
+                consumer((k, new_sum), Diff(1));
             }
         });
     }

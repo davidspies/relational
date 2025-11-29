@@ -23,7 +23,7 @@ where
     L: Relation<T>,
     R: Relation<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(&T, Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
         self.left.foreach(consumer);
         self.right.foreach(consumer);
     }

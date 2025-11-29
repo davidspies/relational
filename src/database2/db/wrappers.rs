@@ -118,32 +118,37 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWrapp
     }
 
     fn pull_and_readd(&self) {
-        let mut var = self.variable.borrow_mut();
-        let mut input = self.input.borrow_mut();
-
-        // Pull from input relation to update input_counts
-        input.foreach(&mut |tuple: &T, diff: Diff| {
-            var.update_input_count(tuple.clone(), diff);
+        // Collect first to avoid borrow conflicts
+        let mut changes = Vec::new();
+        self.input.borrow_mut().foreach(&mut |tuple: T, diff: Diff| {
+            changes.push((tuple, diff));
         });
 
-        // Now readd tuples that are still reachable
+        // Now apply to variable
+        let mut var = self.variable.borrow_mut();
+        for (tuple, diff) in changes {
+            var.update_input_count(tuple, diff);
+        }
         var.readd_reachable();
     }
 
     fn step(&self, recording: bool) -> bool {
-        let mut var = self.variable.borrow_mut();
-        let mut input = self.input.borrow_mut();
+        // Collect first to avoid borrow conflicts
+        let mut changes = Vec::new();
+        self.input.borrow_mut().foreach(&mut |tuple: T, diff: Diff| {
+            changes.push((tuple, diff));
+        });
 
-        // Pull from input relation and add positive tuples to variable
-        input.foreach(&mut |tuple: &T, diff: Diff| {
+        // Now apply to variable
+        let mut var = self.variable.borrow_mut();
+        for (tuple, diff) in changes {
             if diff.0 > 0 {
                 for _ in 0..diff.0 {
                     var.add_change(tuple.clone(), Diff(1));
                 }
             }
-        });
+        }
 
-        // Check if any new output was produced
         let _ = recording; // TODO: use for checkpoint tracking
         var.has_changes()
     }

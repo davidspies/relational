@@ -40,16 +40,16 @@ where
     RL: Relation<L>,
     RR: Relation<R>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(&(L, R), Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut((L, R), Diff)) {
         // Collect changes from both sides first to avoid borrow issues
         let mut left_changes: Vec<(L, Diff)> = Vec::new();
         let mut right_changes: Vec<(R, Diff)> = Vec::new();
 
         self.left.foreach(&mut |l, diff| {
-            left_changes.push((l.clone(), diff));
+            left_changes.push((l, diff));
         });
         self.right.foreach(&mut |r, diff| {
-            right_changes.push((r.clone(), diff));
+            right_changes.push((r, diff));
         });
 
         // Process left changes - join with existing right state
@@ -61,7 +61,7 @@ where
                 for (r, r_count) in rights {
                     let output_diff = Diff(l_diff.0 * r_count);
                     if output_diff.0 != 0 {
-                        consumer(&(l.clone(), r.clone()), output_diff);
+                        consumer((l.clone(), r.clone()), output_diff);
                     }
                 }
             }
@@ -80,7 +80,7 @@ where
                 for (l, l_count) in lefts {
                     let output_diff = Diff(l_count * r_diff.0);
                     if output_diff.0 != 0 {
-                        consumer(&(l.clone(), r.clone()), output_diff);
+                        consumer((l.clone(), r.clone()), output_diff);
                     }
                 }
             }
