@@ -126,40 +126,6 @@ impl<T: Eq + Hash> Multiset<T> {
     pub fn clear(&mut self) {
         self.data.clear();
     }
-
-    /// Compute the changes needed to transform from this collection to another.
-    pub fn diff(&self, other: &Multiset<T>) -> Vec<Change<T>>
-    where
-        T: Clone,
-    {
-        let mut changes = Vec::new();
-
-        // For each tuple in self, compute the difference
-        for (tuple, &self_diff) in &self.data {
-            let other_diff = other.get(tuple);
-            let delta = other_diff - self_diff;
-            if !delta.is_zero() {
-                changes.push(Change::new(tuple.clone(), delta));
-            }
-        }
-
-        // For tuples only in other
-        for (tuple, &other_diff) in &other.data {
-            if !self.data.contains_key(tuple) {
-                changes.push(Change::new(tuple.clone(), other_diff));
-            }
-        }
-
-        changes
-    }
-
-    /// Create a snapshot of the current state.
-    pub fn snapshot(&self) -> Multiset<T>
-    where
-        T: Clone,
-    {
-        self.clone()
-    }
 }
 
 impl<T: Eq + Hash> FromIterator<T> for Multiset<T> {
@@ -209,17 +175,5 @@ mod tests {
         coll.delete(1);
         coll.compact();
         assert!(!coll.contains(&1));
-    }
-
-    #[test]
-    fn test_collection_diff() {
-        let coll1: Multiset<i32> = [1, 2, 3].into_iter().collect();
-        let coll2: Multiset<i32> = [2, 3, 4].into_iter().collect();
-
-        let changes = coll1.diff(&coll2);
-        let mut result = coll1.clone();
-        result.apply_changes(changes);
-
-        assert_eq!(result.to_vec().len(), coll2.to_vec().len());
     }
 }

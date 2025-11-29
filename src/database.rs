@@ -10,6 +10,14 @@ use crate::operators;
 use crate::relation::{Relation, Variable};
 use crate::Tuple;
 
+/// Type-erased incremental operator function.
+/// Takes: input node IDs, graph (for reading states and pending changes) -> output changes
+/// The function is responsible for reading its inputs' states and pending changes.
+type IncrementalFn = Box<dyn Fn(&DataflowGraph, &[&dyn AnyChanges]) -> Box<dyn AnyChanges> + Send + Sync>;
+
+/// Type-erased function to apply changes to a node's state.
+type ApplyFn = Box<dyn Fn(&mut dyn AnyCollection, &dyn AnyChanges) + Send + Sync>;
+
 /// A monotonically increasing commit ID that tracks database mutations.
 ///
 /// This counter is incremented:
@@ -55,8 +63,14 @@ pub struct Database {
     checkpoint_stack: CheckpointStack,
     /// Maximum iterations for fixed-point computation.
     max_iterations: usize,
-    /// Type-erased recomputation functions for each derived node.
+    /// Type-erased recomputation functions for each derived node (legacy, being phased out).
     recompute_fns: Vec<Option<RecomputeFn>>,
+    /// Incremental operator functions for each derived node.
+    /// Takes input changes and produces output changes.
+    incremental_fns: Vec<Option<IncrementalFn>>,
+    /// Type-erased apply functions for each node.
+    /// These know how to apply changes to the node's state.
+    apply_fns: Vec<Option<ApplyFn>>,
     /// Feedback loops and interrupts in order of declaration (for stratified fixpoint).
     stratified_ops: Vec<StratifiedOp>,
     /// Whether the last fixpoint was interrupted.
@@ -363,6 +377,8 @@ impl Database {
             checkpoint_stack: CheckpointStack::new(),
             max_iterations: 1000,
             recompute_fns: Vec::new(),
+            incremental_fns: Vec::new(),
+            apply_fns: Vec::new(),
             stratified_ops: Vec::new(),
             interrupted: false,
             commit_id: CommitId(0),
@@ -389,6 +405,24 @@ impl Database {
         while self.recompute_fns.len() <= id.index() {
             self.recompute_fns.push(None);
         }
+        while self.incremental_fns.len() <= id.index() {
+            self.incremental_fns.push(None);
+        }
+        while self.apply_fns.len() <= id.index() {
+            self.apply_fns.push(None);
+        }
+    }
+
+    /// Create an apply function for a specific tuple type.
+    fn make_apply_fn<T: Tuple + Send + Sync>() -> ApplyFn {
+        Box::new(|state: &mut dyn AnyCollection, changes: &dyn AnyChanges| {
+            if let (Some(coll), Some(changes)) = (
+                state.as_any_mut().downcast_mut::<Multiset<T>>(),
+                changes.as_any().downcast_ref::<Vec<Change<T>>>(),
+            ) {
+                coll.apply_changes(changes.iter().cloned());
+            }
+        })
     }
 
     // ========================================================================
@@ -400,6 +434,7 @@ impl Database {
     pub fn create_input<T: Tuple + Send + Sync>(&mut self, name: &str) -> Relation<T> {
         let id = self.graph.create_input::<T>(name);
         self.ensure_recompute_fns_len(id);
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<T>());
         Relation::new(id)
     }
 
@@ -409,6 +444,7 @@ impl Database {
     pub fn create_persistent_input<T: Tuple + Send + Sync>(&mut self, name: &str) -> Relation<T> {
         let id = self.graph.create_persistent_input::<T>(name);
         self.ensure_recompute_fns_len(id);
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<T>());
         Relation::new(id)
     }
 
@@ -538,6 +574,7 @@ impl Database {
         F: Fn(&T) -> U + Send + Sync + 'static,
     {
         let f = Arc::new(f);
+        let f_inc = f.clone();
         let f_recompute = f.clone();
         let input_id = input.id;
 
@@ -554,7 +591,20 @@ impl Database {
         );
         self.ensure_recompute_fns_len(id);
 
-        // Store the recompute function
+        // Store the apply function for this node's output type
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<U>());
+
+        // Store the incremental function - map is purely local, no state needed
+        self.incremental_fns[id.index()] = Some(Box::new(move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+            let changes = input_changes[0]
+                .as_any()
+                .downcast_ref::<Vec<Change<T>>>()
+                .map(|c| c.as_slice())
+                .unwrap_or(&[]);
+            Box::new(operators::map_changes(changes, |t| f_inc(t))) as Box<dyn AnyChanges>
+        }));
+
+        // Store the recompute function (for initial state and fallback)
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
             let input_coll = graph
                 .get(input_id)
@@ -604,6 +654,20 @@ impl Database {
         );
         self.ensure_recompute_fns_len(id);
 
+        // Store the apply function for this node's output type
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(T, CommitId)>());
+
+        // Store the incremental function - stamps with current commit ID
+        self.incremental_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+            let changes = input_changes[0]
+                .as_any()
+                .downcast_ref::<Vec<Change<T>>>()
+                .map(|c| c.as_slice())
+                .unwrap_or(&[]);
+            let commit_id = CommitId(graph.commit_id());
+            Box::new(operators::map_changes(changes, |t| (t.clone(), commit_id))) as Box<dyn AnyChanges>
+        }));
+
         // Store the recompute function - captures current commit ID from graph
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
             let commit_id = CommitId(graph.commit_id());
@@ -641,6 +705,7 @@ impl Database {
         F: Fn(&T) -> bool + Send + Sync + 'static,
     {
         let pred = Arc::new(pred);
+        let pred_inc = pred.clone();
         let pred_recompute = pred.clone();
         let input_id = input.id;
 
@@ -656,6 +721,19 @@ impl Database {
             None,
         );
         self.ensure_recompute_fns_len(id);
+
+        // Store the apply function for this node's output type
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<T>());
+
+        // Store the incremental function - filter is purely local
+        self.incremental_fns[id.index()] = Some(Box::new(move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+            let changes = input_changes[0]
+                .as_any()
+                .downcast_ref::<Vec<Change<T>>>()
+                .map(|c| c.as_slice())
+                .unwrap_or(&[]);
+            Box::new(operators::filter_changes(changes, |t| pred_inc(t))) as Box<dyn AnyChanges>
+        }));
 
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -692,6 +770,7 @@ impl Database {
         F: Fn(&T) -> I + Send + Sync + 'static,
     {
         let f = Arc::new(f);
+        let f_inc = f.clone();
         let f_recompute = f.clone();
         let input_id = input.id;
 
@@ -707,6 +786,19 @@ impl Database {
             None,
         );
         self.ensure_recompute_fns_len(id);
+
+        // Store the apply function for this node's output type
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<U>());
+
+        // Store the incremental function - flat_map is purely local
+        self.incremental_fns[id.index()] = Some(Box::new(move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+            let changes = input_changes[0]
+                .as_any()
+                .downcast_ref::<Vec<Change<T>>>()
+                .map(|c| c.as_slice())
+                .unwrap_or(&[]);
+            Box::new(operators::flat_map_changes(changes, |t| f_inc(t))) as Box<dyn AnyChanges>
+        }));
 
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -766,6 +858,8 @@ impl Database {
     {
         let key_left = Arc::new(key_left);
         let key_right = Arc::new(key_right);
+        let kl_inc = key_left.clone();
+        let kr_inc = key_right.clone();
         let kl_recompute = key_left.clone();
         let kr_recompute = key_right.clone();
         let left_id = left.id;
@@ -783,6 +877,64 @@ impl Database {
             None,
         );
         self.ensure_recompute_fns_len(id);
+
+        // Store the apply function for this node's output type
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(L, R)>());
+
+        // Store the incremental function
+        // Join requires state of both inputs to process changes from either side
+        self.incremental_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+            let left_changes = input_changes[0]
+                .as_any()
+                .downcast_ref::<Vec<Change<L>>>()
+                .map(|c| c.as_slice())
+                .unwrap_or(&[]);
+            let right_changes = input_changes[1]
+                .as_any()
+                .downcast_ref::<Vec<Change<R>>>()
+                .map(|c| c.as_slice())
+                .unwrap_or(&[]);
+
+            // Get current states (BEFORE applying changes - states are updated after)
+            let left_state = graph
+                .get(left_id)
+                .state
+                .as_any()
+                .downcast_ref::<Multiset<L>>()
+                .cloned()
+                .unwrap_or_default();
+            let right_state = graph
+                .get(right_id)
+                .state
+                .as_any()
+                .downcast_ref::<Multiset<R>>()
+                .cloned()
+                .unwrap_or_default();
+
+            let mut output = Vec::new();
+
+            // Process left changes against right state
+            if !left_changes.is_empty() {
+                output.extend(operators::join_changes_left(
+                    left_changes,
+                    &right_state,
+                    |l| kl_inc(l),
+                    |r| kr_inc(r),
+                ));
+            }
+
+            // Process right changes against left state
+            if !right_changes.is_empty() {
+                output.extend(operators::join_changes_right(
+                    &left_state,
+                    right_changes,
+                    |l| kl_inc(l),
+                    |r| kr_inc(r),
+                ));
+            }
+
+            Box::new(output) as Box<dyn AnyChanges>
+        }));
 
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -849,6 +1001,27 @@ impl Database {
         );
         self.ensure_recompute_fns_len(id);
 
+        // Store the apply function for this node's output type
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<T>());
+
+        // Store the incremental function - union just combines changes
+        self.incremental_fns[id.index()] = Some(Box::new(move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+            let left_changes = input_changes[0]
+                .as_any()
+                .downcast_ref::<Vec<Change<T>>>()
+                .cloned()
+                .unwrap_or_default();
+            let right_changes = input_changes[1]
+                .as_any()
+                .downcast_ref::<Vec<Change<T>>>()
+                .cloned()
+                .unwrap_or_default();
+
+            let mut output = left_changes;
+            output.extend(right_changes);
+            Box::new(output) as Box<dyn AnyChanges>
+        }));
+
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
             let left_coll = graph
@@ -911,6 +1084,35 @@ impl Database {
         );
         self.ensure_recompute_fns_len(id);
 
+        // Store the apply function for this node's output type
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<T>());
+
+        // Store the incremental function
+        // Distinct needs to track when multiplicities cross the 0 boundary
+        self.incremental_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+            let changes = input_changes[0]
+                .as_any()
+                .downcast_ref::<Vec<Change<T>>>()
+                .map(|c| c.as_slice())
+                .unwrap_or(&[]);
+
+            // Get current input state (before changes are applied)
+            let old_input = graph
+                .get(input_id)
+                .state
+                .as_any()
+                .downcast_ref::<Multiset<T>>()
+                .cloned()
+                .unwrap_or_default();
+
+            // Compute new input state by applying changes
+            let mut new_input = old_input.clone();
+            new_input.apply_changes(changes.iter().cloned());
+
+            // Use the distinct_changes helper
+            Box::new(operators::distinct_changes(&old_input, &new_input)) as Box<dyn AnyChanges>
+        }));
+
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
             let input_coll = graph
@@ -957,6 +1159,9 @@ impl Database {
             None,
         );
         self.ensure_recompute_fns_len(id);
+
+        // Store the apply function for this node's output type
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<T>());
 
         // Store the recompute function
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
@@ -1021,6 +1226,8 @@ impl Database {
     ///
     /// For each distinct key K, outputs (K, max(V)) where V are all values
     /// associated with that key.
+    ///
+    /// Uses BTreeMap internally for O(1) max lookup per group.
     pub fn group_max<T, K, V, FK, FV>(
         &mut self,
         input: Relation<T>,
@@ -1051,7 +1258,7 @@ impl Database {
         );
         self.ensure_recompute_fns_len(id);
 
-        // Store the recompute function
+        // Store the recompute function using BTreeMap-based group_max
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
             let input_coll = graph
                 .get(input_id)
@@ -1060,22 +1267,11 @@ impl Database {
                 .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
-            let output = operators::aggregate(
-                &input_coll,
-                &key_fn_clone,
-                &value_fn_clone,
-                |k, vals| operators::max(k, vals),
-            );
-            // Filter out None results and unwrap
-            let mut result = Multiset::new();
-            for (opt, diff) in output.iter_with_multiplicity() {
-                if let Some(kv) = opt {
-                    result.apply_change(Change::new(kv.clone(), diff));
-                }
-            }
-            Box::new(result) as Box<dyn AnyCollection>
+            let (_, output) = operators::group_max_init(&input_coll, &key_fn_clone, &value_fn_clone);
+            Box::new(output) as Box<dyn AnyCollection>
         }));
 
+        // Compute initial state using BTreeMap-based group_max
         let input_coll = self
             .graph
             .get(input.id)
@@ -1084,17 +1280,9 @@ impl Database {
             .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
-        let output = operators::aggregate(&input_coll, &key_fn, &value_fn, |k, vals| {
-            operators::max(k, vals)
-        });
-        // Filter out None results
-        let mut result = Multiset::new();
-        for (opt, diff) in output.iter_with_multiplicity() {
-            if let Some(kv) = opt {
-                result.apply_change(Change::new(kv.clone(), diff));
-            }
-        }
-        self.graph.get_mut(id).state = Box::new(result);
+        let (_, output) = operators::group_max_init(&input_coll, &key_fn, &value_fn);
+        self.graph.get_mut(id).state = Box::new(output);
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(K, V)>());
 
         Relation::new(id)
     }
@@ -1103,6 +1291,8 @@ impl Database {
     ///
     /// For each distinct key K, outputs (K, min(V)) where V are all values
     /// associated with that key.
+    ///
+    /// Uses BTreeMap internally for O(1) min lookup per group.
     pub fn group_min<T, K, V, FK, FV>(
         &mut self,
         input: Relation<T>,
@@ -1133,7 +1323,7 @@ impl Database {
         );
         self.ensure_recompute_fns_len(id);
 
-        // Store the recompute function
+        // Store the recompute function using BTreeMap-based group_min
         self.recompute_fns[id.index()] = Some(Box::new(move |graph: &DataflowGraph| {
             let input_coll = graph
                 .get(input_id)
@@ -1142,22 +1332,11 @@ impl Database {
                 .downcast_ref::<Multiset<T>>()
                 .cloned()
                 .unwrap_or_default();
-            let output = operators::aggregate(
-                &input_coll,
-                &key_fn_clone,
-                &value_fn_clone,
-                |k, vals| operators::min(k, vals),
-            );
-            // Filter out None results and unwrap
-            let mut result = Multiset::new();
-            for (opt, diff) in output.iter_with_multiplicity() {
-                if let Some(kv) = opt {
-                    result.apply_change(Change::new(kv.clone(), diff));
-                }
-            }
-            Box::new(result) as Box<dyn AnyCollection>
+            let (_, output) = operators::group_min_init(&input_coll, &key_fn_clone, &value_fn_clone);
+            Box::new(output) as Box<dyn AnyCollection>
         }));
 
+        // Compute initial state using BTreeMap-based group_min
         let input_coll = self
             .graph
             .get(input.id)
@@ -1166,17 +1345,9 @@ impl Database {
             .downcast_ref::<Multiset<T>>()
             .cloned()
             .unwrap_or_default();
-        let output = operators::aggregate(&input_coll, &key_fn, &value_fn, |k, vals| {
-            operators::min(k, vals)
-        });
-        // Filter out None results
-        let mut result = Multiset::new();
-        for (opt, diff) in output.iter_with_multiplicity() {
-            if let Some(kv) = opt {
-                result.apply_change(Change::new(kv.clone(), diff));
-            }
-        }
-        self.graph.get_mut(id).state = Box::new(result);
+        let (_, output) = operators::group_min_init(&input_coll, &key_fn, &value_fn);
+        self.graph.get_mut(id).state = Box::new(output);
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(K, V)>());
 
         Relation::new(id)
     }
@@ -1243,6 +1414,7 @@ impl Database {
             operators::sum(k, vals)
         });
         self.graph.get_mut(id).state = Box::new(output);
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(K, i64)>());
 
         Relation::new(id)
     }
@@ -1306,6 +1478,7 @@ impl Database {
             operators::count(k, vals)
         });
         self.graph.get_mut(id).state = Box::new(output);
+        self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(K, i64)>());
 
         Relation::new(id)
     }
@@ -1583,6 +1756,16 @@ impl Database {
         // Sync commit ID to graph so recompute functions can access it
         self.graph.set_commit_id(self.commit_id.0);
 
+        // TODO: Incremental propagation is not yet working correctly with feedback loops.
+        // The key issue is that recompute_all is called during feedback fixpoint iteration,
+        // and the incremental approach requires all inputs to have been updated first.
+        // For now, fall back to full recomputation until we fix the interaction with feedback.
+        //
+        // if self.propagate_deltas() {
+        //     return;
+        // }
+
+        // Full recomputation
         let topo_order: Vec<NodeId> = self.graph.topo_order().to_vec();
 
         for &node_id in &topo_order {
@@ -1595,6 +1778,140 @@ impl Database {
                 self.graph.get_mut(node_id).state = new_state;
             }
         }
+    }
+
+    /// Incrementally propagate deltas through the dataflow graph.
+    /// Returns true if successful, false if we should fall back to full recomputation.
+    fn propagate_deltas(&mut self) -> bool {
+        // Collect pending changes from input nodes
+        let topo_order: Vec<NodeId> = self.graph.topo_order().to_vec();
+
+        // Build a map of node_id -> pending changes for this propagation round
+        // We'll populate this as we go through the topological order
+        let mut pending: std::collections::HashMap<NodeId, Box<dyn AnyChanges>> =
+            std::collections::HashMap::new();
+
+        // First, collect pending changes from all input nodes
+        for &node_id in &topo_order {
+            let node = self.graph.get(node_id);
+            if node.is_input() && !node.pending_changes.is_empty() {
+                // Take the pending changes - we'll apply them as we propagate
+                let changes = self.graph.get_mut(node_id).pending_changes.clone_empty();
+                let changes = std::mem::replace(&mut self.graph.get_mut(node_id).pending_changes, changes);
+                if !changes.is_empty() {
+                    pending.insert(node_id, changes);
+                }
+            }
+        }
+
+        // Now propagate through derived nodes in topological order
+        for &node_id in &topo_order {
+            let node = self.graph.get(node_id);
+
+            // Skip input and feedback nodes (they have their own update mechanisms)
+            if node.is_input() || node.is_feedback() {
+                continue;
+            }
+
+            // Check if we have an incremental function for this node
+            if node_id.index() >= self.incremental_fns.len() {
+                continue;
+            }
+
+            let incremental_fn = match &self.incremental_fns[node_id.index()] {
+                Some(f) => f,
+                None => continue, // Fall back to recompute for nodes without incremental
+            };
+
+            // Collect input changes for this node
+            let inputs = self.graph.get(node_id).inputs.clone();
+            let input_changes: Vec<&dyn AnyChanges> = inputs
+                .iter()
+                .filter_map(|&input_id| pending.get(&input_id).map(|c| c.as_ref()))
+                .collect();
+
+            // Skip if no inputs have changes
+            if input_changes.is_empty() || input_changes.iter().all(|c| c.is_empty()) {
+                continue;
+            }
+
+            // Build properly sized input_changes slice
+            let empty_changes: Vec<Box<dyn AnyChanges>> = inputs
+                .iter()
+                .map(|_| Box::new(Vec::<Change<()>>::new()) as Box<dyn AnyChanges>)
+                .collect();
+
+            let input_refs: Vec<&dyn AnyChanges> = inputs
+                .iter()
+                .enumerate()
+                .map(|(i, &input_id)| {
+                    pending.get(&input_id)
+                        .map(|c| c.as_ref())
+                        .unwrap_or(empty_changes[i].as_ref())
+                })
+                .collect();
+
+            // Run the incremental function
+            let output_changes = incremental_fn(&self.graph, &input_refs);
+
+            // Store output changes for dependent nodes
+            if !output_changes.is_empty() {
+                pending.insert(node_id, output_changes);
+            }
+        }
+
+        // Now apply all changes to update states
+        for (node_id, changes) in &pending {
+            self.apply_changes_to_node(*node_id, changes.as_ref());
+        }
+
+        // Clear all pending changes
+        for &node_id in &topo_order {
+            self.graph.get_mut(node_id).pending_changes.clear();
+        }
+
+        true
+    }
+
+    /// Apply type-erased changes to a node's state.
+    fn apply_changes_to_node(&mut self, node_id: NodeId, changes: &dyn AnyChanges) {
+        // This is a type-erased operation - we need to figure out the type
+        // by trying each possible type that's used in the system.
+        // This is unfortunate but necessary due to type erasure.
+
+        // The actual application is handled by the state's own methods
+        // We'll create a helper trait for this
+        let node = self.graph.get_mut(node_id);
+
+        // Use the type info we have from pending_changes to apply correctly
+        // For now, we just need to get the changes applied to state
+        // The state and changes should be of compatible types
+
+        // Try common types - this is the cost of type erasure
+        macro_rules! try_apply {
+            ($t:ty) => {
+                if let (Some(state), Some(changes)) = (
+                    node.state.as_any_mut().downcast_mut::<Multiset<$t>>(),
+                    changes.as_any().downcast_ref::<Vec<Change<$t>>>()
+                ) {
+                    state.apply_changes(changes.iter().cloned());
+                    return;
+                }
+            };
+        }
+
+        // Try common tuple types used in the system
+        try_apply!(i32);
+        try_apply!((i32, i32));
+        try_apply!(((i32, i32), (i32, i32)));
+        try_apply!((i32, CommitId));
+        try_apply!(((i32, i32), CommitId));
+        try_apply!((i32, i64));
+        try_apply!(((), i64));
+        try_apply!(((), i32));
+
+        // If no type matched, the changes won't be applied
+        // This is a limitation we'll need to address
     }
 
     /// Get an iterator over feedback loops (for pop operations).

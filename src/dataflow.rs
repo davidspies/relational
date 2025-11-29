@@ -76,6 +76,8 @@ pub trait AnyChanges: Any + Send + Sync {
     fn is_empty(&self) -> bool;
     fn len(&self) -> usize;
     fn clear(&mut self);
+    /// Create an empty version of the same type.
+    fn clone_empty(&self) -> Box<dyn AnyChanges>;
 }
 
 impl<T: Tuple + Send + Sync> AnyChanges for Vec<Change<T>> {
@@ -97,6 +99,10 @@ impl<T: Tuple + Send + Sync> AnyChanges for Vec<Change<T>> {
 
     fn clear(&mut self) {
         Vec::clear(self);
+    }
+
+    fn clone_empty(&self) -> Box<dyn AnyChanges> {
+        Box::new(Vec::<Change<T>>::new())
     }
 }
 
@@ -337,6 +343,52 @@ impl DataflowGraph {
     /// Clear all dirty flags.
     pub fn clear_dirty(&mut self) {
         self.dirty_nodes.clear();
+    }
+}
+
+impl DataflowGraph {
+    /// Get nodes that depend on the given node.
+    pub fn dependents(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        self.nodes.iter().filter_map(move |node| {
+            if node.inputs.contains(&id) {
+                Some(node.id)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Take pending changes from a node, leaving it empty.
+    pub fn take_pending_changes(&mut self, id: NodeId) -> Box<dyn AnyChanges> {
+        let node = &mut self.nodes[id.0];
+        let empty = node.pending_changes.clone_empty();
+        std::mem::replace(&mut node.pending_changes, empty)
+    }
+
+    /// Apply changes to a node's state.
+    pub fn apply_changes_to_state<T: crate::Tuple + Send + Sync>(
+        &mut self,
+        id: NodeId,
+        changes: &[Change<T>],
+    ) {
+        if let Some(state) = self.nodes[id.0].state.as_any_mut().downcast_mut::<Multiset<T>>() {
+            state.apply_changes(changes.iter().cloned());
+        }
+    }
+
+    /// Add pending changes to a node.
+    pub fn add_pending_changes<T: crate::Tuple + Send + Sync>(
+        &mut self,
+        id: NodeId,
+        changes: Vec<Change<T>>,
+    ) {
+        if changes.is_empty() {
+            return;
+        }
+        if let Some(pending) = self.nodes[id.0].pending_changes.as_any_mut().downcast_mut::<Vec<Change<T>>>() {
+            pending.extend(changes);
+        }
+        self.mark_dirty(id);
     }
 }
 
