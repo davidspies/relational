@@ -40,7 +40,12 @@ fn main() {
 
     // Verify count is correct
     let count_result: Vec<_> = db.collect(count);
-    assert_eq!(count_result, vec![((), 2)], "Count should be 2 after pop, got {:?}", count_result);
+    assert_eq!(
+        count_result,
+        vec![((), 2)],
+        "Count should be 2 after pop, got {:?}",
+        count_result
+    );
 
     println!("\nTest passed!");
 }

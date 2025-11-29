@@ -155,7 +155,11 @@ fn test_cdcl_pattern() {
     // Initially no assignments, both clauses unsatisfied
     let mut unsat: Vec<_> = db.collect(unsatisfied);
     unsat.sort();
-    assert_eq!(unsat, vec![1, 2], "Both clauses should be unsatisfied initially");
+    assert_eq!(
+        unsat,
+        vec![1, 2],
+        "Both clauses should be unsatisfied initially"
+    );
 
     // Verify all_clause_ids_distinct is correct
     let mut all_ids: Vec<_> = db.collect(all_clause_ids_distinct);
@@ -169,7 +173,11 @@ fn test_cdcl_pattern() {
 
     // Clause 1 satisfied, clause 2 unsatisfied
     let unsat_after_assign: Vec<_> = db.collect(unsatisfied);
-    assert_eq!(unsat_after_assign, vec![2], "Only clause 2 should be unsatisfied");
+    assert_eq!(
+        unsat_after_assign,
+        vec![2],
+        "Only clause 2 should be unsatisfied"
+    );
 
     // Pop and verify restoration
     db.pop();
@@ -213,5 +221,5 @@ fn test_distinct_multiplicity() {
     // Multiplicity should still be 1
     let mults_after: Vec<_> = db.iter_with_multiplicity(distinct).collect();
     assert_eq!(mults_after.len(), 1);
-    assert_eq!(mults_after[0].1 .0, 1, "Multiplicity should remain 1");
+    assert_eq!(mults_after[0].1.0, 1, "Multiplicity should remain 1");
 }

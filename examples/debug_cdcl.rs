@@ -22,7 +22,7 @@ fn main() {
     // Add clauses: (x1) AND (NOT x1)
     // Clause 1: literal 1 (x1)
     // Clause 2: literal -1 (NOT x1)
-    db.insert(clauses, (1, 1));  // clause 1 contains x1
+    db.insert(clauses, (1, 1)); // clause 1 contains x1
     db.insert(clauses, (2, -1)); // clause 2 contains NOT x1
     db.commit();
 
@@ -30,8 +30,14 @@ fn main() {
     println!("  clauses = {:?}", db.collect::<(i32, i32)>(clauses));
     println!("  assigned = {:?}", db.collect::<i32>(assigned));
     println!("  all_clause_ids = {:?}", db.collect::<i32>(all_clause_ids));
-    println!("  all_clause_ids_distinct = {:?}", db.collect::<i32>(all_clause_ids_distinct));
-    println!("  satisfied_distinct = {:?}", db.collect::<i32>(satisfied_distinct));
+    println!(
+        "  all_clause_ids_distinct = {:?}",
+        db.collect::<i32>(all_clause_ids_distinct)
+    );
+    println!(
+        "  satisfied_distinct = {:?}",
+        db.collect::<i32>(satisfied_distinct)
+    );
     println!("  unsatisfied = {:?}", db.collect::<i32>(unsatisfied));
 
     // Push and try assigning x1 = true (literal 1)
@@ -41,7 +47,10 @@ fn main() {
 
     println!("\nAfter assigning x1=true:");
     println!("  assigned = {:?}", db.collect::<i32>(assigned));
-    println!("  satisfied_distinct = {:?}", db.collect::<i32>(satisfied_distinct));
+    println!(
+        "  satisfied_distinct = {:?}",
+        db.collect::<i32>(satisfied_distinct)
+    );
     println!("  unsatisfied = {:?}", db.collect::<i32>(unsatisfied));
 
     // Clause 1 should be satisfied, clause 2 should be unsatisfied
@@ -53,7 +62,10 @@ fn main() {
 
     println!("\nAfter pop (backtrack):");
     println!("  assigned = {:?}", db.collect::<i32>(assigned));
-    println!("  satisfied_distinct = {:?}", db.collect::<i32>(satisfied_distinct));
+    println!(
+        "  satisfied_distinct = {:?}",
+        db.collect::<i32>(satisfied_distinct)
+    );
     println!("  unsatisfied = {:?}", db.collect::<i32>(unsatisfied));
 
     // Now try assigning x1 = false (literal -1)
@@ -63,7 +75,10 @@ fn main() {
 
     println!("\nAfter assigning x1=false:");
     println!("  assigned = {:?}", db.collect::<i32>(assigned));
-    println!("  satisfied_distinct = {:?}", db.collect::<i32>(satisfied_distinct));
+    println!(
+        "  satisfied_distinct = {:?}",
+        db.collect::<i32>(satisfied_distinct)
+    );
     println!("  unsatisfied = {:?}", db.collect::<i32>(unsatisfied));
 
     // Clause 2 should be satisfied, clause 1 should be unsatisfied

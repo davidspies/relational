@@ -143,11 +143,7 @@ trait FeedbackOps: Send + Sync {
     fn clone_tuples(&self, tuples: &dyn AnyCollection) -> Box<dyn AnyCollection>;
 
     /// Append insert changes to the pending changes vector.
-    fn append_insert_changes(
-        &self,
-        pending: &mut dyn AnyChanges,
-        tuples: &dyn AnyCollection,
-    );
+    fn append_insert_changes(&self, pending: &mut dyn AnyChanges, tuples: &dyn AnyCollection);
 }
 
 /// Concrete implementation of FeedbackOps for a specific tuple type.
@@ -1965,8 +1961,10 @@ impl Database {
                 }
             } else {
                 // Recompute node - compute from current (updated) input states
-                if let Some(ref recompute_fn) =
-                    self.recompute_fns.get(node_id.index()).and_then(|f| f.as_ref())
+                if let Some(ref recompute_fn) = self
+                    .recompute_fns
+                    .get(node_id.index())
+                    .and_then(|f| f.as_ref())
                 {
                     let new_state = recompute_fn(&self.graph);
                     let old_state = &self.graph.get(node_id).state;
