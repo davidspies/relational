@@ -510,14 +510,14 @@ impl Solver {
     }
 
     /// Get the causes (implication graph) as a structured data type.
-    /// Returns HashMap<Lit, BTreeMap<CommitId, Vec<(ClauseId, Level)>>>
-    /// For each literal, this maps each CommitId to the list of (ClauseId, Level) that derived it at that commit.
-    /// The Vec acts as a multiset (there can be duplicates if the same clause/level appears multiple times).
-    pub fn get_causes(&self) -> std::collections::HashMap<Lit, std::collections::BTreeMap<CommitId, Vec<(ClauseId, Level)>>> {
+    /// Returns HashMap<Lit, BTreeMap<CommitId, Multiset<(ClauseId, Level)>>>
+    /// For each literal, this maps each CommitId to the multiset of (ClauseId, Level) that derived it at that commit.
+    pub fn get_causes(&self) -> std::collections::HashMap<Lit, std::collections::BTreeMap<CommitId, crate::Multiset<(ClauseId, Level)>>> {
         use std::collections::{HashMap, BTreeMap};
+        use crate::Multiset;
 
         let raw: Vec<((Lit, CommitId), (ClauseId, Level))> = self.db.collect(self.causes);
-        let mut result: HashMap<Lit, BTreeMap<CommitId, Vec<(ClauseId, Level)>>> = HashMap::new();
+        let mut result: HashMap<Lit, BTreeMap<CommitId, Multiset<(ClauseId, Level)>>> = HashMap::new();
 
         for ((lit, commit_id), (clause_id, level)) in raw {
             result
@@ -525,7 +525,7 @@ impl Solver {
                 .or_default()
                 .entry(commit_id)
                 .or_default()
-                .push((clause_id, level));
+                .insert((clause_id, level));
         }
 
         result

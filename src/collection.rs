@@ -1,9 +1,9 @@
 //! Differential collections - multisets that track changes.
 
 use std::collections::HashMap;
+use std::hash::Hash;
 
 use crate::change::{Change, Diff};
-use crate::Tuple;
 
 /// A differential collection storing tuples with their multiplicities.
 ///
@@ -11,18 +11,18 @@ use crate::Tuple;
 /// Multiplicities can be negative during intermediate computation but typically
 /// should be non-negative in final results.
 #[derive(Debug, Clone)]
-pub struct Multiset<T: Tuple> {
+pub struct Multiset<T> {
     /// The current state: tuple -> multiplicity
     data: HashMap<T, Diff>,
 }
 
-impl<T: Tuple> Default for Multiset<T> {
+impl<T: Eq + Hash> Default for Multiset<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Tuple> Multiset<T> {
+impl<T: Eq + Hash> Multiset<T> {
     /// Create an empty collection.
     pub fn new() -> Self {
         Multiset {
@@ -110,7 +110,10 @@ impl<T: Tuple> Multiset<T> {
     }
 
     /// Convert the collection to a Vec of its tuples (with positive multiplicity).
-    pub fn to_vec(&self) -> Vec<T> {
+    pub fn to_vec(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
         self.iter().cloned().collect()
     }
 
@@ -125,7 +128,10 @@ impl<T: Tuple> Multiset<T> {
     }
 
     /// Compute the changes needed to transform from this collection to another.
-    pub fn diff(&self, other: &Multiset<T>) -> Vec<Change<T>> {
+    pub fn diff(&self, other: &Multiset<T>) -> Vec<Change<T>>
+    where
+        T: Clone,
+    {
         let mut changes = Vec::new();
 
         // For each tuple in self, compute the difference
@@ -148,12 +154,15 @@ impl<T: Tuple> Multiset<T> {
     }
 
     /// Create a snapshot of the current state.
-    pub fn snapshot(&self) -> Multiset<T> {
+    pub fn snapshot(&self) -> Multiset<T>
+    where
+        T: Clone,
+    {
         self.clone()
     }
 }
 
-impl<T: Tuple> FromIterator<T> for Multiset<T> {
+impl<T: Eq + Hash> FromIterator<T> for Multiset<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut coll = Multiset::new();
         for tuple in iter {
@@ -163,7 +172,7 @@ impl<T: Tuple> FromIterator<T> for Multiset<T> {
     }
 }
 
-impl<T: Tuple> FromIterator<Change<T>> for Multiset<T> {
+impl<T: Eq + Hash> FromIterator<Change<T>> for Multiset<T> {
     fn from_iter<I: IntoIterator<Item = Change<T>>>(iter: I) -> Self {
         let mut coll = Multiset::new();
         coll.apply_changes(iter);
