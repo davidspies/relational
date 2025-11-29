@@ -8,6 +8,7 @@
 
 use std::fmt;
 
+use crate::database::CommitId;
 use crate::relation::Relation;
 use crate::Database;
 
@@ -162,10 +163,26 @@ pub struct Solver {
     /// Learned clauses (persistent - survive backtracking)
     learned: Relation<(ClauseId, Lit)>,
 
+    /// Decision levels - we insert the current level here
+    levels: Relation<Level>,
+
+    /// Decision assignments (lit, level) - inserted directly for decisions
+    decision_assignments: Relation<(Lit, Level)>,
+
     // === Derived/State Relations ===
-    /// Current assignments: (literal, level, reason_clause)
-    /// reason_clause = 0 means decision, otherwise it's the clause that implied it
-    assignments: Relation<(Lit, Level, ClauseId)>,
+    /// Current level = max(levels)
+    /// Note: Stored to keep the relation alive, accessed via the graph
+    #[allow(dead_code)]
+    current_level_rel: Relation<Level>,
+
+    /// Prep assignments from feedback_with_id: ((lit, level), commit_id)
+    /// This accumulates all discovered assignments with their discovery time
+    /// Note: Stored to keep the relation alive, accessed via the graph
+    #[allow(dead_code)]
+    prep_assignments: Relation<((Lit, Level), CommitId)>,
+
+    /// Final assignments: (lit, level) - derived by taking min commit_id per lit
+    assignments: Relation<(Lit, Level)>,
 
     /// The "assigned" relation - just tracks which literals are assigned true
     assigned: Relation<Lit>,
@@ -177,7 +194,7 @@ pub struct Solver {
     conflicts: Relation<ClauseId>,
 
     // === Solver State ===
-    /// Current decision level.
+    /// Current decision level (local copy for convenience).
     current_level: Level,
 
     /// Next clause ID for learned clauses.
@@ -196,30 +213,42 @@ impl Solver {
     pub fn new(num_vars: Var) -> Self {
         let mut db = Database::new();
 
-        // Input relations
+        // === Input Relations ===
         let clauses = db.create_input::<(ClauseId, Lit)>("clauses");
         let learned = db.create_persistent_input::<(ClauseId, Lit)>("learned");
 
-        // State relation for assignments
-        let assignments = db.create_input::<(Lit, Level, ClauseId)>("assignments");
+        // Levels input - we insert decision levels here
+        let levels = db.create_input::<Level>("levels");
 
-        // Derived: which literals are assigned true
-        let assigned = db.map(assignments, |(lit, _, _)| *lit);
+        // Decision assignments - inserted directly for decisions
+        let decision_assignments = db.create_input::<(Lit, Level)>("decision_assignments");
+
+        // Current level = max(levels)
+        let current_level_rel = db.max(levels);
 
         // All clauses (original + learned)
         let all_clauses = db.union(clauses, learned);
 
-        // === Unit Propagation ===
-        // A clause is unit when:
-        // - It has exactly one unassigned literal
-        // - All other literals are assigned false (equivalently: 0 true literals)
-        //
-        // Since we're doing SAT, a literal being "true" means it's in `assigned`.
-        // A clause is satisfied if any literal in it is true.
-        // A clause is unit if: exactly 1 unassigned literal AND 0 true literals.
+        // === Feedback-based Unit Propagation ===
+        // prep_assignments accumulates ((Lit, Level), CommitId) via feedback_with_id
+        let (prep_var, prep_assignments) =
+            db.variable::<((Lit, Level), CommitId)>("prep_assignments");
 
+        // Final assignments: for each literal, take the entry with minimum CommitId
+        // group_min groups by lit, and for each lit picks the (level, commit_id) with min commit_id
+        let assignments_with_id = db.group_min(
+            prep_assignments,
+            |((lit, _), _)| *lit,                    // group by lit
+            |((_, level), id)| (*level, *id),        // value is (level, commit_id)
+        );
+        // Result is (Lit, (Level, CommitId)) - extract (Lit, Level)
+        let assignments = db.map(assignments_with_id, |(lit, (level, _id))| (*lit, *level));
+
+        // Derived: which literals are assigned true
+        let assigned = db.map(assignments, |(lit, _)| *lit);
+
+        // === Compute Units ===
         // Literals that are true (in assigned)
-        // For each (clause_id, lit), check if lit is true (satisfied)
         let clause_lit_true = db.join(
             all_clauses,
             assigned,
@@ -241,7 +270,7 @@ impl Solver {
         );
         let clause_assigned_lit_ids = db.map(clause_assigned_lits, |((cid, lit, _), _)| (*cid, *lit));
 
-        // Unassigned literals in clauses = all_clauses - clause_assigned_lit_ids
+        // Unassigned literals in clauses
         let clause_unassigned_lits = db.difference(all_clauses, clause_assigned_lit_ids);
 
         // Count unassigned literals per clause
@@ -260,7 +289,7 @@ impl Solver {
         );
         let potential_units = db.map(units_with_lit, |(cid, (_, lit))| (*cid, *lit));
 
-        // Filter out satisfied clauses - only propagate from unsatisfied unit clauses
+        // Filter out satisfied clauses
         let satisfied_set = db.map(satisfied_clauses, |cid| *cid);
         let unit_clause_sat_check = db.join(
             potential_units,
@@ -274,36 +303,72 @@ impl Solver {
         let units = db.difference(potential_units, units_from_sat);
 
         // === Conflict Detection ===
-        // A clause is in conflict when ALL its literals are assigned false
-        // Equivalently: 0 unassigned literals AND 0 true literals (not satisfied)
-        //
-        // Clauses with 0 unassigned literals: total_count - unassigned_count = total_count
-        // Actually, easier: clauses NOT in unassigned_count (no unassigned literals)
-
-        // Get all clause IDs
+        // Type 1: Clause conflicts (all literals false)
         let all_clause_ids = db.map(all_clauses, |(cid, _)| *cid);
         let all_clause_ids_distinct = db.distinct(all_clause_ids);
-
-        // Clauses with unassigned literals
         let clauses_with_unassigned = db.map(unassigned_count, |(cid, _)| *cid);
-
-        // Clauses with NO unassigned literals = all - clauses_with_unassigned
         let fully_assigned_clauses = db.difference(all_clause_ids_distinct, clauses_with_unassigned);
-
-        // Conflict = fully assigned AND not satisfied
         let satisfied_distinct = db.distinct(satisfied_set);
-        let conflicts = db.difference(fully_assigned_clauses, satisfied_distinct);
+        let clause_conflicts = db.difference(fully_assigned_clauses, satisfied_distinct);
+
+        // Type 2: Direct conflicts (both lit and neg(lit) assigned)
+        // Map each assigned literal to its variable
+        let assigned_with_var = db.map(assigned, |lit| (*lit, var(*lit)));
+        // Join on variable to find pairs where both polarities are assigned
+        let both_polarities = db.join(
+            assigned_with_var,
+            assigned_with_var,
+            |(_, v)| *v,
+            |(_, v)| *v,
+        );
+        // Filter to only pairs where the literals are different (one positive, one negative)
+        let conflicting_pairs = db.filter(both_polarities, |((lit1, _), (lit2, _))| lit1 != lit2);
+        // Map to a dummy conflict clause ID (use 0 to indicate direct conflict)
+        let direct_conflicts = db.map(conflicting_pairs, |_| ClauseId::new(0));
+        let direct_conflicts_distinct = db.distinct(direct_conflicts);
+
+        // All conflicts
+        let conflicts = db.union(clause_conflicts, direct_conflicts_distinct);
+
+        // === Set up interrupts for early conflict detection ===
+        // Interrupt 1: Empty clause (all literals false)
+        db.interrupt(clause_conflicts);
+
+        // Interrupt 2: Both literal and its negation assigned
+        db.interrupt(direct_conflicts_distinct);
+
+        // === Set up the feedback loop ===
+        // unit_lits: just the literals from units (without clause id)
+        let unit_lits = db.map(units, |(_, lit)| *lit);
+
+        // Cartesian product of unit_lits with current_level (join on unit key)
+        let unit_with_level = db.join(unit_lits, current_level_rel, |_| (), |_| ());
+        let unit_lit_level = db.map(unit_with_level, |(lit, level)| (*lit, *level));
+
+        // Combine with decision_assignments for the base case
+        let all_new_assignments = db.union(decision_assignments, unit_lit_level);
+
+        // Set up the feedback: prep_assignments accumulates all assignments with timestamps
+        db.feedback_with_id(prep_var, decision_assignments, all_new_assignments);
+
+        // Initialize with Level::TOP so unit propagation works at level 0
+        db.insert(levels, Level::TOP);
+        db.commit();
 
         Solver {
             db,
             clauses,
             learned,
+            levels,
+            decision_assignments,
+            current_level_rel,
+            prep_assignments,
             assignments,
             assigned,
             units,
             conflicts,
             current_level: Level::TOP,
-            next_learned_id: ClauseId::new(1_000_000), // Start learned clause IDs high to avoid collision
+            next_learned_id: ClauseId::new(1_000_000),
             num_vars,
             decision_stack: Vec::new(),
         }
@@ -323,8 +388,12 @@ impl Solver {
         self.db.push(None);
         self.current_level.inc();
         self.decision_stack.push((self.current_level, lit, tried_opposite));
-        self.db.insert(self.assignments, (lit, self.current_level, ClauseId::DECISION));
+
+        // Insert the new level and the decision assignment
+        self.db.insert(self.levels, self.current_level);
+        self.db.insert(self.decision_assignments, (lit, self.current_level));
         self.db.commit();
+        // The feedback loop will automatically propagate units
     }
 
     /// Make a decision: assign a literal at a new decision level.
@@ -334,45 +403,17 @@ impl Solver {
 
     /// Propagate units until fixpoint or conflict.
     /// Returns Ok(()) if no conflict, Err(clause_id) if conflict found.
+    ///
+    /// With the feedback-based approach, propagation happens automatically
+    /// when we commit. This method just checks for conflicts.
     pub fn propagate(&mut self) -> Result<(), ClauseId> {
-        loop {
-            // Check for conflicts first
-            let conflicts: Vec<_> = self.db.collect(self.conflicts);
-            if let Some(&cid) = conflicts.first() {
-                return Err(cid);
-            }
-
-            // Get units to propagate
-            let units: Vec<_> = self.db.collect(self.units);
-
-            // Filter out already assigned literals
-            let assigned: std::collections::HashSet<_> = self.db.collect(self.assigned).into_iter().collect();
-
-            // Check for contradictory units first
-            for (reason, lit) in &units {
-                if assigned.contains(&neg(*lit)) {
-                    // The negation is already assigned, this is a conflict!
-                    return Err(*reason);
-                }
-            }
-
-            // Filter to only truly new units
-            let new_units: Vec<_> = units
-                .into_iter()
-                .filter(|(_, lit)| !assigned.contains(lit))
-                .collect();
-
-            if new_units.is_empty() {
-                return Ok(());
-            }
-
-            // Propagate one unit at a time to catch conflicts properly
-            // (If we propagate multiple at once, we might miss detecting when
-            // two units in the same batch contradict each other)
-            let (reason, lit) = new_units[0];
-            self.db.insert(self.assignments, (lit, self.current_level, reason));
-            self.db.commit();
+        // The feedback loop has already propagated to fixpoint
+        // Just check for conflicts
+        let conflicts: Vec<_> = self.db.collect(self.conflicts);
+        if let Some(&cid) = conflicts.first() {
+            return Err(cid);
         }
+        Ok(())
     }
 
     /// Backtrack to the given level, popping decision stack entries.
@@ -396,7 +437,7 @@ impl Solver {
     }
 
     /// Get all currently assigned literals.
-    pub fn get_assignments(&self) -> Vec<(Lit, Level, ClauseId)> {
+    pub fn get_assignments(&self) -> Vec<(Lit, Level)> {
         self.db.collect(self.assignments)
     }
 
