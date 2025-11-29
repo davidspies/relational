@@ -103,6 +103,7 @@ mod change;
 mod checkpoint;
 mod collection;
 mod database;
+pub mod database2;
 mod dataflow;
 pub mod operators;
 mod relation;

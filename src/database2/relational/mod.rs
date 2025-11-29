@@ -1,0 +1,36 @@
+//! Pull-based relational operators.
+//!
+//! This module implements a dataflow system where:
+//! - Relations are streams of changes (tuple, diff) pairs
+//! - `foreach` iterates over pending changes, pulling from upstream
+//! - Operators are generic over their input relation types
+//! - Use `.boxed()` to break type chains when needed
+
+mod input;
+mod ops_difference;
+mod ops_distinct;
+mod ops_filter;
+mod ops_flat_map;
+mod ops_join;
+mod ops_map;
+mod ops_max;
+mod ops_sum;
+mod ops_union;
+mod relation;
+mod saved;
+
+// Core types
+pub use input::{create_input, InputHandle, InputRelation};
+pub use relation::Relation;
+pub use saved::{save, SavedGetter, SavedRelation};
+
+// Operators
+pub use ops_difference::{difference, negate, DifferenceRelation, NegateRelation};
+pub use ops_distinct::{distinct, DistinctRelation};
+pub use ops_filter::{filter, FilterRelation};
+pub use ops_flat_map::{flat_map, FlatMapRelation};
+pub use ops_join::{join, JoinRelation};
+pub use ops_map::{map, MapRelation};
+pub use ops_max::{max, MaxRelation};
+pub use ops_sum::{sum, SumRelation};
+pub use ops_union::{union, UnionRelation};
