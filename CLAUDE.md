@@ -7,6 +7,23 @@
 - **File size limit**: All non-test Rust files should be ≤ 200 lines of code. Break large files into submodules.
 - Test files (files named `tests.rs` or in a `tests/` directory) are exempt from this limit.
 
+### Error Handling: Fail Fast, Don't Hide Bugs
+
+**Never silently handle "impossible" cases.** If something shouldn't happen, panic.
+
+Bad patterns that hide bugs:
+- `.unwrap_or_default()` when None/Err indicates a bug
+- `.min()` / `.max()` to clamp values that should already be in range
+- Silent fallbacks for cases that "can't happen"
+- Default values that mask logic errors
+
+Good patterns:
+- `.unwrap()` or `.expect("explanation")` for cases that indicate bugs
+- `assert!()` for invariants
+- Let it panic - a crash with a stack trace is infinitely better than silent corruption
+
+The goal is to surface bugs immediately, not hide them behind fallbacks.
+
 ### Debug Scripts
 
 Debug scripts should be placed in the workspace directory, not in `/tmp`. Operations outside the workspace require manual approval for each action, with no way to grant blanket approval.

@@ -38,16 +38,15 @@ impl Database {
                 let changes = input_changes[0]
                     .as_any()
                     .downcast_ref::<Vec<Change<T>>>()
-                    .map(|c| c.as_slice())
-                    .unwrap_or(&[]);
+                    .expect("type mismatch in distinct incremental changes");
 
                 let new_input = graph
                     .get(input_id)
                     .state
                     .as_any()
                     .downcast_ref::<Multiset<T>>()
-                    .cloned()
-                    .unwrap_or_default();
+                    .expect("type mismatch in distinct incremental state")
+                    .clone();
 
                 let mut old_input = new_input.clone();
                 for change in changes {
@@ -64,8 +63,8 @@ impl Database {
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<T>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in distinct recompute")
+                .clone();
             Box::new(operators::distinct(&input_coll)) as Box<dyn AnyCollection>
         }));
 
@@ -75,8 +74,8 @@ impl Database {
             .state
             .as_any()
             .downcast_ref::<Multiset<T>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in distinct initial")
+            .clone();
         let output = operators::distinct(&input_coll);
         self.graph.get_mut(id).state = Box::new(output);
 

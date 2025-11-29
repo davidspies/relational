@@ -31,7 +31,13 @@ impl Database {
                 );
             }
 
-            for i in 0..limit.min(self.stratified_ops.len()) {
+            assert!(
+                limit <= self.stratified_ops.len(),
+                "limit {} exceeds stratified_ops.len() {}",
+                limit,
+                self.stratified_ops.len()
+            );
+            for i in 0..limit {
                 match &self.stratified_ops[i] {
                     StratifiedOp::Interrupt { check } => {
                         if check(&self.graph) {

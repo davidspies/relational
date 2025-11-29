@@ -54,8 +54,8 @@ impl Database {
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<T>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in group_max recompute")
+                .clone();
             let (_, output) =
                 operators::group_max_init(&input_coll, &key_fn_clone, &value_fn_clone);
             Box::new(output) as Box<dyn AnyCollection>
@@ -67,8 +67,8 @@ impl Database {
             .state
             .as_any()
             .downcast_ref::<Multiset<T>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in group_max initial")
+            .clone();
         let (_, output) = operators::group_max_init(&input_coll, &key_fn, &value_fn);
         self.graph.get_mut(id).state = Box::new(output);
         self.apply_fns[id.index()] = Some(Self::make_apply_fn::<(K, V)>());

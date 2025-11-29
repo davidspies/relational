@@ -51,8 +51,8 @@ impl Database {
                         .state
                         .as_any()
                         .downcast_ref::<Multiset<T>>()
-                        .cloned()
-                        .unwrap_or_default();
+                        .expect("type mismatch in feedback compute_input")
+                        .clone();
 
                     Box::new(operators::distinct(&input_coll)) as Box<dyn AnyCollection>
                 }),
@@ -92,8 +92,8 @@ impl Database {
                         .state
                         .as_any()
                         .downcast_ref::<Multiset<T>>()
-                        .cloned()
-                        .unwrap_or_default();
+                        .expect("type mismatch in feedback_with_id compute_input")
+                        .clone();
 
                     Box::new(operators::distinct(&input_coll)) as Box<dyn AnyCollection>
                 }),
@@ -116,13 +116,13 @@ impl Database {
         let rel_id = rel.id;
         self.stratified_ops.push(StratifiedOp::Interrupt {
             check: Box::new(move |graph: &DataflowGraph| {
-                graph
+                let coll = graph
                     .get(rel_id)
                     .state
                     .as_any()
                     .downcast_ref::<Multiset<T>>()
-                    .map(|c| !c.is_empty())
-                    .unwrap_or(false)
+                    .expect("type mismatch in interrupt check");
+                !coll.is_empty()
             }),
         });
     }

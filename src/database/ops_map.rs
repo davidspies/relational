@@ -56,8 +56,8 @@ impl Database {
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<T>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in map recompute")
+                .clone();
             Box::new(operators::map(&input_coll, |t| f_recompute(t))) as Box<dyn AnyCollection>
         }));
 
@@ -67,8 +67,8 @@ impl Database {
             .state
             .as_any()
             .downcast_ref::<Multiset<T>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in map initial")
+            .clone();
         let output = operators::map(&input_coll, |t| f(t));
         self.graph.get_mut(id).state = Box::new(output);
 

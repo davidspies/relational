@@ -70,15 +70,15 @@ impl Database {
                     .state
                     .as_any()
                     .downcast_ref::<Multiset<L>>()
-                    .cloned()
-                    .unwrap_or_default();
+                    .expect("type mismatch in join incremental left")
+                    .clone();
                 let new_right_state = graph
                     .get(right_id)
                     .state
                     .as_any()
                     .downcast_ref::<Multiset<R>>()
-                    .cloned()
-                    .unwrap_or_default();
+                    .expect("type mismatch in join incremental right")
+                    .clone();
 
                 // Compute old_right by reversing right_changes
                 let mut old_right_state = new_right_state;
@@ -116,15 +116,15 @@ impl Database {
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<L>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in join recompute left")
+                .clone();
             let right_coll = graph
                 .get(right_id)
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<R>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in join recompute right")
+                .clone();
             let output = operators::join(
                 &left_coll,
                 &right_coll,
@@ -140,16 +140,16 @@ impl Database {
             .state
             .as_any()
             .downcast_ref::<Multiset<L>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in join initial left")
+            .clone();
         let right_coll = self
             .graph
             .get(right.id)
             .state
             .as_any()
             .downcast_ref::<Multiset<R>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in join initial right")
+            .clone();
 
         let output = operators::join(&left_coll, &right_coll, |l| key_left(l), |r| key_right(r));
         self.graph.get_mut(id).state = Box::new(output);

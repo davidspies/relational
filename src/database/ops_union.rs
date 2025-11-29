@@ -35,6 +35,7 @@ impl Database {
 
         self.incremental_fns[id.index()] = Some(Box::new(
             move |_graph: &DataflowGraph, input_changes: &[&dyn AnyChanges]| {
+                // Note: downcast may fail if input has no changes (empty changes use unit type)
                 let left_changes = input_changes[0]
                     .as_any()
                     .downcast_ref::<Vec<Change<T>>>()
@@ -58,15 +59,15 @@ impl Database {
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<T>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in union recompute left")
+                .clone();
             let right_coll = graph
                 .get(right_id)
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<T>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in union recompute right")
+                .clone();
             Box::new(operators::union(&left_coll, &right_coll)) as Box<dyn AnyCollection>
         }));
 
@@ -76,16 +77,16 @@ impl Database {
             .state
             .as_any()
             .downcast_ref::<Multiset<T>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in union initial left")
+            .clone();
         let right_coll = self
             .graph
             .get(right.id)
             .state
             .as_any()
             .downcast_ref::<Multiset<T>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in union initial right")
+            .clone();
 
         let output = operators::union(&left_coll, &right_coll);
         self.graph.get_mut(id).state = Box::new(output);

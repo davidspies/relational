@@ -39,15 +39,15 @@ impl Database {
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<T>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in difference recompute left")
+                .clone();
             let right_coll = graph
                 .get(right_id)
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<T>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in difference recompute right")
+                .clone();
             let mut output = left_coll.clone();
             for (t, diff) in right_coll.iter_with_multiplicity() {
                 output.apply_change(Change::new(t.clone(), crate::change::Diff(-diff.0)));
@@ -62,16 +62,16 @@ impl Database {
             .state
             .as_any()
             .downcast_ref::<Multiset<T>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in difference initial left")
+            .clone();
         let right_coll = self
             .graph
             .get(right.id)
             .state
             .as_any()
             .downcast_ref::<Multiset<T>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in difference initial right")
+            .clone();
 
         let mut output = left_coll.clone();
         for (t, diff) in right_coll.iter_with_multiplicity() {

@@ -57,8 +57,8 @@ impl Database {
                 .state
                 .as_any()
                 .downcast_ref::<Multiset<T>>()
-                .cloned()
-                .unwrap_or_default();
+                .expect("type mismatch in flat_map recompute")
+                .clone();
             let mut output = Multiset::<U>::new();
             for t in input_coll.iter() {
                 for u in f_recompute(t) {
@@ -74,8 +74,8 @@ impl Database {
             .state
             .as_any()
             .downcast_ref::<Multiset<T>>()
-            .cloned()
-            .unwrap_or_default();
+            .expect("type mismatch in flat_map initial")
+            .clone();
 
         let mut output = Multiset::<U>::new();
         for t in input_coll.iter() {
