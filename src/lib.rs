@@ -34,7 +34,7 @@
 //! let all_paths = db.union(edges, new_paths);
 //!
 //! // Wire up the feedback loop - this automatically runs to fixed point
-//! db.feedback(path_var, edges, all_paths);
+//! db.feedback(path_var, all_paths);
 //!
 //! // Collect results (already computed)
 //! let paths = db.collect(path);

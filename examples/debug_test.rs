@@ -31,7 +31,8 @@ fn main() {
     println!("  v_with_a = {:?}", db.collect::<i32>(v_with_a));
 
     // First feedback (A): v = v ∪ a_new
-    db.feedback(v_var, seeds, v_with_a);
+    let a_input = db.union(seeds, v_with_a);
+    db.feedback(v_var, a_input);
 
     println!("\nAfter A feedback:");
     println!("  V = {:?}", db.collect::<i32>(v_rel));

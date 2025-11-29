@@ -1,69 +1,9 @@
-//! Checkpoint and push/pop operations for Database.
-
-use crate::checkpoint::{Checkpoint, CheckpointId, RestoreInfo};
-use crate::dataflow::NodeId;
-use crate::relation::Relation;
-use crate::Tuple;
+//! Stack-based push/pop checkpoint operations for Database.
 
 use super::feedback::{FeedbackLoop, FeedbackRollbackData, StratifiedOp};
 use super::Database;
 
 impl Database {
-    /// Create a checkpoint of the current state.
-    pub fn checkpoint(&mut self, name: Option<&str>) -> CheckpointId {
-        let id = self.checkpoints.next_id();
-        let mut checkpoint = Checkpoint::new(id, name.map(|s| s.to_string()));
-
-        for node_id in self.graph.node_ids() {
-            let node = self.graph.get(node_id);
-            checkpoint.states.insert(node_id, node.state.clone_box());
-
-            if node.is_manual_input {
-                checkpoint.manual_inputs.push(node_id);
-            }
-        }
-
-        self.checkpoints.store(checkpoint);
-        id
-    }
-
-    /// Restore to a checkpoint.
-    pub fn restore(&mut self, checkpoint_id: CheckpointId) -> Option<RestoreInfo> {
-        let checkpoint = self.checkpoints.get(checkpoint_id)?.clone();
-        let mut info = RestoreInfo::new();
-
-        let mut to_restore: Vec<(NodeId, Box<dyn crate::dataflow::AnyCollection>)> = Vec::new();
-
-        for (&node_id, saved_state) in &checkpoint.states {
-            let node = self.graph.get(node_id);
-
-            if node.is_manual_input {
-                info.manual_input_nodes.push(node_id);
-            } else {
-                to_restore.push((node_id, saved_state.clone_box()));
-                info.restored_nodes.push(node_id);
-            }
-        }
-
-        for (node_id, saved_state) in to_restore {
-            let node = self.graph.get_mut(node_id);
-            node.state = saved_state;
-            self.graph.mark_dirty(node_id);
-        }
-
-        info.needs_propagation = !info.restored_nodes.is_empty();
-        Some(info)
-    }
-
-    /// List all checkpoints.
-    pub fn list_checkpoints(&self) -> Vec<(CheckpointId, Option<&str>)> {
-        self.checkpoints
-            .list()
-            .iter()
-            .map(|c| (c.id, c.name.as_deref()))
-            .collect()
-    }
-
     /// Push a new checkpoint frame onto the stack.
     ///
     /// Changes made after this call will be tracked and can be undone with `pop()`.
@@ -106,7 +46,6 @@ impl Database {
         }
 
         // Step 2: For all feedbacks, send -1 for outputs AND subtract recorded input deltas
-        // Collect the feedback data we need to process
         let feedback_data: Vec<FeedbackRollbackData> = self
             .feedback_iter()
             .map(|(i, fl)| FeedbackRollbackData {
@@ -119,10 +58,9 @@ impl Database {
             })
             .collect();
 
-        // Apply -1 for each output we recorded, and subtract recorded input deltas from input_totals
+        // Apply -1 for each output we recorded, and subtract recorded input deltas
         for data in &feedback_data {
             if let Some(outputs) = &data.outputs {
-                // Need to work around borrow checker by getting ops separately
                 let fl = match &self.stratified_ops[data.index] {
                     StratifiedOp::Feedback(fl) => fl,
                     _ => unreachable!(),
@@ -145,8 +83,7 @@ impl Database {
         // Step 3: Recompute derived nodes
         self.recompute_all();
 
-        // Step 4: For each feedback in stratified order, check if any removed tuples
-        // should be re-added, then run partial fixpoint up to that feedback
+        // Step 4: For each feedback, check if removed tuples should be re-added
         for data in &feedback_data {
             if let Some(outputs) = &data.outputs {
                 let still_positive = {
@@ -159,7 +96,6 @@ impl Database {
                 };
 
                 if !still_positive.is_empty() {
-                    // Re-add these tuples to output
                     let fl = match &self.stratified_ops[data.index] {
                         StratifiedOp::Feedback(fl) => fl,
                         _ => unreachable!(),
@@ -169,14 +105,12 @@ impl Database {
                         still_positive.as_ref(),
                     );
 
-                    // Add pending changes for incremental propagation
                     fl.ops.append_insert_changes(
                         self.graph.get_mut(data.var_id).pending_changes.as_mut(),
                         still_positive.as_ref(),
                     );
                     self.graph.mark_dirty(data.var_id);
 
-                    // Record in parent frame (if exists)
                     self.checkpoint_stack.record_feedback_outputs_to_parent(
                         data.var_id,
                         fl.ops.clone_tuples(still_positive.as_ref()),
@@ -184,14 +118,13 @@ impl Database {
                 }
             }
 
-            // Run partial fixpoint up to this feedback index
             self.run_partial_stratified_fixpoint(data.index);
         }
 
         true
     }
 
-    /// Check if we're currently recording changes (have at least one frame on the stack).
+    /// Check if we're currently recording changes.
     pub fn is_recording(&self) -> bool {
         self.checkpoint_stack.is_recording()
     }
@@ -199,11 +132,6 @@ impl Database {
     /// Get the current checkpoint stack depth.
     pub fn stack_depth(&self) -> usize {
         self.checkpoint_stack.depth()
-    }
-
-    /// Get a relation by name.
-    pub fn get<T: Tuple>(&self, name: &str) -> Option<Relation<T>> {
-        self.graph.get_id(name).map(Relation::new)
     }
 
     /// Get an iterator over feedback loops (for pop operations).

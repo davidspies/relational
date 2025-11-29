@@ -8,6 +8,7 @@
 
 mod types;
 mod solver;
+mod solver_setup;
 mod queries;
 mod solve;
 

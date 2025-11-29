@@ -45,7 +45,8 @@ fn test_stratified_two_feedbacks() {
     db.commit();
 
     // Set up first feedback (reach)
-    db.feedback(reach_var, edges, all_reach);
+    let reach_input = db.union(edges, all_reach);
+    db.feedback(reach_var, reach_input);
 
     // At this point, reach should be at fixpoint: {(1,2), (2,3), (1,3)}
     let reach_result: Vec<_> = db.collect(reach);
@@ -55,11 +56,7 @@ fn test_stratified_two_feedbacks() {
     assert_eq!(reach_result.len(), 3, "reach should have exactly 3 pairs");
 
     // Set up second feedback (extended)
-    // The base is empty, recursive is triples
-    let empty = db.filter(reach, |_| false);
-    let empty_triples = db.map(empty, |&(a, b)| (a, b, 0)); // Type conversion hack
-
-    db.feedback(extended_var, empty_triples, triples);
+    db.feedback(extended_var, triples);
 
     // Extended should contain all (a, b, c) where reach(a,b) and reach(b,c)
     // With reach = {(1,2), (2,3), (1,3)}:
@@ -96,7 +93,8 @@ fn test_incremental_after_feedback() {
     db.insert(edges, (2, 3));
     db.commit();
 
-    db.feedback(path_var, edges, all_paths);
+    let path_input = db.union(edges, all_paths);
+    db.feedback(path_var, path_input);
 
     // Check initial state
     let paths: Vec<_> = db.collect(path);
@@ -135,7 +133,7 @@ fn test_feedback_order_independence() {
     let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
     let all_paths = db.union(edges, new_paths);
 
-    db.feedback(path_var, edges, all_paths);
+    db.feedback(path_var, all_paths);
 
     let paths: Vec<_> = db.collect(path);
     assert_eq!(paths.len(), 3);
@@ -168,21 +166,21 @@ fn test_three_feedbacks_chain() {
 
     // Set up feedbacks in order
     // doubled = double(facts)
-    db.feedback(doubled_var, double_op, double_op);
+    db.feedback(doubled_var, double_op);
 
     // After first feedback: doubled = {2}
     let doubled_result: Vec<_> = db.collect(doubled);
     assert!(doubled_result.contains(&2), "doubled should contain 2");
 
     // tripled = triple(doubled)
-    db.feedback(tripled_var, triple_op, triple_op);
+    db.feedback(tripled_var, triple_op);
 
     // After second feedback: tripled = {6}
     let tripled_result: Vec<_> = db.collect(tripled);
     assert!(tripled_result.contains(&6), "tripled should contain 6");
 
     // plus_one = plus_one(tripled)
-    db.feedback(plus_one_var, plus_one_op, plus_one_op);
+    db.feedback(plus_one_var, plus_one_op);
 
     // After third feedback: plus_one = {7}
     let plus_one_result: Vec<_> = db.collect(plus_one);
@@ -202,7 +200,7 @@ fn test_feedback_immediate_fixpoint() {
     // Feedback that just passes through the input (identity)
     let (var, rel) = db.variable::<i32>("identity");
 
-    db.feedback(var, items, items);
+    db.feedback(var, items);
 
     let result: Vec<_> = db.collect(rel);
     assert_eq!(result.len(), 2);
@@ -312,7 +310,8 @@ fn test_a_reaches_fixpoint_between_b_applications() {
     db.commit();
 
     // First feedback (A): v = v ∪ a_new
-    db.feedback(v_var, seeds, v_with_a);
+    let a_input = db.union(seeds, v_with_a);
+    db.feedback(v_var, a_input);
 
     println!("After A feedback:");
     println!("  V = {:?}", db.collect::<i32>(v_rel));
@@ -320,7 +319,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
     println!("  max(V) = {}", v_max_after_a);
 
     // Second feedback (B): v = v ∪ b_new
-    db.feedback(v_var, v_rel, v_with_b);
+    db.feedback(v_var, v_with_b);
 
     println!("\nAfter B feedback:");
     println!("  V = {:?}", db.collect::<i32>(v_rel));
@@ -387,7 +386,7 @@ fn test_interleaved_mutual_fixpoint() {
     db.commit();
 
     // Set up A first
-    db.feedback(a_var, a_combined, a_recursive);
+    db.feedback(a_var, a_recursive);
 
     // A should have: 1, 3, 5, 7, 9 (starting from 1, adding 2 each time)
     let a_result: Vec<_> = db.collect(a_rel);
@@ -396,7 +395,7 @@ fn test_interleaved_mutual_fixpoint() {
     assert!(a_result.contains(&5), "A should contain 5");
 
     // Set up B
-    db.feedback(b_var, b_filtered, b_filtered);
+    db.feedback(b_var, b_filtered);
 
     // Now B should have added even numbers to A via the feedback
     // B = A + 1 = {2, 4, 6, 8, 10}
@@ -453,7 +452,7 @@ fn test_diamond_dependency() {
 
     // Use a feedback to test that the diamond is computed correctly
     let (d_var, d_rel) = db.variable::<i32>("d_feedback");
-    db.feedback(d_var, d, d);
+    db.feedback(d_var, d);
 
     let result: Vec<_> = db.collect(d_rel);
     assert!(result.contains(&20), "should have 10*2=20 from B");
@@ -568,7 +567,7 @@ fn test_push_pop_with_feedback() {
     db.insert(edges, (2, 3));
     db.commit();
 
-    db.feedback(path_var, edges, all_paths);
+    db.feedback(path_var, all_paths);
 
     // Initial paths: (1,2), (2,3), (1,3)
     let paths: Vec<_> = db.collect(path);
@@ -871,7 +870,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     let all_paths = db.union(edges, new_paths);
 
     // Wire up timestamped feedback
-    db.feedback_with_id(path_var, edges, all_paths);
+    db.feedback_with_id(path_var, all_paths);
 
     // Initial state: path (1,2) discovered at some commit ID
     let paths_before: Vec<_> = db.collect(path);

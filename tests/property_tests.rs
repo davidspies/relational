@@ -41,7 +41,7 @@ fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
     let extended = db.join(path, edges, |(_, b)| *b, |(b, _)| *b);
     let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
     let all_paths = db.union(edges, new_paths);
-    db.feedback(path_var, edges, all_paths);
+    db.feedback(path_var, all_paths);
 
     for op in ops {
         match op {
@@ -106,7 +106,7 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
     let extended = db.join(path, edges, |(_, b)| *b, |(b, _)| *b);
     let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
     let all_paths = db.union(edges, new_paths);
-    db.feedback(path_var, edges, all_paths);
+    db.feedback(path_var, all_paths);
 
     for (i, op) in ops.iter().enumerate() {
         if !surviving[i] {
@@ -305,11 +305,10 @@ fn test_multiple_feedbacks_with_pop() {
     db.insert(edges, (2, 3));
     db.commit();
 
-    db.feedback(reach_var, edges, all_reach);
+    let reach_input = db.union(edges, all_reach);
+    db.feedback(reach_var, reach_input);
 
-    let empty_triples = db.filter(reach, |_| false);
-    let empty_triples = db.map(empty_triples, |&(a, b)| (a, b, 0));
-    db.feedback(pairs_var, empty_triples, triples);
+    db.feedback(pairs_var, triples);
 
     // Initial state
     let reach_before: Vec<_> = db.collect(reach);

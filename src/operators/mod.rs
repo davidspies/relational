@@ -6,7 +6,8 @@
 mod basic;
 mod join;
 mod aggregate;
-mod group_state;
+mod group_max_state;
+mod group_sum_state;
 
 #[cfg(test)]
 mod tests;
@@ -17,7 +18,5 @@ pub use basic::{
 };
 pub use join::{antijoin, join, join_changes_left, join_changes_right, semijoin};
 pub use aggregate::{aggregate, count, max, min, sum};
-pub use group_state::{
-    group_max_changes, group_max_init, group_min_changes, group_min_init, GroupMaxState,
-    GroupMinState,
-};
+pub use group_max_state::{group_max_changes, group_max_init, GroupMaxState};
+pub use group_sum_state::{group_sum_changes, group_sum_init, GroupSumState};

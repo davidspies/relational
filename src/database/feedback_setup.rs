@@ -7,7 +7,9 @@ use crate::relation::{Relation, Variable};
 use crate::Tuple;
 
 use super::commit_id::CommitId;
-use super::feedback::{FeedbackLoop, StratifiedOp, TimestampedFeedbackOps, TypedFeedbackOps};
+use super::feedback::{FeedbackLoop, StratifiedOp};
+use super::feedback_ops::TypedFeedbackOps;
+use super::feedback_ops_timestamped::TimestampedFeedbackOps;
 use super::Database;
 
 impl Database {
@@ -25,7 +27,7 @@ impl Database {
     /// Complete a feedback loop by connecting computed output back to variable.
     ///
     /// The variable acts as a monotonically growing "seen set":
-    /// - Takes tuples with positive multiplicity from `base ∪ recursive`
+    /// - Takes tuples with positive multiplicity from `input`
     /// - Adds them to the variable with multiplicity 1 if not already present
     /// - Never removes tuples (except via pop)
     ///
@@ -33,45 +35,26 @@ impl Database {
     /// - Each feedback runs to fixpoint before the next one is applied
     /// - When a later feedback changes, all earlier feedbacks re-run to fixpoint
     /// - This continues until all feedbacks reach a global fixpoint
-    pub fn feedback<T: Tuple + Send + Sync>(
-        &mut self,
-        var: Variable<T>,
-        base: Relation<T>,
-        recursive: Relation<T>,
-    ) {
+    pub fn feedback<T: Tuple + Send + Sync>(&mut self, var: Variable<T>, input: Relation<T>) {
         let node = self.graph.get_mut(var.id);
-        node.inputs = vec![base.id, recursive.id];
+        node.inputs = vec![input.id];
 
-        // Store the feedback loop info
         let var_id = var.id;
-        let base_id = base.id;
-        let recursive_id = recursive.id;
+        let input_id = input.id;
 
         self.stratified_ops
             .push(StratifiedOp::Feedback(FeedbackLoop {
                 var_id,
                 compute_input: Box::new(move |graph: &DataflowGraph| {
-                    let base_coll = graph
-                        .get(base_id)
+                    let input_coll = graph
+                        .get(input_id)
                         .state
                         .as_any()
                         .downcast_ref::<Multiset<T>>()
                         .cloned()
                         .unwrap_or_default();
 
-                    let recursive_coll = graph
-                        .get(recursive_id)
-                        .state
-                        .as_any()
-                        .downcast_ref::<Multiset<T>>()
-                        .cloned()
-                        .unwrap_or_default();
-
-                    // Compute the input: distinct(union(base, recursive))
-                    Box::new(operators::distinct(&operators::union(
-                        &base_coll,
-                        &recursive_coll,
-                    ))) as Box<dyn AnyCollection>
+                    Box::new(operators::distinct(&input_coll)) as Box<dyn AnyCollection>
                 }),
                 input_totals: Box::new(Multiset::<T>::new()),
                 ops: Box::new(TypedFeedbackOps::<T>::new()),
@@ -87,48 +70,32 @@ impl Database {
     /// records when each tuple was first discovered. This allows deriving relations
     /// that depend on discovery order (e.g., taking the tuple with minimum CommitId).
     ///
-    /// The input `base` and `recursive` are `Relation<T>`, but the variable holds
-    /// `(T, CommitId)`. When a tuple T is first seen, it's added to the variable
-    /// with the current commit ID.
+    /// The `input` is `Relation<T>`, but the variable holds `(T, CommitId)`.
+    /// When a tuple T is first seen, it's added to the variable with the current commit ID.
     pub fn feedback_with_id<T: Tuple + Send + Sync>(
         &mut self,
         var: Variable<(T, CommitId)>,
-        base: Relation<T>,
-        recursive: Relation<T>,
+        input: Relation<T>,
     ) {
         let node = self.graph.get_mut(var.id);
-        node.inputs = vec![base.id, recursive.id];
+        node.inputs = vec![input.id];
 
         let var_id = var.id;
-        let base_id = base.id;
-        let recursive_id = recursive.id;
+        let input_id = input.id;
 
         self.stratified_ops
             .push(StratifiedOp::Feedback(FeedbackLoop {
                 var_id,
                 compute_input: Box::new(move |graph: &DataflowGraph| {
-                    let base_coll = graph
-                        .get(base_id)
+                    let input_coll = graph
+                        .get(input_id)
                         .state
                         .as_any()
                         .downcast_ref::<Multiset<T>>()
                         .cloned()
                         .unwrap_or_default();
 
-                    let recursive_coll = graph
-                        .get(recursive_id)
-                        .state
-                        .as_any()
-                        .downcast_ref::<Multiset<T>>()
-                        .cloned()
-                        .unwrap_or_default();
-
-                    // Compute the input: distinct(union(base, recursive))
-                    // This is Collection<T>, not Collection<(T, CommitId)>
-                    Box::new(operators::distinct(&operators::union(
-                        &base_coll,
-                        &recursive_coll,
-                    ))) as Box<dyn AnyCollection>
+                    Box::new(operators::distinct(&input_coll)) as Box<dyn AnyCollection>
                 }),
                 // input_totals is Collection<T> (the seen set)
                 input_totals: Box::new(Multiset::<T>::new()),

@@ -78,7 +78,7 @@ fn test_transitive_closure() {
     // Combine base (edges) and recursive (new_paths)
     let all_paths = db.union(edges, new_paths);
 
-    db.feedback(path_var, edges, all_paths);
+    db.feedback(path_var, all_paths);
 
     let result: Vec<_> = db.collect(path);
     // Should have: (1,2), (2,3), (3,4), (1,3), (2,4), (1,4)
@@ -174,7 +174,7 @@ fn test_commit_id_advances_with_feedback() {
     let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
     let all_paths = db.union(edges, new_paths);
 
-    db.feedback(path_var, edges, all_paths);
+    db.feedback(path_var, all_paths);
 
     // Add edges: 1->2->3
     // This triggers feedback iterations, incrementing commit ID
@@ -274,7 +274,7 @@ fn test_commit_id_advances_per_feedback_iteration() {
     let all_paths = db.union(edges, new_paths);
 
     // Wire up the feedback
-    db.feedback(path_var, edges, all_paths);
+    db.feedback(path_var, all_paths);
 
     let after_feedback_setup = db.commit_id();
 
@@ -345,7 +345,7 @@ fn test_feedback_with_id_discovery_order() {
     let all_paths = db.union(edges, new_paths);
 
     // Wire up the timestamped feedback - this runs fixpoint and discovers all paths
-    db.feedback_with_id(path_var, edges, all_paths);
+    db.feedback_with_id(path_var, all_paths);
 
     // Collect paths with their discovery times
     let paths_with_times: Vec<_> = db.collect(path);
