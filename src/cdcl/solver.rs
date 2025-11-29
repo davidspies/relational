@@ -1,225 +1,70 @@
-//! CDCL SAT Solver built on the relational query engine.
-//!
-//! This implements Conflict-Driven Clause Learning using:
-//! - Relations for clauses, assignments, and implications
-//! - Feedback loops for unit propagation (fixpoint)
-//! - Push/pop checkpoints for backtracking
-//! - Persistent inputs for learned clauses
+//! CDCL SAT Solver implementation.
 
-use std::fmt;
-
-use crate::Database;
 use crate::database::CommitId;
 use crate::relation::Relation;
+use crate::Database;
 
-/// A literal is a variable with a sign (positive or negative).
-/// Positive values represent the variable, negative values represent its negation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Lit(i32);
-
-impl Lit {
-    /// Create a positive literal for a variable.
-    pub fn pos(v: Var) -> Self {
-        Lit(v.0 as i32)
-    }
-
-    /// Create a negative literal for a variable.
-    pub fn neg(v: Var) -> Self {
-        Lit(-(v.0 as i32))
-    }
-
-    /// Create a literal from a raw i32 (positive = positive literal, negative = negative literal).
-    pub fn from_raw(raw: i32) -> Self {
-        assert!(raw != 0, "Literal cannot be 0");
-        Lit(raw)
-    }
-
-    /// Get the variable this literal refers to.
-    pub fn var(self) -> Var {
-        Var(self.0.unsigned_abs())
-    }
-
-    /// Check if this is a positive literal.
-    pub fn is_positive(self) -> bool {
-        self.0 > 0
-    }
-
-    /// Get the negation of this literal.
-    pub fn negated(self) -> Self {
-        Lit(-self.0)
-    }
-
-    /// Get the raw i32 value.
-    pub fn raw(self) -> i32 {
-        self.0
-    }
-}
-
-/// Helper function to get the variable of a literal.
-fn var(lit: Lit) -> Var {
-    lit.var()
-}
-
-/// Helper function to negate a literal.
-fn neg(lit: Lit) -> Lit {
-    lit.negated()
-}
-
-impl fmt::Display for Lit {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0 > 0 {
-            write!(f, "x{}", self.0)
-        } else {
-            write!(f, "¬x{}", -self.0)
-        }
-    }
-}
-
-/// A variable identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Var(u32);
-
-impl Var {
-    /// Create a variable from a 1-indexed number.
-    pub fn new(n: u32) -> Self {
-        assert!(n > 0, "Variables are 1-indexed");
-        Var(n)
-    }
-
-    /// Get the raw u32 value.
-    pub fn raw(self) -> u32 {
-        self.0
-    }
-}
-
-impl fmt::Display for Var {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "x{}", self.0)
-    }
-}
-
-/// Decision level (0 = top-level/forced, 1+ = decision levels).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct Level(u32);
-
-impl Level {
-    /// The top level (level 0) where unit clauses propagate.
-    pub const TOP: Level = Level(0);
-
-    /// Create a new level.
-    pub fn new(n: u32) -> Self {
-        Level(n)
-    }
-
-    /// Get the raw u32 value.
-    pub fn raw(self) -> u32 {
-        self.0
-    }
-
-    /// Increment the level.
-    pub fn inc(&mut self) {
-        self.0 += 1;
-    }
-
-    /// Decrement the level.
-    pub fn dec(&mut self) {
-        self.0 = self.0.saturating_sub(1);
-    }
-}
-
-/// A clause ID for tracking which clause caused an implication.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct ClauseId(u32);
-
-impl ClauseId {
-    /// A special clause ID indicating a decision (no reason clause).
-    pub const DECISION: ClauseId = ClauseId(0);
-
-    /// Create a new clause ID.
-    pub fn new(n: u32) -> Self {
-        ClauseId(n)
-    }
-
-    /// Get the raw u32 value.
-    pub fn raw(self) -> u32 {
-        self.0
-    }
-
-    /// Check if this is a decision (no reason clause).
-    pub fn is_decision(self) -> bool {
-        self.0 == 0
-    }
-}
-
-/// A conflict detected during propagation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Conflict {
-    /// A clause has all its literals assigned false.
-    EmptyClause(ClauseId),
-    /// Both a literal and its negation are assigned.
-    /// The variable is stored (the literal that was assigned both ways).
-    DirectConflict(Var),
-}
+use super::types::{var, ClauseId, Conflict, Level, Lit, Var};
 
 /// CDCL SAT Solver.
 pub struct Solver {
-    db: Database,
+    pub(super) db: Database,
 
     // === Input Relations ===
     /// Original clauses: (clause_id, literal)
     /// Each clause is represented as multiple tuples, one per literal.
-    clauses: Relation<(ClauseId, Lit)>,
+    pub(super) clauses: Relation<(ClauseId, Lit)>,
 
     /// Learned clauses (persistent - survive backtracking)
-    learned: Relation<(ClauseId, Lit)>,
+    pub(super) learned: Relation<(ClauseId, Lit)>,
 
     /// Decision levels - we insert the current level here
-    levels: Relation<Level>,
+    pub(super) levels: Relation<Level>,
 
     /// Decision assignments (lit, level, clause_id) - inserted directly for decisions
-    decision_assignments: Relation<(Lit, Level, ClauseId)>,
+    pub(super) decision_assignments: Relation<(Lit, Level, ClauseId)>,
 
     // === Derived/State Relations ===
     /// Current level = max(levels)
     /// Note: Stored to keep the relation alive, accessed via the graph
     #[allow(dead_code)]
-    current_level_rel: Relation<Level>,
+    pub(super) current_level_rel: Relation<Level>,
 
     /// Prep assignments from feedback_with_id: ((lit, level, clause_id), commit_id)
     /// This accumulates all discovered assignments with their discovery time and reason clause
     /// Note: Stored to keep the relation alive, accessed via the graph
     #[allow(dead_code)]
-    prep_assignments: Relation<((Lit, Level, ClauseId), CommitId)>,
+    pub(super) prep_assignments: Relation<((Lit, Level, ClauseId), CommitId)>,
 
     /// Final assignments: (lit, level) - derived by taking min commit_id per lit
-    assignments: Relation<(Lit, Level)>,
+    pub(super) assignments: Relation<(Lit, Level)>,
 
     /// Causes: ((lit, commit_id), (clause_id, level)) - tracks all ways each literal was derived
     /// Can be collected to HashMap<Lit, BTreeMap<CommitId, Multiset<(ClauseId, Level)>>>
-    causes: Relation<((Lit, CommitId), (ClauseId, Level))>,
+    pub(super) causes: Relation<((Lit, CommitId), (ClauseId, Level))>,
 
     /// The "assigned" relation - just tracks which literals are assigned true
-    assigned: Relation<Lit>,
+    pub(super) assigned: Relation<Lit>,
 
     /// Unit clauses that need propagation: (clause_id, implied_literal)
-    units: Relation<(ClauseId, Lit)>,
+    pub(super) units: Relation<(ClauseId, Lit)>,
 
     /// Conflicts detected during propagation
-    conflicts: Relation<Conflict>,
+    pub(super) conflicts: Relation<Conflict>,
 
     // === Solver State ===
     /// Current decision level (local copy for convenience).
-    current_level: Level,
+    pub(super) current_level: Level,
 
     /// Next clause ID for learned clauses.
-    next_learned_id: ClauseId,
+    pub(super) next_learned_id: ClauseId,
 
     /// Number of variables.
-    num_vars: Var,
+    pub(super) num_vars: Var,
 
     /// Stack of decisions: (level, literal, tried_both)
     /// tried_both = true means we've already tried the opposite polarity
-    decision_stack: Vec<(Level, Lit, bool)>,
+    pub(super) decision_stack: Vec<(Level, Lit, bool)>,
 }
 
 impl Solver {
@@ -401,7 +246,7 @@ impl Solver {
 
     /// Make a decision: assign a literal at a new decision level.
     /// `tried_opposite` indicates if we've already tried the opposite polarity.
-    fn decide_internal(&mut self, lit: Lit, tried_opposite: bool) {
+    pub(super) fn decide_internal(&mut self, lit: Lit, tried_opposite: bool) {
         self.db.push(None);
         self.current_level.inc();
         self.decision_stack
@@ -457,198 +302,4 @@ impl Solver {
         cid
     }
 
-    /// Get all currently assigned literals.
-    pub fn get_assignments(&self) -> Vec<(Lit, Level)> {
-        self.db.collect(self.assignments)
-    }
-
-    /// Get the current decision level.
-    pub fn level(&self) -> Level {
-        self.current_level
-    }
-
-    /// Check if a variable is assigned.
-    pub fn is_assigned(&self, v: Var) -> bool {
-        let assigned: std::collections::HashSet<_> =
-            self.db.collect(self.assigned).into_iter().collect();
-        assigned.contains(&Lit::pos(v)) || assigned.contains(&Lit::neg(v))
-    }
-
-    /// Get the truth value of a variable, if assigned.
-    pub fn value(&self, v: Var) -> Option<bool> {
-        let assigned: std::collections::HashSet<_> =
-            self.db.collect(self.assigned).into_iter().collect();
-        if assigned.contains(&Lit::pos(v)) {
-            Some(true)
-        } else if assigned.contains(&Lit::neg(v)) {
-            Some(false)
-        } else {
-            None
-        }
-    }
-
-    /// Get the next unassigned variable (simple heuristic: lowest numbered).
-    pub fn pick_branching_variable(&self) -> Option<Var> {
-        for v in 1..=self.num_vars.raw() {
-            let var = Var::new(v);
-            if !self.is_assigned(var) {
-                return Some(var);
-            }
-        }
-        None
-    }
-
-    /// Get current conflicts (for debugging).
-    pub fn get_conflicts(&self) -> Vec<Conflict> {
-        self.db.collect(self.conflicts)
-    }
-
-    /// Get current units (for debugging).
-    pub fn get_units(&self) -> Vec<(ClauseId, Lit)> {
-        self.db.collect(self.units)
-    }
-
-    /// Get the causes (implication graph) as a structured data type.
-    /// Returns HashMap<Lit, BTreeMap<CommitId, Multiset<(ClauseId, Level)>>>
-    /// For each literal, this maps each CommitId to the multiset of (ClauseId, Level) that derived it at that commit.
-    pub fn get_causes(
-        &self,
-    ) -> std::collections::HashMap<
-        Lit,
-        std::collections::BTreeMap<CommitId, crate::Multiset<(ClauseId, Level)>>,
-    > {
-        use crate::Multiset;
-        use std::collections::{BTreeMap, HashMap};
-
-        let raw: Vec<((Lit, CommitId), (ClauseId, Level))> = self.db.collect(self.causes);
-        let mut result: HashMap<Lit, BTreeMap<CommitId, Multiset<(ClauseId, Level)>>> =
-            HashMap::new();
-
-        for ((lit, commit_id), (clause_id, level)) in raw {
-            result
-                .entry(lit)
-                .or_default()
-                .entry(commit_id)
-                .or_default()
-                .insert((clause_id, level));
-        }
-
-        result
-    }
-
-    /// Main solve loop.
-    pub fn solve(&mut self) -> bool {
-        loop {
-            // Propagate
-            match self.propagate() {
-                Ok(()) => {
-                    // No conflict - pick next variable or return SAT
-                    match self.pick_branching_variable() {
-                        Some(v) => {
-                            // Decide: try positive literal first
-                            self.decide(Lit::pos(v));
-                        }
-                        None => {
-                            // All variables assigned, no conflict = SAT
-                            return true;
-                        }
-                    }
-                }
-                Err(_conflict_clause) => {
-                    // Conflict! Need to backtrack.
-                    // Find a decision level where we haven't tried both polarities.
-                    loop {
-                        if self.current_level == Level::TOP {
-                            // Conflict at level 0 = UNSAT
-                            return false;
-                        }
-
-                        // Get the decision at current level
-                        let (_, decision_lit, tried_both) =
-                            self.decision_stack.last().copied().unwrap();
-
-                        // Calculate previous level
-                        let prev_level = Level::new(self.current_level.raw().saturating_sub(1));
-
-                        if tried_both {
-                            // Already tried both polarities at this level, backtrack further
-                            self.backtrack_to(prev_level);
-                        } else {
-                            // Haven't tried opposite polarity yet
-                            // Backtrack this level and try the opposite
-                            self.backtrack_to(prev_level);
-                            self.decide_internal(neg(decision_lit), true);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Helper to create literals from raw i32
-    fn lit(raw: i32) -> Lit {
-        Lit::from_raw(raw)
-    }
-
-    // Helper to create clause IDs
-    fn cid(n: u32) -> ClauseId {
-        ClauseId::new(n)
-    }
-
-    #[test]
-    fn test_simple_sat() {
-        // (x1 OR x2) AND (x1 OR NOT x2)
-        // SAT: x1 = true
-        let mut solver = Solver::new(Var::new(2));
-        solver.add_clause(cid(1), &[lit(1), lit(2)]); // x1 OR x2
-        solver.add_clause(cid(2), &[lit(1), lit(-2)]); // x1 OR NOT x2
-
-        assert!(solver.solve());
-        assert_eq!(solver.value(Var::new(1)), Some(true));
-    }
-
-    #[test]
-    fn test_simple_unsat() {
-        // (x1) AND (NOT x1)
-        // UNSAT
-        let mut solver = Solver::new(Var::new(1));
-        solver.add_clause(cid(1), &[lit(1)]); // x1
-        solver.add_clause(cid(2), &[lit(-1)]); // NOT x1
-
-        assert!(!solver.solve());
-    }
-
-    #[test]
-    fn test_unit_propagation() {
-        // (x1) AND (NOT x1 OR x2) AND (NOT x2 OR x3)
-        // Unit prop: x1=T -> x2=T -> x3=T
-        let mut solver = Solver::new(Var::new(3));
-        solver.add_clause(cid(1), &[lit(1)]); // x1
-        solver.add_clause(cid(2), &[lit(-1), lit(2)]); // NOT x1 OR x2
-        solver.add_clause(cid(3), &[lit(-2), lit(3)]); // NOT x2 OR x3
-
-        assert!(solver.solve());
-        assert_eq!(solver.value(Var::new(1)), Some(true));
-        assert_eq!(solver.value(Var::new(2)), Some(true));
-        assert_eq!(solver.value(Var::new(3)), Some(true));
-    }
-
-    #[test]
-    fn test_backtracking() {
-        // (x1 OR x2) AND (NOT x1 OR x2) AND (x1 OR NOT x2) AND (NOT x1 OR NOT x2)
-        // This is UNSAT (pigeon hole for 2 pigeons, 1 hole)
-        let mut solver = Solver::new(Var::new(2));
-        solver.add_clause(cid(1), &[lit(1), lit(2)]); // x1 OR x2
-        solver.add_clause(cid(2), &[lit(-1), lit(2)]); // NOT x1 OR x2
-        solver.add_clause(cid(3), &[lit(1), lit(-2)]); // x1 OR NOT x2
-        solver.add_clause(cid(4), &[lit(-1), lit(-2)]); // NOT x1 OR NOT x2
-
-        assert!(!solver.solve());
-    }
 }
