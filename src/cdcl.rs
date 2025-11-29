@@ -151,6 +151,16 @@ impl ClauseId {
     }
 }
 
+/// A conflict detected during propagation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Conflict {
+    /// A clause has all its literals assigned false.
+    EmptyClause(ClauseId),
+    /// Both a literal and its negation are assigned.
+    /// The variable is stored (the literal that was assigned both ways).
+    DirectConflict(Var),
+}
+
 /// CDCL SAT Solver.
 pub struct Solver {
     db: Database,
@@ -190,8 +200,8 @@ pub struct Solver {
     /// Unit clauses that need propagation: (clause_id, implied_literal)
     units: Relation<(ClauseId, Lit)>,
 
-    /// Conflicts: clause_id of conflicting clauses
-    conflicts: Relation<ClauseId>,
+    /// Conflicts detected during propagation
+    conflicts: Relation<Conflict>,
 
     // === Solver State ===
     /// Current decision level (local copy for convenience).
@@ -323,19 +333,23 @@ impl Solver {
         );
         // Filter to only pairs where the literals are different (one positive, one negative)
         let conflicting_pairs = db.filter(both_polarities, |((lit1, _), (lit2, _))| lit1 != lit2);
-        // Map to a dummy conflict clause ID (use 0 to indicate direct conflict)
-        let direct_conflicts = db.map(conflicting_pairs, |_| ClauseId::new(0));
-        let direct_conflicts_distinct = db.distinct(direct_conflicts);
+        // Extract the variable that has both polarities assigned
+        let direct_conflict_vars = db.map(conflicting_pairs, |((_, v), _)| *v);
+        let direct_conflict_vars_distinct = db.distinct(direct_conflict_vars);
+
+        // Map conflicts to Conflict enum
+        let clause_conflict_enums = db.map(clause_conflicts, |cid| Conflict::EmptyClause(*cid));
+        let direct_conflict_enums = db.map(direct_conflict_vars_distinct, |v| Conflict::DirectConflict(*v));
 
         // All conflicts
-        let conflicts = db.union(clause_conflicts, direct_conflicts_distinct);
+        let conflicts = db.union(clause_conflict_enums, direct_conflict_enums);
 
         // === Set up interrupts for early conflict detection ===
         // Interrupt 1: Empty clause (all literals false)
-        db.interrupt(clause_conflicts);
+        db.interrupt(clause_conflict_enums);
 
         // Interrupt 2: Both literal and its negation assigned
-        db.interrupt(direct_conflicts_distinct);
+        db.interrupt(direct_conflict_enums);
 
         // === Set up the feedback loop ===
         // unit_lits: just the literals from units (without clause id)
@@ -402,16 +416,16 @@ impl Solver {
     }
 
     /// Propagate units until fixpoint or conflict.
-    /// Returns Ok(()) if no conflict, Err(clause_id) if conflict found.
+    /// Returns Ok(()) if no conflict, Err(conflict) if conflict found.
     ///
     /// With the feedback-based approach, propagation happens automatically
     /// when we commit. This method just checks for conflicts.
-    pub fn propagate(&mut self) -> Result<(), ClauseId> {
+    pub fn propagate(&mut self) -> Result<(), Conflict> {
         // The feedback loop has already propagated to fixpoint
         // Just check for conflicts
         let conflicts: Vec<_> = self.db.collect(self.conflicts);
-        if let Some(&cid) = conflicts.first() {
-            return Err(cid);
+        if let Some(&conflict) = conflicts.first() {
+            return Err(conflict);
         }
         Ok(())
     }
@@ -476,7 +490,7 @@ impl Solver {
     }
 
     /// Get current conflicts (for debugging).
-    pub fn get_conflicts(&self) -> Vec<ClauseId> {
+    pub fn get_conflicts(&self) -> Vec<Conflict> {
         self.db.collect(self.conflicts)
     }
 
