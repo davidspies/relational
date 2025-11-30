@@ -52,15 +52,6 @@ impl Sink<((Lit, CommitId), (ClauseId, Level))> for CauseSink {
         let ((lit, commit_id), (clause_id, level)) = tuple;
         let commits = self.data.entry(lit).or_default();
         let multiset = commits.entry(commit_id).or_default();
-
-        if diff.0 > 0 {
-            for _ in 0..diff.0 {
-                multiset.insert((clause_id, level));
-            }
-        } else {
-            for _ in 0..(-diff.0) {
-                multiset.delete((clause_id, level));
-            }
-        }
+        multiset.update((clause_id, level), diff);
     }
 }
