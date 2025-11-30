@@ -2,9 +2,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::Tuple;
 use crate::change::Diff;
 use crate::collection::Multiset;
 use crate::database::commit_id::CommitId;
@@ -25,14 +25,14 @@ pub(super) trait AnyInput {
 }
 
 /// Wrapper to make InputHandle type-erased (seen-set semantics).
-pub(super) struct InputWrapper<T: Tuple> {
+pub(super) struct InputWrapper<T> {
     /// Shared state with InputHandle and InputRelation.
     state: Rc<RefCell<InputState<T>>>,
     /// Stack of tuples inserted at each checkpoint level.
     checkpoint_stack: Vec<HashSet<T>>,
 }
 
-impl<T: Tuple> InputWrapper<T> {
+impl<T> InputWrapper<T> {
     pub(super) fn new(state: Rc<RefCell<InputState<T>>>) -> Self {
         InputWrapper {
             state,
@@ -47,7 +47,7 @@ impl<T: Tuple> InputWrapper<T> {
     }
 }
 
-impl<T: Tuple + 'static> AnyInput for InputWrapper<T> {
+impl<T: Clone + Eq + Hash> AnyInput for InputWrapper<T> {
     fn push_checkpoint(&mut self) {
         self.checkpoint_stack.push(HashSet::new());
     }
@@ -88,7 +88,7 @@ pub(super) trait AnyFeedback {
 }
 
 /// Wrapper to make feedback type-erased.
-pub(super) struct FeedbackWrapper<T: Tuple, R: Relation<T>> {
+pub(super) struct FeedbackWrapper<T, R: Relation<T>> {
     /// Shared variable state (also accessed by VariableRelation).
     variable: Rc<RefCell<Variable<T>>>,
     /// The input relation that feeds into this variable.
@@ -97,7 +97,7 @@ pub(super) struct FeedbackWrapper<T: Tuple, R: Relation<T>> {
     commit_id: Rc<Cell<CommitId>>,
 }
 
-impl<T: Tuple, R: Relation<T>> FeedbackWrapper<T, R> {
+impl<T: Clone + Eq + Hash, R: Relation<T>> FeedbackWrapper<T, R> {
     pub(super) fn new(
         variable: Rc<RefCell<Variable<T>>>,
         input: R,
@@ -117,7 +117,7 @@ impl<T: Tuple, R: Relation<T>> FeedbackWrapper<T, R> {
     }
 }
 
-impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWrapper<T, R> {
+impl<T: Clone + Eq + Hash, R: Relation<T>> AnyFeedback for FeedbackWrapper<T, R> {
     fn push_checkpoint(&mut self) {
         self.variable.borrow_mut().push_checkpoint();
     }
@@ -185,13 +185,13 @@ pub(super) trait AnyInterrupt {
 }
 
 /// Wrapper for interrupt - checks if a relation has any positive entries.
-pub(super) struct InterruptWrapper<T: Tuple, R: Relation<T>> {
+pub(super) struct InterruptWrapper<T, R: Relation<T>> {
     input: R,
     has_positive: bool,
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T: Tuple, R: Relation<T>> InterruptWrapper<T, R> {
+impl<T, R: Relation<T>> InterruptWrapper<T, R> {
     pub(super) fn new(input: R) -> Self {
         InterruptWrapper {
             input,
@@ -201,7 +201,7 @@ impl<T: Tuple, R: Relation<T>> InterruptWrapper<T, R> {
     }
 }
 
-impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyInterrupt for InterruptWrapper<T, R> {
+impl<T, R: Relation<T>> AnyInterrupt for InterruptWrapper<T, R> {
     fn check(&mut self) -> bool {
         self.input.foreach(&mut |_, diff| {
             if diff.0 > 0 {
@@ -218,7 +218,7 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyInterrupt for InterruptWra
 
 /// Wrapper for feedback_with_id - stamps tuples with CommitId when first seen.
 /// Input relation produces T, variable stores (T, CommitId).
-pub(super) struct FeedbackWithIdWrapper<T: Tuple, R: Relation<T>> {
+pub(super) struct FeedbackWithIdWrapper<T, R: Relation<T>> {
     /// Shared variable state (also accessed by VariableRelation).
     variable: Rc<RefCell<Variable<(T, CommitId)>>>,
     /// Shared commit ID counter.
@@ -231,7 +231,7 @@ pub(super) struct FeedbackWithIdWrapper<T: Tuple, R: Relation<T>> {
     t_to_commit_id: HashMap<T, CommitId>,
 }
 
-impl<T: Tuple, R: Relation<T>> FeedbackWithIdWrapper<T, R> {
+impl<T: Clone + Eq + Hash, R: Relation<T>> FeedbackWithIdWrapper<T, R> {
     pub(super) fn new(
         variable: Rc<RefCell<Variable<(T, CommitId)>>>,
         input: R,
@@ -253,7 +253,7 @@ impl<T: Tuple, R: Relation<T>> FeedbackWithIdWrapper<T, R> {
     }
 }
 
-impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWithIdWrapper<T, R> {
+impl<T: Clone + Eq + Hash, R: Relation<T>> AnyFeedback for FeedbackWithIdWrapper<T, R> {
     fn push_checkpoint(&mut self) {
         self.variable.borrow_mut().push_checkpoint();
     }

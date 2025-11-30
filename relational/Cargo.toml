@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+derive-where = "*"
 
 [dev-dependencies]
-proptest = "1.4"
+proptest = "*"

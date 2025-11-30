@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 
-use crate::Tuple;
 use crate::change::Diff;
 
 use super::relation::Relation;
@@ -12,9 +11,8 @@ use super::relation::Relation;
 /// Output is (key, max_value) pairs.
 pub struct MaxRelation<T, K, V, FK, FV, R>
 where
-    T: Tuple,
-    K: Tuple + Eq + Hash,
-    V: Tuple + Ord,
+    K: Eq + Hash,
+    V: Ord,
     FK: Fn(&T) -> K,
     FV: Fn(&T) -> V,
     R: Relation<T>,
@@ -30,11 +28,10 @@ where
 
 impl<T, K, V, FK, FV, R> Relation<(K, V)> for MaxRelation<T, K, V, FK, FV, R>
 where
-    T: Tuple + 'static,
-    K: Tuple + Eq + Hash + 'static,
-    V: Tuple + Ord + 'static,
-    FK: Fn(&T) -> K + 'static,
-    FV: Fn(&T) -> V + 'static,
+    K: Clone + Eq + Hash,
+    V: Clone + Ord,
+    FK: Fn(&T) -> K,
+    FV: Fn(&T) -> V,
     R: Relation<T>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
@@ -82,11 +79,10 @@ where
 /// Create a max relation - maximum value by key.
 pub fn max<T, K, V, FK, FV, R>(input: R, key_fn: FK, val_fn: FV) -> MaxRelation<T, K, V, FK, FV, R>
 where
-    T: Tuple + 'static,
-    K: Tuple + Eq + Hash + 'static,
-    V: Tuple + Ord + 'static,
-    FK: Fn(&T) -> K + 'static,
-    FV: Fn(&T) -> V + 'static,
+    K: Eq + Hash,
+    V: Ord,
+    FK: Fn(&T) -> K,
+    FV: Fn(&T) -> V,
     R: Relation<T>,
 {
     MaxRelation {

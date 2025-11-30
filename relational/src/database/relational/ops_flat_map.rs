@@ -1,6 +1,5 @@
 //! FlatMap operator - stateless, transforms each tuple into zero or more tuples.
 
-use crate::Tuple;
 use crate::change::Diff;
 
 use super::relation::Relation;
@@ -8,8 +7,6 @@ use super::relation::Relation;
 /// A flat_map relation - transforms each tuple into zero or more tuples.
 pub struct FlatMapRelation<T, U, I, F, R>
 where
-    T: Tuple,
-    U: Tuple,
     I: IntoIterator<Item = U>,
     F: Fn(T) -> I,
     R: Relation<T>,
@@ -21,10 +18,8 @@ where
 
 impl<T, U, I, F, R> Relation<U> for FlatMapRelation<T, U, I, F, R>
 where
-    T: Tuple + 'static,
-    U: Tuple + 'static,
-    I: IntoIterator<Item = U> + 'static,
-    F: Fn(T) -> I + 'static,
+    I: IntoIterator<Item = U>,
+    F: Fn(T) -> I,
     R: Relation<T>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut(U, Diff)) {
@@ -40,10 +35,8 @@ where
 /// Create a flat_map relation.
 pub fn flat_map<T, U, I, F, R>(input: R, f: F) -> FlatMapRelation<T, U, I, F, R>
 where
-    T: Tuple + 'static,
-    U: Tuple + 'static,
-    I: IntoIterator<Item = U> + 'static,
-    F: Fn(T) -> I + 'static,
+    I: IntoIterator<Item = U>,
+    F: Fn(T) -> I,
     R: Relation<T>,
 {
     FlatMapRelation {

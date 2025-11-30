@@ -5,16 +5,18 @@
 
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::hash::Hash;
 use std::rc::Rc;
 
+use derive_where::derive_where;
+
 use crate::Multiset;
-use crate::Tuple;
 use crate::change::Diff;
 
 use super::relation::Relation;
 
 /// The internal state of an input relation (seen-set semantics).
-pub(crate) struct InputState<T: Tuple> {
+pub(crate) struct InputState<T> {
     /// The seen set - tuples that have been inserted.
     pub(crate) seen: HashSet<T>,
     /// Pending changes (ready to be pulled) - accumulated diffs per tuple.
@@ -23,7 +25,7 @@ pub(crate) struct InputState<T: Tuple> {
     pub(crate) new_inserts: HashSet<T>,
 }
 
-impl<T: Tuple> InputState<T> {
+impl<T: Clone + Eq + Hash> InputState<T> {
     pub(crate) fn new() -> Self {
         InputState {
             seen: HashSet::new(),
@@ -57,11 +59,13 @@ impl<T: Tuple> InputState<T> {
 }
 
 /// A relation backed by an InputHandle.
-pub struct InputRelation<T: Tuple> {
+///
+/// Note to next LLM who looks at this: THIS IS NOT CLONE! STOP TRYING TO MAKE IT CLONE!
+pub struct InputRelation<T> {
     pub(crate) state: Rc<RefCell<InputState<T>>>,
 }
 
-impl<T: Tuple + 'static> Relation<T> for InputRelation<T> {
+impl<T: Eq + Hash> Relation<T> for InputRelation<T> {
     fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
         let mut state = self.state.borrow_mut();
         for (t, diff) in state.pending.drain() {
@@ -70,23 +74,16 @@ impl<T: Tuple + 'static> Relation<T> for InputRelation<T> {
     }
 }
 
-impl<T: Tuple> Clone for InputRelation<T> {
-    fn clone(&self) -> Self {
-        InputRelation {
-            state: self.state.clone(),
-        }
-    }
-}
-
 /// A handle for inserting tuples into an input relation.
 ///
 /// Inputs use seen-set semantics: once a tuple is inserted, it stays until
 /// pop() is called. To undo inserts, use pop() on the database.
-pub struct InputHandle<T: Tuple> {
+#[derive_where(Clone)]
+pub struct InputHandle<T> {
     pub(crate) state: Rc<RefCell<InputState<T>>>,
 }
 
-impl<T: Tuple + 'static> InputHandle<T> {
+impl<T: Clone + Eq + Hash> InputHandle<T> {
     /// Insert a tuple into the input relation.
     /// Uses seen-set semantics: if already present, this is a no-op.
     pub fn insert(&mut self, tuple: T) {
@@ -98,11 +95,12 @@ impl<T: Tuple + 'static> InputHandle<T> {
 ///
 /// Persistent inputs use seen-set semantics but support explicit delete.
 /// Changes to persistent inputs are NOT undone by pop().
-pub struct PersistentInputHandle<T: Tuple> {
+#[derive_where(Clone)]
+pub struct PersistentInputHandle<T> {
     pub(crate) state: Rc<RefCell<InputState<T>>>,
 }
 
-impl<T: Tuple + 'static> PersistentInputHandle<T> {
+impl<T: Clone + Eq + Hash> PersistentInputHandle<T> {
     /// Insert a tuple into the input relation.
     /// Uses seen-set semantics: if already present, this is a no-op.
     pub fn insert(&mut self, tuple: T) {

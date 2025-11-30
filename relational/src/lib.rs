@@ -90,7 +90,3 @@ pub mod database;
 pub use change::Diff;
 pub use collection::Multiset;
 pub use database::{CommitId, Database};
-
-/// A trait for types that can be used as tuples in relations.
-pub trait Tuple: Clone + Eq + std::hash::Hash + std::fmt::Debug + 'static {}
-impl<T: Clone + Eq + std::hash::Hash + std::fmt::Debug + 'static> Tuple for T {}

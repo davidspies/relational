@@ -1,9 +1,9 @@
 //! SavedRelation - for using a relation in multiple places.
 
 use std::cell::{Cell, RefCell};
+use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::Tuple;
 use crate::change::{Change, Diff};
 use crate::collection::Multiset;
 use crate::database::commit_id::CommitId;
@@ -11,7 +11,7 @@ use crate::database::commit_id::CommitId;
 use super::relation::Relation;
 
 /// Shared state for a saved relation.
-struct SavedState<T: Tuple, R: Relation<T>> {
+struct SavedState<T, R: Relation<T>> {
     upstream: R,
     /// Separate pending multiset for each consumer.
     consumer_queues: Vec<Rc<RefCell<Multiset<T>>>>,
@@ -21,7 +21,7 @@ struct SavedState<T: Tuple, R: Relation<T>> {
     last_update_commit_id: CommitId,
 }
 
-impl<T: Tuple + 'static, R: Relation<T>> SavedState<T, R> {
+impl<T: Clone + Eq + Hash, R: Relation<T>> SavedState<T, R> {
     /// Pull changes from upstream and distribute to all consumer queues.
     fn update(&mut self) {
         // Optimization: skip pull if commit ID hasn't changed since last update
@@ -47,11 +47,11 @@ impl<T: Tuple + 'static, R: Relation<T>> SavedState<T, R> {
 ///
 /// Call `.get()` to obtain a relation that can be used in the dataflow graph.
 /// Each call to `.get()` returns a new consumer of the saved data.
-pub struct SavedRelation<T: Tuple, R: Relation<T>> {
+pub struct SavedRelation<T, R: Relation<T>> {
     state: Rc<RefCell<SavedState<T, R>>>,
 }
 
-impl<T: Tuple + 'static, R: Relation<T>> SavedRelation<T, R> {
+impl<T: Eq + Hash, R: Relation<T>> SavedRelation<T, R> {
     /// Create a new saved relation from an upstream relation.
     pub(crate) fn new(upstream: R) -> Self {
         SavedRelation {
@@ -90,12 +90,12 @@ impl<T: Tuple + 'static, R: Relation<T>> SavedRelation<T, R> {
 }
 
 /// A getter for a saved relation - implements Relation.
-pub struct SavedGetter<T: Tuple, R: Relation<T>> {
+pub struct SavedGetter<T, R: Relation<T>> {
     state: Rc<RefCell<SavedState<T, R>>>,
     queue: Rc<RefCell<Multiset<T>>>,
 }
 
-impl<T: Tuple + 'static, R: Relation<T>> Relation<T> for SavedGetter<T, R> {
+impl<T: Clone + Eq + Hash, R: Relation<T>> Relation<T> for SavedGetter<T, R> {
     fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
         // First pull from upstream to all queues
         self.state.borrow_mut().update();
@@ -109,6 +109,6 @@ impl<T: Tuple + 'static, R: Relation<T>> Relation<T> for SavedGetter<T, R> {
 }
 
 /// Create a saved relation.
-pub fn save<T: Tuple + 'static, R: Relation<T>>(upstream: R) -> SavedRelation<T, R> {
+pub fn save<T: Eq + Hash, R: Relation<T>>(upstream: R) -> SavedRelation<T, R> {
     SavedRelation::new(upstream)
 }

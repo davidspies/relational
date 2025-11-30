@@ -4,14 +4,7 @@
 //! When input state is already updated (NEW state) before the incremental function
 //! runs, it must reconstruct OLD state by reversing the changes.
 
-use relational::database::{
-    Database, Output, Relation, difference, distinct, join, map, output, save,
-};
-
-/// Helper to collect output after update.
-fn collect_output<T: relational::Tuple + Clone>(out: &mut Output<T>) -> Vec<T> {
-    out.collect()
-}
+use relational::database::{Database, Relation, difference, distinct, join, map, output, save};
 
 /// Test: distinct after map produces correct results.
 /// This is the pattern used in CDCL: map extracts clause IDs, distinct deduplicates.
@@ -171,7 +164,7 @@ fn test_cdcl_pattern() {
 
     // Clauses that are NOT satisfied
     let unsatisfied = difference(all_clause_ids_distinct, satisfied_distinct);
-    let mut unsatisfied_out = output(unsatisfied.boxed());
+    let unsatisfied_out = output(unsatisfied.boxed());
 
     // Add clauses: (x1) AND (NOT x1) - unsatisfiable
     clauses.insert((1, 1)); // clause 1 contains x1
@@ -179,7 +172,7 @@ fn test_cdcl_pattern() {
     db.commit();
 
     // Initially no assignments, both clauses unsatisfied
-    let mut unsat = collect_output(&mut unsatisfied_out);
+    let mut unsat = unsatisfied_out.collect();
     unsat.sort();
     assert_eq!(
         unsat,
@@ -193,7 +186,7 @@ fn test_cdcl_pattern() {
     db.commit();
 
     // Clause 1 satisfied, clause 2 unsatisfied
-    let unsat_after_assign = collect_output(&mut unsatisfied_out);
+    let unsat_after_assign = unsatisfied_out.collect();
     assert_eq!(
         unsat_after_assign,
         vec![2],
@@ -204,7 +197,7 @@ fn test_cdcl_pattern() {
     let popped = db.pop();
     assert!(popped, "Tried to pop past level 0");
 
-    let mut unsat_after_pop = collect_output(&mut unsatisfied_out);
+    let mut unsat_after_pop = unsatisfied_out.collect();
     unsat_after_pop.sort();
     assert_eq!(
         unsat_after_pop,

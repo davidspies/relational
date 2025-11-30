@@ -1,6 +1,5 @@
 //! Union operator - stateless, combines two relations.
 
-use crate::Tuple;
 use crate::change::Diff;
 
 use super::relation::Relation;
@@ -8,7 +7,6 @@ use super::relation::Relation;
 /// A union relation - combines changes from both inputs.
 pub struct UnionRelation<T, L, R>
 where
-    T: Tuple,
     L: Relation<T>,
     R: Relation<T>,
 {
@@ -19,7 +17,6 @@ where
 
 impl<T, L, R> Relation<T> for UnionRelation<T, L, R>
 where
-    T: Tuple + 'static,
     L: Relation<T>,
     R: Relation<T>,
 {
@@ -32,7 +29,6 @@ where
 /// Create a union relation.
 pub fn union<T, L, R>(left: L, right: R) -> UnionRelation<T, L, R>
 where
-    T: Tuple + 'static,
     L: Relation<T>,
     R: Relation<T>,
 {

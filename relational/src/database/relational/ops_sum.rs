@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::{Add, Mul, Sub};
 
-use crate::Tuple;
 use crate::change::Diff;
 
 use super::relation::Relation;
@@ -13,9 +12,8 @@ use super::relation::Relation;
 /// Output is (key, sum) pairs.
 pub struct SumRelation<T, K, V, FK, FV, R>
 where
-    T: Tuple,
-    K: Tuple + Eq + Hash,
-    V: Tuple + Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
+    K: Eq + Hash,
+    V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
     FK: Fn(&T) -> K,
     FV: Fn(&T) -> V,
     R: Relation<T>,
@@ -30,17 +28,10 @@ where
 
 impl<T, K, V, FK, FV, R> Relation<(K, V)> for SumRelation<T, K, V, FK, FV, R>
 where
-    T: Tuple + 'static,
-    K: Tuple + Eq + Hash + 'static,
-    V: Tuple
-        + Add<Output = V>
-        + Sub<Output = V>
-        + Mul<i64, Output = V>
-        + Default
-        + PartialEq
-        + 'static,
-    FK: Fn(&T) -> K + 'static,
-    FV: Fn(&T) -> V + 'static,
+    K: Clone + Eq + Hash,
+    V: Clone + Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
+    FK: Fn(&T) -> K,
+    FV: Fn(&T) -> V,
     R: Relation<T>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
@@ -77,17 +68,10 @@ where
 /// Create a sum relation - sums values by key.
 pub fn sum<T, K, V, FK, FV, R>(input: R, key_fn: FK, val_fn: FV) -> SumRelation<T, K, V, FK, FV, R>
 where
-    T: Tuple + 'static,
-    K: Tuple + Eq + Hash + 'static,
-    V: Tuple
-        + Add<Output = V>
-        + Sub<Output = V>
-        + Mul<i64, Output = V>
-        + Default
-        + PartialEq
-        + 'static,
-    FK: Fn(&T) -> K + 'static,
-    FV: Fn(&T) -> V + 'static,
+    K: Eq + Hash,
+    V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
+    FK: Fn(&T) -> K,
+    FV: Fn(&T) -> V,
     R: Relation<T>,
 {
     SumRelation {

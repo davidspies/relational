@@ -1,8 +1,10 @@
 //! Variable for tracking iterative computation state.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
-use crate::Tuple;
 use crate::change::Diff;
 
 /// A variable in an iterative computation.
@@ -16,7 +18,7 @@ use crate::change::Diff;
 ///
 /// During normal operation, tuples are added to output_seen when they first become
 /// positive in input_totals. During pop(), we manipulate output_seen directly.
-pub struct Variable<T: Tuple> {
+pub struct Variable<T> {
     /// Cumulative input multiplicities.
     /// A tuple is considered "reachable" when this is positive.
     input_totals: HashMap<T, i64>,
@@ -30,7 +32,7 @@ pub struct Variable<T: Tuple> {
     outputs_by_checkpoint: Vec<Vec<T>>,
 }
 
-impl<T: Tuple> Variable<T> {
+impl<T: Clone + Eq + Hash> Variable<T> {
     /// Create a new empty variable.
     pub fn new() -> Self {
         Variable {
@@ -172,7 +174,7 @@ impl<T: Tuple> Variable<T> {
     }
 }
 
-impl<T: Tuple> Default for Variable<T> {
+impl<T: Clone + Eq + Hash> Default for Variable<T> {
     fn default() -> Self {
         Self::new()
     }

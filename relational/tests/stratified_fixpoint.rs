@@ -4,13 +4,8 @@
 //! with each reaching fixpoint before the next is applied.
 
 use relational::database::{
-    Database, Output, Relation, difference, filter, join, map, max, output, save, union,
+    Database, Relation, difference, filter, join, map, max, output, save, union,
 };
-
-/// Helper to collect output after update.
-fn collect_output<T: relational::Tuple + Clone>(out: &mut Output<T>) -> Vec<T> {
-    out.collect()
-}
 
 /// Test that multiple feedbacks run in stratified order.
 ///
@@ -519,11 +514,11 @@ fn test_push_pop_simple() {
     items_h.insert(2);
     db.commit();
 
-    let mut items_out = output(items_saved.get().boxed());
-    let mut doubled_out = output(doubled.boxed());
+    let items_out = output(items_saved.get().boxed());
+    let doubled_out = output(doubled.boxed());
 
-    assert_eq!(collect_output(&mut items_out).len(), 2);
-    assert_eq!(collect_output(&mut doubled_out).len(), 2);
+    assert_eq!(items_out.collect().len(), 2);
+    assert_eq!(doubled_out.collect().len(), 2);
 
     // Push checkpoint
     db.push();
@@ -533,10 +528,10 @@ fn test_push_pop_simple() {
     items_h.insert(3);
     db.commit();
 
-    let items_result = collect_output(&mut items_out);
+    let items_result = items_out.collect();
     assert_eq!(items_result.len(), 3); // {1, 2, 3}
 
-    let doubled_result = collect_output(&mut doubled_out);
+    let doubled_result = doubled_out.collect();
     assert!(doubled_result.contains(&2)); // 1*2
     assert!(doubled_result.contains(&4)); // 2*2
     assert!(doubled_result.contains(&6)); // 3*2
@@ -546,12 +541,12 @@ fn test_push_pop_simple() {
     assert_eq!(db.depth(), 0);
 
     // Check state is restored - 3 should be gone
-    let items_result = collect_output(&mut items_out);
+    let items_result = items_out.collect();
     assert_eq!(items_result.len(), 2);
     assert!(items_result.contains(&1));
     assert!(items_result.contains(&2));
 
-    let doubled_result = collect_output(&mut doubled_out);
+    let doubled_result = doubled_out.collect();
     assert!(doubled_result.contains(&2)); // 1*2
     assert!(doubled_result.contains(&4)); // 2*2
 }
@@ -566,7 +561,7 @@ fn test_push_pop_nested() {
     items_h.insert(1);
     db.commit();
 
-    let mut items_out = output(items_rel.boxed());
+    let items_out = output(items_rel.boxed());
 
     // First push
     db.push();
@@ -578,14 +573,14 @@ fn test_push_pop_nested() {
     items_h.insert(3);
     db.commit();
 
-    assert_eq!(collect_output(&mut items_out).len(), 3); // {1, 2, 3}
+    assert_eq!(items_out.collect().len(), 3); // {1, 2, 3}
     assert_eq!(db.depth(), 2);
 
     // Pop level2 - should remove 3
     let popped = db.pop();
     assert!(popped, "Tried to pop past level 0");
     assert_eq!(db.depth(), 1);
-    let items_result = collect_output(&mut items_out);
+    let items_result = items_out.collect();
     assert_eq!(items_result.len(), 2);
     assert!(items_result.contains(&1));
     assert!(items_result.contains(&2));
@@ -595,7 +590,7 @@ fn test_push_pop_nested() {
     let popped = db.pop();
     assert!(popped, "Tried to pop past level 0");
     assert_eq!(db.depth(), 0);
-    let items_result = collect_output(&mut items_out);
+    let items_result = items_out.collect();
     assert_eq!(items_result.len(), 1);
     assert!(items_result.contains(&1));
 }
@@ -672,7 +667,7 @@ fn test_push_pop_no_changes() {
     items_h.insert(2);
     db.commit();
 
-    let mut items_out = output(items_rel.boxed());
+    let items_out = output(items_rel.boxed());
 
     db.push();
     // No changes made
@@ -680,7 +675,7 @@ fn test_push_pop_no_changes() {
     assert!(db.pop());
 
     // State should be unchanged
-    let items_result = collect_output(&mut items_out);
+    let items_result = items_out.collect();
     assert_eq!(items_result.len(), 2);
     assert!(items_result.contains(&1));
     assert!(items_result.contains(&2));
@@ -710,8 +705,8 @@ fn test_persistent_vs_regular_inputs() {
     learned_h.insert(100);
     db.commit();
 
-    let mut decisions_out = output(decisions_rel.boxed());
-    let mut learned_out = output(learned_rel.boxed());
+    let decisions_out = output(decisions_rel.boxed());
+    let learned_out = output(learned_rel.boxed());
 
     // Push checkpoint
     db.push();
@@ -722,11 +717,11 @@ fn test_persistent_vs_regular_inputs() {
     db.commit();
 
     // Verify both have the new data
-    let decisions_result = collect_output(&mut decisions_out);
+    let decisions_result = decisions_out.collect();
     assert!(decisions_result.contains(&1));
     assert!(decisions_result.contains(&2));
 
-    let learned_result = collect_output(&mut learned_out);
+    let learned_result = learned_out.collect();
     assert!(learned_result.contains(&100));
     assert!(learned_result.contains(&200));
 
@@ -735,7 +730,7 @@ fn test_persistent_vs_regular_inputs() {
     assert!(popped, "Tried to pop past level 0");
 
     // Decisions should be restored (2 removed)
-    let decisions_result = collect_output(&mut decisions_out);
+    let decisions_result = decisions_out.collect();
     assert!(decisions_result.contains(&1));
     assert!(
         !decisions_result.contains(&2),
@@ -744,7 +739,7 @@ fn test_persistent_vs_regular_inputs() {
     assert_eq!(decisions_result.len(), 1);
 
     // Learned clauses should persist (200 kept)
-    let learned_result = collect_output(&mut learned_out);
+    let learned_result = learned_out.collect();
     assert!(learned_result.contains(&100));
     assert!(
         learned_result.contains(&200),
@@ -765,8 +760,8 @@ fn test_persistent_nested_checkpoints() {
     persistent_h.insert(100);
     db.commit();
 
-    let mut regular_out = output(regular_rel.boxed());
-    let mut persistent_out = output(persistent_rel.boxed());
+    let regular_out = output(regular_rel.boxed());
+    let persistent_out = output(persistent_rel.boxed());
 
     // Level 1
     db.push();
@@ -781,19 +776,19 @@ fn test_persistent_nested_checkpoints() {
     db.commit();
 
     // Verify current state
-    assert_eq!(collect_output(&mut regular_out).len(), 3); // {1, 2, 3}
-    assert_eq!(collect_output(&mut persistent_out).len(), 3); // {100, 200, 300}
+    assert_eq!(regular_out.collect().len(), 3); // {1, 2, 3}
+    assert_eq!(persistent_out.collect().len(), 3); // {100, 200, 300}
 
     // Pop level 2
     let popped = db.pop();
     assert!(popped, "Tried to pop past level 0");
 
     // Regular should lose 3, persistent keeps 300
-    let regular_result = collect_output(&mut regular_out);
+    let regular_result = regular_out.collect();
     assert_eq!(regular_result.len(), 2);
     assert!(!regular_result.contains(&3));
 
-    let persistent_result = collect_output(&mut persistent_out);
+    let persistent_result = persistent_out.collect();
     assert_eq!(persistent_result.len(), 3);
     assert!(persistent_result.contains(&300));
 
@@ -802,11 +797,11 @@ fn test_persistent_nested_checkpoints() {
     assert!(popped, "Tried to pop past level 0");
 
     // Regular should lose 2, persistent still has all
-    let regular_result = collect_output(&mut regular_out);
+    let regular_result = regular_out.collect();
     assert_eq!(regular_result.len(), 1);
     assert!(regular_result.contains(&1));
 
-    let persistent_result = collect_output(&mut persistent_out);
+    let persistent_result = persistent_out.collect();
     assert_eq!(persistent_result.len(), 3);
     assert!(persistent_result.contains(&100));
     assert!(persistent_result.contains(&200));
@@ -823,7 +818,7 @@ fn test_persistent_with_derived() {
 
     // Derived: union of regular and persistent
     let combined = union(regular_rel, persistent_rel);
-    let mut combined_out = output(combined.boxed());
+    let combined_out = output(combined.boxed());
 
     regular_h.insert(1);
     persistent_h.insert(100);
@@ -836,7 +831,7 @@ fn test_persistent_with_derived() {
     db.commit();
 
     // Combined should have all 4
-    let combined_result = collect_output(&mut combined_out);
+    let combined_result = combined_out.collect();
     assert_eq!(combined_result.len(), 4);
 
     // Pop
@@ -844,7 +839,7 @@ fn test_persistent_with_derived() {
     assert!(popped, "Tried to pop past level 0");
 
     // Combined should have 1 (regular) + 100, 200 (persistent) = 3 items
-    let combined_result = collect_output(&mut combined_out);
+    let combined_result = combined_out.collect();
     assert_eq!(combined_result.len(), 3);
     assert!(combined_result.contains(&1));
     assert!(combined_result.contains(&100));
@@ -863,7 +858,7 @@ fn test_persistent_delete() {
     persistent_h.insert(200);
     db.commit();
 
-    let mut persistent_out = output(persistent_rel.boxed());
+    let persistent_out = output(persistent_rel.boxed());
 
     db.push();
 
@@ -871,7 +866,7 @@ fn test_persistent_delete() {
     persistent_h.delete(100);
     db.commit();
 
-    let result = collect_output(&mut persistent_out);
+    let result = persistent_out.collect();
     assert_eq!(result.len(), 1);
     assert!(result.contains(&200));
 
@@ -879,7 +874,7 @@ fn test_persistent_delete() {
     let popped = db.pop();
     assert!(popped, "Tried to pop past level 0");
 
-    let result = collect_output(&mut persistent_out);
+    let result = persistent_out.collect();
     assert_eq!(result.len(), 1);
     assert!(result.contains(&200));
     assert!(

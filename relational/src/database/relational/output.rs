@@ -1,9 +1,9 @@
 //! Output - accumulates relation changes into a Sink.
 
 use std::cell::RefCell;
+use std::hash::Hash;
 use std::marker::PhantomData;
 
-use crate::Tuple;
 use crate::collection::Multiset;
 
 use super::relation::Relation;
@@ -17,17 +17,17 @@ use super::sink::Sink;
 ///
 /// Default type parameters allow `Output<T>` as shorthand for boxed relations
 /// with Multiset state.
-pub struct Output<T: Tuple, S: Sink<T> = Multiset<T>, R: Relation<T> = Box<dyn Relation<T>>> {
+pub struct Output<T, S = Multiset<T>, R = Box<dyn Relation<T>>> {
     inner: RefCell<OutputInner<T, S, R>>,
 }
 
-struct OutputInner<T: Tuple, S: Sink<T>, R: Relation<T>> {
+struct OutputInner<T, S, R> {
     relation: R,
     state: S,
     _phantom: PhantomData<T>,
 }
 
-impl<T: Tuple + 'static, S: Sink<T>, R: Relation<T>> Output<T, S, R> {
+impl<T, S: Sink<T>, R: Relation<T>> Output<T, S, R> {
     /// Create a new output wrapping the given relation.
     pub(crate) fn new(relation: R) -> Self
     where
@@ -60,7 +60,7 @@ impl<T: Tuple + 'static, S: Sink<T>, R: Relation<T>> Output<T, S, R> {
     }
 }
 
-impl<T: Tuple + 'static, R: Relation<T>> Output<T, Multiset<T>, R> {
+impl<T: Clone + Eq + Hash, R: Relation<T>> Output<T, Multiset<T>, R> {
     /// Collect all tuples with positive multiplicity into a Vec.
     /// Automatically pulls pending changes first.
     pub fn collect(&self) -> Vec<T> {
@@ -71,13 +71,11 @@ impl<T: Tuple + 'static, R: Relation<T>> Output<T, Multiset<T>, R> {
 }
 
 /// Create an output from a relation with Multiset state.
-pub fn output<T: Tuple + 'static, R: Relation<T>>(relation: R) -> Output<T, Multiset<T>, R> {
+pub fn output<T: Eq + Hash, R: Relation<T>>(relation: R) -> Output<T, Multiset<T>, R> {
     Output::new(relation)
 }
 
 /// Create an output from a relation with a custom sink type.
-pub fn output_with_sink<T: Tuple + 'static, S: Default + Sink<T>, R: Relation<T>>(
-    relation: R,
-) -> Output<T, S, R> {
+pub fn output_with_sink<T, S: Default + Sink<T>, R: Relation<T>>(relation: R) -> Output<T, S, R> {
     Output::new(relation)
 }

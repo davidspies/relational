@@ -1,8 +1,7 @@
 //! Distinct operator - stateful, collapses multiplicities to 0 or 1.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::Hash};
 
-use crate::Tuple;
 use crate::change::Diff;
 
 use super::relation::Relation;
@@ -12,7 +11,6 @@ use super::relation::Relation;
 /// and -1 when count goes from positive to 0.
 pub struct DistinctRelation<T, R>
 where
-    T: Tuple,
     R: Relation<T>,
 {
     inner: R,
@@ -20,9 +18,8 @@ where
     counts: HashMap<T, i64>,
 }
 
-impl<T, R> Relation<T> for DistinctRelation<T, R>
+impl<T: Clone + Eq + Hash, R> Relation<T> for DistinctRelation<T, R>
 where
-    T: Tuple + 'static,
     R: Relation<T>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
@@ -53,7 +50,6 @@ where
 /// Create a distinct relation.
 pub fn distinct<T, R>(input: R) -> DistinctRelation<T, R>
 where
-    T: Tuple + 'static,
     R: Relation<T>,
 {
     DistinctRelation {

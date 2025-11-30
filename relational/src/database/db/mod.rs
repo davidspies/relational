@@ -3,9 +3,8 @@
 mod wrappers;
 
 use std::cell::{Cell, RefCell};
+use std::hash::Hash;
 use std::rc::Rc;
-
-use crate::Tuple;
 
 use super::commit_id::CommitId;
 use super::feedback::Variable as InternalVariable;
@@ -59,7 +58,9 @@ impl Database {
     ///
     /// Returns a handle for inserting/deleting tuples and a relation for reading.
     /// Changes are staged until `db.commit()` is called.
-    pub fn create_input<T: Tuple + 'static>(&mut self) -> (InputHandle<T>, InputRelation<T>) {
+    pub fn create_input<T: Clone + Eq + Hash + 'static>(
+        &mut self,
+    ) -> (InputHandle<T>, InputRelation<T>) {
         let state = Rc::new(RefCell::new(InputState::new()));
 
         let handle = InputHandle {
@@ -83,7 +84,7 @@ impl Database {
     /// Use this for learned clauses, facts that should persist through backtracking, etc.
     ///
     /// Returns a `PersistentInputHandle` which supports both insert and delete.
-    pub fn create_persistent_input<T: Tuple + 'static>(
+    pub fn create_persistent_input<T: Clone + Eq + Hash>(
         &mut self,
     ) -> (PersistentInputHandle<T>, InputRelation<T>) {
         let state = Rc::new(RefCell::new(InputState::new()));
@@ -109,7 +110,7 @@ impl Database {
     /// let derived = map(var_rel, |x| x * 2);
     /// db.feedback(var, some_input_relation);
     /// ```
-    pub fn create_variable<T: Tuple + 'static>(&self) -> (Variable<T>, VariableRelation<T>) {
+    pub fn create_variable<T: Clone + Eq + Hash>(&self) -> (Variable<T>, VariableRelation<T>) {
         let inner = Rc::new(RefCell::new(InternalVariable::new()));
         let var = Variable {
             inner: inner.clone(),
@@ -176,7 +177,7 @@ impl Database {
     ///
     /// The input relation computes new tuples to feed into the variable.
     /// This immediately runs stratified fixpoint to compute initial values.
-    pub fn feedback<T: Tuple + 'static, R: Relation<T> + 'static>(
+    pub fn feedback<T: Clone + Eq + Hash + 'static, R: Relation<T> + 'static>(
         &mut self,
         variable: Variable<T>,
         input: R,
@@ -197,7 +198,7 @@ impl Database {
     ///
     /// The `input` is `Relation<T>`, but the variable holds `(T, CommitId)`.
     /// When a tuple T is first seen, it's added to the variable with the current commit ID.
-    pub fn feedback_with_id<T: Tuple + 'static, R: Relation<T> + 'static>(
+    pub fn feedback_with_id<T: Clone + Eq + Hash + 'static, R: Relation<T> + 'static>(
         &mut self,
         variable: Variable<(T, CommitId)>,
         input: R,
@@ -212,7 +213,7 @@ impl Database {
     /// If the relation produces any positive tuples during fixpoint propagation,
     /// the fixpoint stops immediately. Check `was_interrupted()` after `commit()`
     /// to see if an interrupt fired.
-    pub fn interrupt<T: Tuple + 'static, R: Relation<T> + 'static>(&mut self, input: R) {
+    pub fn interrupt<T: 'static, R: Relation<T> + 'static>(&mut self, input: R) {
         self.steps
             .push(StratifiedStep::Interrupt(Box::new(InterruptWrapper::new(
                 input,
@@ -228,7 +229,7 @@ impl Database {
     ///
     /// This is an optimized version of the standalone `save()` function that
     /// tracks the database's commit ID to avoid redundant upstream pulls.
-    pub fn save<T: Tuple + 'static, R: Relation<T>>(&self, upstream: R) -> SavedRelation<T, R> {
+    pub fn save<T: Eq + Hash, R: Relation<T>>(&self, upstream: R) -> SavedRelation<T, R> {
         SavedRelation::with_commit_id(upstream, self.commit_id.clone())
     }
 
