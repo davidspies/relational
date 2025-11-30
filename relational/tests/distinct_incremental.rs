@@ -153,7 +153,7 @@ fn test_cdcl_pattern() {
     let (mut assigned, assigned_rel) = db.create_input::<i32>();
 
     // Save clauses_rel so we can use it in multiple places
-    let mut saved_clauses = save(clauses_rel);
+    let saved_clauses = save(clauses_rel);
 
     // Clause literals that are true (satisfied)
     let clause_lit_true = join(

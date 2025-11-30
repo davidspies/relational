@@ -105,7 +105,7 @@ fn test_join_multiplicity_not_doubled() {
 
     // Join where left == right (identity key)
     let joined = join(left_rel, right_rel, |x| *x, |x| *x);
-    let mut joined_out = output(joined.boxed());
+    let joined_out = output(joined.boxed());
 
     // Insert 1 into both sides in a single commit
     left.insert(1);
@@ -128,7 +128,7 @@ fn test_join_multiple_keys_simultaneous() {
     let (mut right, right_rel) = db.create_input::<(char, i32)>(); // (key, val)
 
     let joined = join(left_rel, right_rel, |(k, _)| *k, |(k, _)| *k);
-    let mut joined_out = output(joined.boxed());
+    let joined_out = output(joined.boxed());
 
     // Insert matching pairs for keys 'a' and 'b' in one commit
     left.insert(('a', 1));

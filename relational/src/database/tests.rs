@@ -83,10 +83,10 @@ fn test_transitive_closure() {
 
     // Create the path variable
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
     // path = edges ∪ (path ⋈ edges).map(|(p, e)| (p.0, e.1))
-    let mut saved_edges = save(edges);
+    let saved_edges = save(edges);
     let edges_for_union = saved_edges.get();
     let edges_for_join = saved_edges.get();
 
@@ -102,7 +102,7 @@ fn test_transitive_closure() {
     db.feedback(path_var, all_paths);
 
     // Create output before inserting data
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // Create graph: 1->2->3->4
     handle.insert((1, 2));
@@ -126,7 +126,7 @@ fn test_transitive_closure() {
 fn test_multiplicities() {
     let mut db = Database::new();
     let (mut handle, rel) = db.create_input::<i32>();
-    let mut out = output(rel.boxed());
+    let out = output(rel.boxed());
 
     // Insert duplicates
     handle.insert(10);
@@ -168,7 +168,7 @@ fn test_checkpoint_and_restore() {
     db.commit();
 
     let doubled = map(rel, |n| n * 2);
-    let mut doubled_out = output(doubled.boxed());
+    let doubled_out = output(doubled.boxed());
 
     // Verify initial state
     let initial = doubled_out.collect();
@@ -210,9 +210,9 @@ fn test_commit_id_advances_with_feedback() {
     let (mut handle, edges) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
-    let mut saved_edges = save(edges);
+    let saved_edges = save(edges);
     let edges_for_union = saved_edges.get();
     let edges_for_join = saved_edges.get();
 
@@ -224,7 +224,7 @@ fn test_commit_id_advances_with_feedback() {
     db.feedback(path_var, all_paths);
 
     // Create output
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // Add edges: 1->2->3
     // This triggers feedback iterations, incrementing commit ID
@@ -320,9 +320,9 @@ fn test_commit_id_advances_per_feedback_iteration() {
 
     // Create the feedback variable for paths
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
-    let mut saved_edges = save(edges);
+    let saved_edges = save(edges);
     let edges_for_union = saved_edges.get();
     let edges_for_join = saved_edges.get();
 
@@ -343,7 +343,7 @@ fn test_commit_id_advances_per_feedback_iteration() {
     );
 
     // Create output
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // Add chain edges: 1->2->3->4->5
     // This creates paths of lengths 1, 2, 3, and 4
@@ -390,11 +390,11 @@ fn test_feedback_with_id_discovery_order() {
 
     // Create a timestamped path variable
     let (path_var, path_var_rel) = db.create_variable::<((i32, i32), CommitId)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
     // To build the recursive relation, we need to strip the CommitId,
     // join with edges, then the feedback mechanism re-stamps with new CommitId
-    let mut saved_edges = save(edges);
+    let saved_edges = save(edges);
 
     let path_tuples = map(path_rel.get(), |((a, b), _)| (a, b));
 
@@ -407,7 +407,7 @@ fn test_feedback_with_id_discovery_order() {
     db.feedback_with_id(path_var, all_paths);
 
     // Create output
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // Add edges AFTER setting up feedback so they're discovered during commit
     handle.insert((1, 2));
@@ -702,7 +702,7 @@ fn test_saved_relation() {
     handle.insert(2);
     db.commit();
 
-    let mut saved = save(rel);
+    let saved = save(rel);
 
     // Get two consumers
     let mut getter1 = saved.get();
@@ -739,7 +739,7 @@ fn test_self_join_with_saved() {
     handle.insert((2, 3));
     db.commit();
 
-    let mut saved = save(rel);
+    let saved = save(rel);
     let left = saved.get();
     let right = saved.get();
 

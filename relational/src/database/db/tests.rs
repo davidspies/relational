@@ -42,15 +42,15 @@ fn test_pop_transitive_closure() {
 
     // Set up transitive closure: path = edges ∪ (path ⋈ edges)
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
-    let mut edges_saved = save(edges_rel);
+    let edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // Push
     db.push();

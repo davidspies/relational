@@ -24,13 +24,13 @@ fn test_stratified_two_feedbacks() {
 
     // Input: edges in a graph
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
-    let mut edges = save(edges_rel);
+    let edges = save(edges_rel);
 
     // First feedback: transitive closure (reachability)
     // reach(a, b) :- edge(a, b)
     // reach(a, c) :- reach(a, b), edge(b, c)
     let (reach_var, reach_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut reach_rel = save(reach_var_rel);
+    let reach_rel = save(reach_var_rel);
 
     let extended_reach = join(reach_rel.get(), edges.get(), |(_, b)| *b, |(b, _)| *b);
     let new_reach = map(extended_reach, |((a, _), (_, c))| (a, c));
@@ -46,8 +46,8 @@ fn test_stratified_two_feedbacks() {
     db.feedback(reach_var, reach_input);
 
     // Create outputs for reading BEFORE inserting data
-    let mut reach_out = output(reach_rel.get().boxed());
-    let mut extended_out = output(extended_var_rel.boxed());
+    let reach_out = output(reach_rel.get().boxed());
+    let extended_out = output(extended_var_rel.boxed());
 
     // Insert edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));
@@ -87,11 +87,11 @@ fn test_incremental_after_feedback() {
     let mut db = Database::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
-    let mut edges = save(edges_rel);
+    let edges = save(edges_rel);
 
     // Set up transitive closure
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
     let extended = join(path_rel.get(), edges.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
@@ -100,7 +100,7 @@ fn test_incremental_after_feedback() {
     let path_input = union(edges.get(), all_paths);
     db.feedback(path_var, path_input);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // Initial edges
     edges_h.insert((1, 2));
@@ -134,11 +134,11 @@ fn test_feedback_order_independence() {
     let mut db = Database::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
-    let mut edges = save(edges_rel);
+    let edges = save(edges_rel);
 
     // Transitive closure
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
     let extended = join(path_rel.get(), edges.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
@@ -146,7 +146,7 @@ fn test_feedback_order_independence() {
 
     db.feedback(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     edges_h.insert((1, 2));
     edges_h.insert((2, 3));
@@ -172,12 +172,12 @@ fn test_three_feedbacks_chain() {
 
     // Level 1: double the facts
     let (doubled_var, doubled_var_rel) = db.create_variable::<i32>();
-    let mut doubled_saved = save(doubled_var_rel);
+    let doubled_saved = save(doubled_var_rel);
     let double_op = map(facts_rel, |x| x * 2);
 
     // Level 2: triple the doubled values
     let (tripled_var, tripled_var_rel) = db.create_variable::<i32>();
-    let mut tripled_saved = save(tripled_var_rel);
+    let tripled_saved = save(tripled_var_rel);
     let triple_op = map(doubled_saved.get(), |x| x * 3);
 
     // Level 3: add 1 to tripled values
@@ -189,7 +189,7 @@ fn test_three_feedbacks_chain() {
     db.feedback(doubled_var, double_op);
 
     // Create output for reading
-    let mut doubled_out = output(doubled_saved.get().boxed());
+    let doubled_out = output(doubled_saved.get().boxed());
 
     // After first feedback: doubled = {2}
     let doubled_result = doubled_out.collect();
@@ -199,7 +199,7 @@ fn test_three_feedbacks_chain() {
     db.feedback(tripled_var, triple_op);
 
     // Create output for reading
-    let mut tripled_out = output(tripled_saved.get().boxed());
+    let tripled_out = output(tripled_saved.get().boxed());
 
     // After second feedback: tripled = {6}
     let tripled_result = tripled_out.collect();
@@ -209,7 +209,7 @@ fn test_three_feedbacks_chain() {
     db.feedback(plus_one_var, plus_one_op);
 
     // Create output for reading
-    let mut plus_one_out = output(plus_one_var_rel.boxed());
+    let plus_one_out = output(plus_one_var_rel.boxed());
 
     // After third feedback: plus_one = {7}
     let plus_one_result = plus_one_out.collect();
@@ -231,7 +231,7 @@ fn test_feedback_immediate_fixpoint() {
 
     db.feedback(var, items_rel);
 
-    let mut var_out = output(var_rel.boxed());
+    let var_out = output(var_rel.boxed());
     let result = var_out.collect();
 
     assert_eq!(result.len(), 2);
@@ -315,7 +315,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
 
     // Variable V - the shared counter
     let (v_var, v_var_rel) = db.create_variable::<i32>();
-    let mut v_rel = save(v_var_rel);
+    let v_rel = save(v_var_rel);
 
     // v_max = max(v) - use unit key for global max
     let v_max = max(v_rel.get(), |_| (), |x| *x);
@@ -340,7 +340,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
     let v_with_b = union(v_rel.get(), b_new);
 
     // First feedback (A): v = v ∪ a_new
-    let mut seeds_saved = save(seeds_rel);
+    let seeds_saved = save(seeds_rel);
     let a_input = union(seeds_saved.get(), v_with_a);
     db.feedback(v_var.clone(), a_input);
 
@@ -348,7 +348,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
     db.feedback(v_var, v_with_b);
 
     // Create output for reading
-    let mut v_out = output(v_rel.get().boxed());
+    let v_out = output(v_rel.get().boxed());
 
     // Seed with 0
     seeds_h.insert(0);
@@ -402,7 +402,7 @@ fn test_interleaved_mutual_fixpoint() {
 
     // A: tracks numbers, adds +2 to each (stays in same parity class)
     let (a_var, a_var_rel) = db.create_variable::<i32>();
-    let mut a_rel = save(a_var_rel);
+    let a_rel = save(a_var_rel);
     let a_plus_2 = map(a_rel.get(), |x| x + 2);
     let a_filtered = filter(a_plus_2, |x| *x <= 10); // Cap at 10
 
@@ -412,8 +412,8 @@ fn test_interleaved_mutual_fixpoint() {
     let b_filtered = filter(b_from_a, |x| *x <= 10);
 
     // Union B back into A's input (so A grows from B's output too)
-    let mut b_rel = save(b_var_rel);
-    let mut input_saved = save(input_rel);
+    let b_rel = save(b_var_rel);
+    let input_saved = save(input_rel);
     let a_combined = union(input_saved.get(), b_rel.get());
     let a_recursive = union(a_combined, a_filtered);
 
@@ -422,8 +422,8 @@ fn test_interleaved_mutual_fixpoint() {
     db.feedback(b_var, b_filtered);
 
     // Create outputs for reading
-    let mut a_out = output(a_rel.get().boxed());
-    let mut b_out = output(b_rel.get().boxed());
+    let a_out = output(a_rel.get().boxed());
+    let b_out = output(b_rel.get().boxed());
 
     // Start with just 1
     input_h.insert(1);
@@ -478,7 +478,7 @@ fn test_diamond_dependency() {
     let (mut input_h, input_rel) = db.create_input::<i32>();
 
     // B = input * 2
-    let mut input_saved = save(input_rel);
+    let input_saved = save(input_rel);
     let b = map(input_saved.get(), |x| x * 2);
 
     // C = input + 5
@@ -494,7 +494,7 @@ fn test_diamond_dependency() {
     input_h.insert(10);
     db.commit();
 
-    let mut d_out = output(d_var_rel.boxed());
+    let d_out = output(d_var_rel.boxed());
     let result: Vec<_> = d_out.collect();
     assert!(result.contains(&20), "should have 10*2=20 from B");
     assert!(result.contains(&15), "should have 10+5=15 from C");
@@ -511,7 +511,7 @@ fn test_push_pop_simple() {
     let mut db = Database::new();
 
     let (mut items_h, items_rel) = db.create_input::<i32>();
-    let mut items_saved = save(items_rel);
+    let items_saved = save(items_rel);
     let doubled = map(items_saved.get(), |x| x * 2);
 
     // Initial state
@@ -606,11 +606,11 @@ fn test_push_pop_with_feedback() {
     let mut db = Database::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
-    let mut edges = save(edges_rel);
+    let edges = save(edges_rel);
 
     // Set up transitive closure
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
     let extended = join(path_rel.get(), edges.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
@@ -618,7 +618,7 @@ fn test_push_pop_with_feedback() {
 
     db.feedback(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // Initial edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));
@@ -909,13 +909,13 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
 
     // Create timestamped path variable
     let (path_var, path_var_rel) = db.create_variable::<((i32, i32), CommitId)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
     // Strip CommitId for recursive computation
     let path_tuples = map(path_rel.get(), |((a, b), _)| (a, b));
 
     // path(a, c) :- path(a, b), edges(b, c)
-    let mut edges_saved = save(edges_rel);
+    let edges_saved = save(edges_rel);
     let extended = join(path_tuples, edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
@@ -923,7 +923,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     // Wire up timestamped feedback
     db.feedback_with_id(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // Initial edge
     edges_h.insert((1, 2));
@@ -1028,15 +1028,15 @@ fn test_push_insert_pop_minimal() {
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
-    let mut edges_saved = save(edges_rel);
+    let edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // At this point, path should be empty
     assert_eq!(
@@ -1070,15 +1070,15 @@ fn test_push_insert_pop() {
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
-    let mut edges_saved = save(edges_rel);
+    let edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     db.push();
 
@@ -1107,15 +1107,15 @@ fn test_push_no_changes_pop() {
     let (_edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
-    let mut edges_saved = save(edges_rel);
+    let edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // At this point, path should be empty
     assert_eq!(
@@ -1152,17 +1152,17 @@ fn test_regular_feedback_with_persistent_input_and_pop() {
 
     // Create path variable (no CommitId tracking)
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
     // path(a, c) :- path(a, b), edges(b, c)
-    let mut edges_saved = save(edges_rel);
+    let edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
 
     db.feedback(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     // Initial edge
     edges_h.insert((1, 2));

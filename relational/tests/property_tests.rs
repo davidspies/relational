@@ -35,15 +35,15 @@ fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
 
     // Set up transitive closure
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
-    let mut edges_saved = save(edges_rel);
+    let edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     for op in ops {
         match op {
@@ -101,15 +101,15 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
 
     // Set up transitive closure
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut path_rel = save(path_var_rel);
+    let path_rel = save(path_var_rel);
 
-    let mut edges_saved = save(edges_rel);
+    let edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var, all_paths);
 
-    let mut path_out = output(path_rel.get().boxed());
+    let path_out = output(path_rel.get().boxed());
 
     for (i, op) in ops.iter().enumerate() {
         if !surviving[i] {
@@ -175,8 +175,8 @@ fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
-    let mut regular_out = output(regular_rel.boxed());
-    let mut persistent_out = output(persistent_rel.boxed());
+    let regular_out = output(regular_rel.boxed());
+    let persistent_out = output(persistent_rel.boxed());
 
     for op in ops {
         match op {
@@ -229,8 +229,8 @@ fn apply_ops_replay_persistent_model(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_input::<i32>(); // Use regular input for replay
 
-    let mut regular_out = output(regular_rel.boxed());
-    let mut persistent_out = output(persistent_rel.boxed());
+    let regular_out = output(regular_rel.boxed());
+    let persistent_out = output(persistent_rel.boxed());
 
     for (i, op) in ops.iter().enumerate() {
         match op {
@@ -284,9 +284,9 @@ fn test_multiple_feedbacks_with_pop() {
 
     // First feedback: transitive closure
     let (reach_var, reach_var_rel) = db.create_variable::<(i32, i32)>();
-    let mut reach_rel = save(reach_var_rel);
+    let reach_rel = save(reach_var_rel);
 
-    let mut edges_saved = save(edges_rel);
+    let edges_saved = save(edges_rel);
     let extended_reach = join(reach_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_reach = map(extended_reach, |((a, _), (_, c))| (a, c));
     let all_reach = union(edges_saved.get(), new_reach);
@@ -304,8 +304,8 @@ fn test_multiple_feedbacks_with_pop() {
     db.feedback(reach_var, all_reach);
     db.feedback(pairs_var, triples);
 
-    let mut reach_out = output(reach_rel.get().boxed());
-    let mut pairs_out = output(pairs_var_rel.boxed());
+    let reach_out = output(reach_rel.get().boxed());
+    let pairs_out = output(pairs_var_rel.boxed());
 
     // Initial state
     let reach_before = reach_out.collect();

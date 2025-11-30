@@ -1,8 +1,8 @@
 //! CDCL Solver dataflow setup and constructor.
 
 use relational::database::{
-    CommitId, Database, Relation, SavedRelation, count, difference, distinct, filter, join, map,
-    max, min, output, output_with_sink, save, union,
+    CommitId, Database, Relation, count, difference, distinct, filter, join, map, max, min, output,
+    output_with_sink, save, union,
 };
 
 use super::solver::{Inputs, Outputs, Solver, State};
@@ -29,13 +29,13 @@ impl Solver {
         let current_level_rel = map(current_level_rel, |((), level)| level).boxed();
 
         // All clauses (original + learned)
-        let mut all_clauses = save(union(clauses_rel, learned_rel).boxed());
+        let all_clauses = save(union(clauses_rel, learned_rel).boxed());
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
         let (prep_var, prep_var_rel) =
             db.create_variable::<((super::types::Lit, Level, ClauseId), CommitId)>();
-        let mut prep_rel = save(prep_var_rel);
+        let prep_rel = save(prep_var_rel);
 
         // Final assignments: for each literal, take the entry with minimum CommitId
         let assignments_with_id = min(
@@ -43,7 +43,7 @@ impl Solver {
             |((lit, _, _), _)| *lit,
             |((_, level, _), id)| (*level, *id),
         );
-        let mut assignments =
+        let assignments =
             save(map(assignments_with_id, |(lit, (level, _id))| (lit, level)).boxed());
 
         // Causes: tracks all ways each literal was derived
@@ -53,7 +53,7 @@ impl Solver {
         .boxed();
 
         // Derived: which literals are assigned true
-        let mut assigned = save(map(assignments.get(), |(lit, _)| lit).boxed());
+        let assigned = save(map(assignments.get(), |(lit, _)| lit).boxed());
 
         // === Compute Units ===
         let clause_lit_true = join(
@@ -70,10 +70,9 @@ impl Solver {
         let clause_assigned_lit_ids =
             map(clause_assigned_lits, |((cid, lit, _), _)| (cid, lit)).boxed();
 
-        let mut clause_unassigned_lits =
+        let clause_unassigned_lits =
             save(difference(all_clauses.get(), clause_assigned_lit_ids).boxed());
-        let mut unassigned_count =
-            save(count(clause_unassigned_lits.get(), |(cid, _)| *cid).boxed());
+        let unassigned_count = save(count(clause_unassigned_lits.get(), |(cid, _)| *cid).boxed());
 
         let unit_candidate_clauses = filter(unassigned_count.get(), |(_, cnt)| *cnt == 1);
         let unit_clause_ids = map(unit_candidate_clauses, |(cid, _)| cid).boxed();
@@ -84,9 +83,9 @@ impl Solver {
             |cid| *cid,
             |(cid, _)| *cid,
         );
-        let mut potential_units = save(map(units_with_lit, |(cid, (_, lit))| (cid, lit)).boxed());
+        let potential_units = save(map(units_with_lit, |(cid, (_, lit))| (cid, lit)).boxed());
 
-        let mut satisfied_set = save(satisfied_clauses);
+        let satisfied_set = save(satisfied_clauses);
         let unit_clause_sat_check = join(
             potential_units.get(),
             satisfied_set.get(),
@@ -95,7 +94,7 @@ impl Solver {
         );
         let units_from_sat = map(unit_clause_sat_check, |((cid, lit), _)| (cid, lit)).boxed();
 
-        let mut units = save(difference(potential_units.get(), units_from_sat).boxed());
+        let units = save(difference(potential_units.get(), units_from_sat).boxed());
 
         // === Conflict Detection ===
         let all_clause_ids = map(all_clauses.get(), |(cid, _)| cid).boxed();
@@ -106,7 +105,7 @@ impl Solver {
         let satisfied_distinct = distinct(satisfied_set.get()).boxed();
         let clause_conflicts = difference(fully_assigned_clauses, satisfied_distinct).boxed();
 
-        let mut assigned_with_var = save(map(assigned.get(), |lit| (lit, var(lit))).boxed());
+        let assigned_with_var = save(map(assigned.get(), |lit| (lit, var(lit))).boxed());
         let both_polarities = join(
             assigned_with_var.get(),
             assigned_with_var.get(),
