@@ -29,7 +29,8 @@ fn test_pop_duplicate_insert() {
     assert_eq!(out.collect(), vec![0]);
 
     // Pop - should undo nothing since the insert was a no-op
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
     out.update();
 
     // 0 should still be present
@@ -71,7 +72,8 @@ fn test_pop_transitive_closure() {
     assert_eq!(paths, vec![(1, 1), (1, 3), (3, 1), (3, 3)]);
 
     // Pop - should undo all edges
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     let result: Vec<_> = path_out.collect();
     // Expected: [] (all edges were added inside pushed frame)
@@ -132,7 +134,8 @@ fn test_db_push_pop_simple() {
     assert_eq!(values, vec![2, 3]);
 
     // Pop - should queue undo changes
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // Pull the undo changes
     let mut undos = Vec::new();

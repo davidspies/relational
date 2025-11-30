@@ -10,7 +10,7 @@ use super::types::{ClauseId, Conflict, Level, var};
 
 impl Solver {
     /// Create a new solver for the given number of variables.
-    pub(crate) fn new(num_vars: super::types::Var) -> Self {
+    pub fn new(num_vars: super::types::Var) -> Self {
         let mut db = Database2::new();
 
         // === Input Relations ===
@@ -26,17 +26,15 @@ impl Solver {
 
         // Current level = max(levels)
         let current_level_rel = max(levels_rel, |_| (), |l| *l);
-        let current_level_rel = map(current_level_rel, |((), level)| level);
+        let current_level_rel = map(current_level_rel, |((), level)| level).boxed();
 
         // All clauses (original + learned)
         let mut all_clauses = save(union(clauses_rel, learned_rel).boxed());
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
-        let (prep_var, prep_var_rel) = db.create_variable::<(
-            (super::types::Lit, Level, ClauseId),
-            CommitId,
-        )>();
+        let (prep_var, prep_var_rel) =
+            db.create_variable::<((super::types::Lit, Level, ClauseId), CommitId)>();
         let mut prep_rel = save(prep_var_rel);
 
         // Final assignments: for each literal, take the entry with minimum CommitId
@@ -148,13 +146,12 @@ impl Solver {
         db.commit();
 
         // Create outputs from relations (need to box them to store in struct)
-        let mut assignments_out: Output<(super::types::Lit, Level)> =
-            output(assignments.get().boxed());
-        let mut causes_out: Output<((super::types::Lit, CommitId), (ClauseId, Level))> =
+        let assignments_out: Output<(super::types::Lit, Level)> = output(assignments.get().boxed());
+        let causes_out: Output<((super::types::Lit, CommitId), (ClauseId, Level))> =
             output(causes.boxed());
-        let mut assigned_out: Output<super::types::Lit> = output(assigned.get().boxed());
-        let mut units_out: Output<(ClauseId, super::types::Lit)> = output(units.get().boxed());
-        let mut conflicts_out: Output<Conflict> = output(conflicts.boxed());
+        let assigned_out: Output<super::types::Lit> = output(assigned.get().boxed());
+        let units_out: Output<(ClauseId, super::types::Lit)> = output(units.get().boxed());
+        let conflicts_out: Output<Conflict> = output(conflicts.boxed());
 
         Solver {
             db,

@@ -55,7 +55,7 @@ fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
                 db.push();
             }
             Op::Pop => {
-                db.pop();
+                let _ = db.pop();
             }
         }
     }
@@ -189,7 +189,7 @@ fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
                 db.push();
             }
             Op::Pop => {
-                db.pop();
+                let _ = db.pop();
             }
         }
     }
@@ -320,7 +320,8 @@ fn test_multiple_feedbacks_with_pop() {
     let _pairs_during = pairs_out.collect();
 
     // Pop
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     let reach_after = reach_out.collect();
     let pairs_after = pairs_out.collect();

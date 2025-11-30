@@ -99,7 +99,8 @@ fn test_distinct_incremental_with_pop() {
     assert_eq!(result, vec![1, 2]);
 
     // Pop - 2 should be removed, 1 should remain
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     assert_eq!(out.collect(), vec![1]);
 }
@@ -132,7 +133,8 @@ fn test_distinct_with_push_pop() {
     assert_eq!(during.len(), 3);
 
     // Pop should restore to initial state
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     let mut after = out.collect();
     after.sort();
@@ -199,7 +201,8 @@ fn test_cdcl_pattern() {
     );
 
     // Pop and verify restoration
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     let mut unsat_after_pop = collect_output(&mut unsatisfied_out);
     unsat_after_pop.sort();

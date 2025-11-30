@@ -33,26 +33,11 @@ impl<T: Tuple + 'static, R: Relation<T>> Output<T, R> {
         });
     }
 
-    /// Get the accumulated state (call `update()` first to ensure it's current).
-    pub(crate) fn state(&self) -> &Multiset<T> {
-        &self.state
-    }
-
-    /// Check if the state is empty.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.state.is_empty()
-    }
-
     /// Collect all tuples with positive multiplicity into a Vec.
     /// Automatically calls `update()` first to pull pending changes.
     pub fn collect(&mut self) -> Vec<T> {
         self.update();
         self.state.iter().cloned().collect()
-    }
-
-    /// Iterate over tuples with positive multiplicity.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
-        self.state.iter()
     }
 }
 

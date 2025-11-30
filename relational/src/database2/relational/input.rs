@@ -54,14 +54,6 @@ impl<T: Tuple> InputState<T> {
             self.pending.delete(tuple.clone());
         }
     }
-
-    /// Re-emit all seen items as +1. Used after pop() to re-trigger derivation
-    /// from persistent inputs.
-    pub(crate) fn refresh_pending(&mut self) {
-        for tuple in &self.seen {
-            self.pending.insert(tuple.clone());
-        }
-    }
 }
 
 /// A relation backed by an InputHandle.

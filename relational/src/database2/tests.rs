@@ -171,7 +171,8 @@ fn test_distinct_incremental_with_pop() {
     assert_eq!(changes2.get(&2), Some(&1));
 
     // Pop - should undo insert of 2
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     let changes3 = collect_to_map(&mut distinct_rel);
     assert_eq!(changes3.get(&2), Some(&-1));
@@ -427,7 +428,8 @@ fn test_max_incremental_with_pop() {
     assert_eq!(changes2.get(&("a".to_string(), 20)), Some(&1));
 
     // Pop - should restore max to 10
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     let changes3 = collect_to_map(&mut maxed);
     // Max (20) removed, old max (10) restored
@@ -562,7 +564,8 @@ fn test_push_pop_simple() {
     assert_eq!(after_push.get(&3), Some(&1));
 
     // Pop should revert
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     let after_pop = collect_to_map(&mut rel);
     assert_eq!(after_pop.get(&3), Some(&-1)); // deletion

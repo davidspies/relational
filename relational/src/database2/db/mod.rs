@@ -11,21 +11,18 @@ use super::commit_id::CommitId;
 use super::feedback::Variable as InternalVariable;
 use super::relational::input::InputState;
 use super::relational::{
-    InputHandle, PersistentInputHandle, Relation, Variable, VariableRelation,
-    input::InputRelation,
+    InputHandle, PersistentInputHandle, Relation, Variable, VariableRelation, input::InputRelation,
 };
 
 use wrappers::{
-    AnyFeedback, AnyInput, AnyInterrupt, AnyPersistentInput, FeedbackWithIdWrapper,
-    FeedbackWrapper, InputWrapper, InterruptWrapper, PersistentInputWrapper,
+    AnyFeedback, AnyInput, AnyInterrupt, FeedbackWithIdWrapper, FeedbackWrapper, InputWrapper,
+    InterruptWrapper,
 };
 
 /// The main database type for coordinating differential dataflow.
 pub struct Database2 {
     /// All registered inputs (type-erased).
     inputs: Vec<Box<dyn AnyInput>>,
-    /// All registered persistent inputs (type-erased).
-    persistent_inputs: Vec<Box<dyn AnyPersistentInput>>,
     /// All registered feedbacks (type-erased).
     feedbacks: Vec<Box<dyn AnyFeedback>>,
     /// All registered interrupts (type-erased).
@@ -45,7 +42,6 @@ impl Database2 {
     pub fn new() -> Self {
         Database2 {
             inputs: Vec::new(),
-            persistent_inputs: Vec::new(),
             feedbacks: Vec::new(),
             interrupts: Vec::new(),
             checkpoint_depth: 0,
@@ -53,11 +49,6 @@ impl Database2 {
             commit_id: Rc::new(Cell::new(CommitId::new(0))),
             was_interrupted: false,
         }
-    }
-
-    /// Get the current commit ID.
-    pub(crate) fn commit_id(&self) -> CommitId {
-        self.commit_id.get()
     }
 
     /// Create an input and register it with the database.
@@ -99,10 +90,6 @@ impl Database2 {
         let relation = InputRelation {
             state: state.clone(),
         };
-
-        // Register for refresh during pop
-        let wrapper = PersistentInputWrapper::new(state);
-        self.persistent_inputs.push(Box::new(wrapper));
 
         (handle, relation)
     }
@@ -204,8 +191,7 @@ impl Database2 {
         variable: Variable<(T, CommitId)>,
         input: R,
     ) {
-        let mut wrapper =
-            FeedbackWithIdWrapper::new(variable.inner, input, self.commit_id.clone());
+        let mut wrapper = FeedbackWithIdWrapper::new(variable.inner, input, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.feedbacks.push(Box::new(wrapper));
     }
@@ -320,11 +306,6 @@ impl Database2 {
     /// Get the current checkpoint depth.
     pub fn depth(&self) -> usize {
         self.checkpoint_depth
-    }
-
-    /// Set maximum iterations for fixpoint.
-    pub(crate) fn set_max_iterations(&mut self, max: usize) {
-        self.max_iterations = max;
     }
 }
 

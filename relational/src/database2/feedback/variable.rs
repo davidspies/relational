@@ -42,11 +42,6 @@ impl<T: Tuple> Variable<T> {
         }
     }
 
-    /// Insert an initial value.
-    pub(crate) fn insert(&mut self, tuple: T) {
-        self.add_input(tuple, Diff(1));
-    }
-
     /// Add input to this variable (used during normal fixpoint).
     /// Only emits +1 if the tuple is not already in output_seen AND input_totals is positive.
     /// Once a tuple is seen, it stays in output until explicitly removed via pop().
@@ -81,26 +76,6 @@ impl<T: Tuple> Variable<T> {
     /// Commit staged changes to pending.
     pub(crate) fn commit(&mut self) {
         self.pending.append(&mut self.staged);
-    }
-
-    /// Check if there are pending changes.
-    pub(crate) fn has_changes(&self) -> bool {
-        !self.pending.is_empty()
-    }
-
-    /// Check if there are staged changes.
-    pub(crate) fn has_staged(&self) -> bool {
-        !self.staged.is_empty()
-    }
-
-    /// Get all tuples in output_seen.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
-        self.output_seen.iter()
-    }
-
-    /// Collect all positive tuples into a Vec.
-    pub(crate) fn collect(&self) -> Vec<T> {
-        self.iter().cloned().collect()
     }
 
     /// Push a new checkpoint level.
@@ -191,21 +166,6 @@ impl<T: Tuple> Variable<T> {
                 }
             }
         }
-    }
-
-    /// Debug: get input_total for a tuple.
-    pub(crate) fn debug_input_total(&self, tuple: &T) -> i64 {
-        self.input_totals.get(tuple).copied().unwrap_or(0)
-    }
-
-    /// Debug: check if tuple is in output_seen.
-    pub(crate) fn debug_output(&self, tuple: &T) -> bool {
-        self.output_seen.contains(tuple)
-    }
-
-    /// Debug: get checkpoint depth.
-    pub(crate) fn debug_checkpoint_depth(&self) -> usize {
-        self.outputs_by_checkpoint.len()
     }
 }
 

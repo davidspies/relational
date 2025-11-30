@@ -582,7 +582,8 @@ fn test_push_pop_nested() {
     assert_eq!(db.depth(), 2);
 
     // Pop level2 - should remove 3
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
     assert_eq!(db.depth(), 1);
     let items_result = collect_output(&mut items_out);
     assert_eq!(items_result.len(), 2);
@@ -591,7 +592,8 @@ fn test_push_pop_nested() {
     assert!(!items_result.contains(&3));
 
     // Pop level1 - should remove 2
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
     assert_eq!(db.depth(), 0);
     let items_result = collect_output(&mut items_out);
     assert_eq!(items_result.len(), 1);
@@ -640,7 +642,8 @@ fn test_push_pop_with_feedback() {
     assert!(paths.contains(&(1, 4)));
 
     // Pop - should restore to 3 paths
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     let paths = path_out.collect();
     assert_eq!(paths.len(), 3, "Should have 3 paths after pop: {:?}", paths);
@@ -728,7 +731,8 @@ fn test_persistent_vs_regular_inputs() {
     assert!(learned_result.contains(&200));
 
     // Pop - should undo decision but keep learned clause
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // Decisions should be restored (2 removed)
     let decisions_result = collect_output(&mut decisions_out);
@@ -781,7 +785,8 @@ fn test_persistent_nested_checkpoints() {
     assert_eq!(collect_output(&mut persistent_out).len(), 3); // {100, 200, 300}
 
     // Pop level 2
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // Regular should lose 3, persistent keeps 300
     let regular_result = collect_output(&mut regular_out);
@@ -793,7 +798,8 @@ fn test_persistent_nested_checkpoints() {
     assert!(persistent_result.contains(&300));
 
     // Pop level 1
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // Regular should lose 2, persistent still has all
     let regular_result = collect_output(&mut regular_out);
@@ -834,7 +840,8 @@ fn test_persistent_with_derived() {
     assert_eq!(combined_result.len(), 4);
 
     // Pop
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // Combined should have 1 (regular) + 100, 200 (persistent) = 3 items
     let combined_result = collect_output(&mut combined_out);
@@ -869,7 +876,8 @@ fn test_persistent_delete() {
     assert!(result.contains(&200));
 
     // Pop - delete should NOT be undone for persistent input
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     let result = collect_output(&mut persistent_out);
     assert_eq!(result.len(), 1);
@@ -975,7 +983,8 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     );
 
     // Pop - but edges is persistent, so (2,3) survives!
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // All three paths should still exist (because the persistent edge survived)
     let paths_after: Vec<_> = path_out.collect();
@@ -1046,7 +1055,8 @@ fn test_push_insert_pop_minimal() {
     assert_eq!(paths.len(), 1, "Should have 1 path after insert");
     assert!(paths.contains(&(0, 0)));
 
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // After pop, path should be empty again
     let paths = path_out.collect();
@@ -1081,7 +1091,8 @@ fn test_push_insert_pop() {
     assert_eq!(paths.len(), 1, "Should have 1 path: {:?}", paths);
     assert!(paths.contains(&(0, 4)));
 
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // After pop, path should be empty
     let paths = path_out.collect();
@@ -1122,7 +1133,8 @@ fn test_push_no_changes_pop() {
     let paths = path_out.collect();
     assert_eq!(paths.len(), 0, "Should still be empty with no inserts");
 
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // After pop, path should still be empty
     let paths = path_out.collect();
@@ -1175,7 +1187,8 @@ fn test_regular_feedback_with_persistent_input_and_pop() {
     assert!(paths_during.contains(&(1, 3)));
 
     // Pop - but edges is persistent, so (2,3) survives!
-    db.pop();
+    let popped = db.pop();
+    assert!(popped, "Tried to pop past level 0");
 
     // All three paths should still exist (because the persistent edge survived)
     let paths_after: Vec<_> = path_out.collect();

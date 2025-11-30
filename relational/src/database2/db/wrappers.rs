@@ -23,12 +23,6 @@ pub(super) trait AnyInput {
     fn send_inverse_and_pop(&mut self);
 }
 
-/// Type-erased persistent input operations.
-pub(super) trait AnyPersistentInput {
-    /// Re-emit all seen items as +1. Called during pop() to re-trigger derivation.
-    fn refresh_pending(&mut self);
-}
-
 /// Wrapper to make InputHandle type-erased (seen-set semantics).
 pub(super) struct InputWrapper<T: Tuple> {
     /// Shared state with InputHandle and InputRelation.
@@ -73,24 +67,6 @@ impl<T: Tuple + 'static> AnyInput for InputWrapper<T> {
                 state.remove(&tuple);
             }
         }
-    }
-}
-
-/// Wrapper to make PersistentInputHandle type-erased.
-pub(super) struct PersistentInputWrapper<T: Tuple> {
-    /// Shared state with PersistentInputHandle and InputRelation.
-    state: Rc<RefCell<InputState<T>>>,
-}
-
-impl<T: Tuple> PersistentInputWrapper<T> {
-    pub(super) fn new(state: Rc<RefCell<InputState<T>>>) -> Self {
-        PersistentInputWrapper { state }
-    }
-}
-
-impl<T: Tuple + 'static> AnyPersistentInput for PersistentInputWrapper<T> {
-    fn refresh_pending(&mut self) {
-        self.state.borrow_mut().refresh_pending();
     }
 }
 

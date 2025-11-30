@@ -5,7 +5,7 @@ use relational::database2::{CommitId, Database2, InputHandle, Output, Persistent
 use super::types::{ClauseId, Conflict, Level, Lit, Var};
 
 /// CDCL SAT Solver.
-pub(crate) struct Solver {
+pub struct Solver {
     pub(super) db: Database2,
 
     // === Input Handles ===
@@ -53,7 +53,7 @@ pub(crate) struct Solver {
 
 impl Solver {
     /// Add an original clause to the solver.
-    pub(crate) fn add_clause(&mut self, clause_id: ClauseId, literals: &[Lit]) {
+    pub fn add_clause(&mut self, clause_id: ClauseId, literals: &[Lit]) {
         for &lit in literals {
             self.clauses.insert((clause_id, lit));
         }
@@ -75,13 +75,13 @@ impl Solver {
     }
 
     /// Make a decision: assign a literal at a new decision level.
-    pub(crate) fn decide(&mut self, lit: Lit) {
+    pub fn decide(&mut self, lit: Lit) {
         self.decide_internal(lit, false);
     }
 
     /// Propagate units until fixpoint or conflict.
     /// Returns Ok(()) if no conflict, Err(conflict) if conflict found.
-    pub(crate) fn propagate(&mut self) -> Result<(), Conflict> {
+    pub fn propagate(&mut self) -> Result<(), Conflict> {
         let conflicts: Vec<_> = self.conflicts.collect();
         if let Some(&conflict) = conflicts.first() {
             return Err(conflict);
@@ -90,16 +90,17 @@ impl Solver {
     }
 
     /// Backtrack to the given level, popping decision stack entries.
-    pub(crate) fn backtrack_to(&mut self, level: Level) {
+    pub fn backtrack_to(&mut self, level: Level) {
         while self.current_level > level {
-            self.db.pop();
+            let popped = self.db.pop();
+            assert!(popped, "Tried to backtrack past level 0");
             self.decision_stack.pop();
             self.current_level.dec();
         }
     }
 
     /// Learn a clause (adds to persistent learned relation).
-    pub(crate) fn learn_clause(&mut self, literals: &[Lit]) -> ClauseId {
+    pub fn learn_clause(&mut self, literals: &[Lit]) -> ClauseId {
         let cid = self.next_learned_id;
         self.next_learned_id = ClauseId::new(self.next_learned_id.raw() + 1);
         for &lit in literals {
