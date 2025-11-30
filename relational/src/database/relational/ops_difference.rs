@@ -6,7 +6,7 @@ use std::hash::Hash;
 use crate::change::Diff;
 
 use super::ops_distinct::{DistinctOp, distinct};
-use super::relation::{Op, Relation};
+use super::relation::{Op, Relation, assert_same_commit_id};
 
 /// A negate operator - negates all diffs.
 pub struct NegateOp<T, R>
@@ -33,10 +33,13 @@ pub fn negate<T, R>(input: Relation<R>) -> Relation<NegateOp<T, R>>
 where
     R: Op<T>,
 {
-    Relation::new(NegateOp {
-        inner: input.inner,
-        _phantom: std::marker::PhantomData,
-    })
+    Relation {
+        inner: NegateOp {
+            inner: input.inner,
+            _phantom: std::marker::PhantomData,
+        },
+        commit_id: input.commit_id,
+    }
 }
 
 /// A difference operator - combines left with negated right, then distinct.
@@ -86,6 +89,8 @@ where
     L: Op<T>,
     R: Op<T>,
 {
+    assert_same_commit_id(&left.commit_id, &right.commit_id);
+    let commit_id = left.commit_id.clone();
     let union = DifferenceUnion {
         left: left.inner,
         right: NegateOp {
@@ -94,7 +99,10 @@ where
         },
         _phantom: std::marker::PhantomData,
     };
-    Relation::new(DifferenceOp {
-        inner: distinct(Relation::new(union)).inner,
-    })
+    Relation {
+        inner: DifferenceOp {
+            inner: distinct(Relation::new(union, commit_id.clone())).inner,
+        },
+        commit_id,
+    }
 }

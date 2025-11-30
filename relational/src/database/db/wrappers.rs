@@ -93,21 +93,11 @@ pub(super) struct FeedbackWrapper<T, R: Op<T>> {
     variable: Rc<RefCell<Variable<T>>>,
     /// The input relation that feeds into this variable.
     input: R,
-    /// Shared commit ID counter.
-    commit_id: Rc<Cell<CommitId>>,
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWrapper<T, R> {
-    pub(super) fn new(
-        variable: Rc<RefCell<Variable<T>>>,
-        input: R,
-        commit_id: Rc<Cell<CommitId>>,
-    ) -> Self {
-        FeedbackWrapper {
-            variable,
-            input,
-            commit_id,
-        }
+    pub(super) fn new(variable: Rc<RefCell<Variable<T>>>, input: R) -> Self {
+        FeedbackWrapper { variable, input }
     }
 
     pub(super) fn push_initial_checkpoints(&mut self, depth: usize) {
@@ -144,7 +134,8 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
     }
 
     fn pop_and_forward_reachable(&mut self) {
-        self.variable.borrow_mut().pop_and_forward_reachable();
+        let mut variable = self.variable.borrow_mut();
+        variable.pop_and_forward_reachable();
     }
 
     fn step(&mut self, _recording: bool) -> bool {
@@ -160,11 +151,6 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
         if changes.is_empty() {
             return false;
         }
-
-        // Increment commit ID for this feedback step
-        let current_id = self.commit_id.get();
-        let new_id = CommitId::new(current_id.raw() + 1);
-        self.commit_id.set(new_id);
 
         let mut var = self.variable.borrow_mut();
         for (tuple, diff) in changes {
@@ -327,15 +313,15 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
             return false;
         }
 
-        // Increment commit ID for this step
         let current_id = self.commit_id.get();
-        let new_id = CommitId::new(current_id.raw() + 1);
-        self.commit_id.set(new_id);
 
         let mut var = self.variable.borrow_mut();
         for (tuple, diff) in changes {
             // Track the T -> CommitId mapping (first discovery wins)
-            let commit_id = *self.t_to_commit_id.entry(tuple.clone()).or_insert(new_id);
+            let commit_id = *self
+                .t_to_commit_id
+                .entry(tuple.clone())
+                .or_insert(current_id);
             // Also track input totals by T
             *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff.0;
             // Add to variable with commit ID stamp (use the mapped commit_id, not new_id)

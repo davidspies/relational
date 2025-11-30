@@ -39,9 +39,12 @@ where
     F: Fn(T) -> I,
     R: Op<T>,
 {
-    Relation::new(FlatMapOp {
-        inner: input.inner,
-        f,
-        _phantom: std::marker::PhantomData,
-    })
+    Relation {
+        inner: FlatMapOp {
+            inner: input.inner,
+            f,
+            _phantom: std::marker::PhantomData,
+        },
+        commit_id: input.commit_id,
+    }
 }

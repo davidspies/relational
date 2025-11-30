@@ -3,7 +3,11 @@
 //! Relations are move-only (not Clone). To use a relation in multiple places,
 //! you must first save it to get a `SavedRelation`, then call `.get()`.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use crate::change::Diff;
+use crate::database::commit_id::CommitId;
 
 /// The core trait for relational operators.
 /// An operator is a stream of changes - call foreach to iterate over pending changes.
@@ -25,12 +29,13 @@ impl<T, R: Op<T> + ?Sized> Op<T> for Box<R> {
 /// Use the `boxed()` method to break type chains when needed.
 pub struct Relation<R> {
     pub(crate) inner: R,
+    pub(crate) commit_id: Rc<Cell<CommitId>>,
 }
 
 impl<R> Relation<R> {
-    /// Create a new relation from an operator.
-    pub fn new(inner: R) -> Self {
-        Relation { inner }
+    /// Create a new relation from an operator with a commit ID.
+    pub(crate) fn new(inner: R, commit_id: Rc<Cell<CommitId>>) -> Self {
+        Relation { inner, commit_id }
     }
 
     /// Box this relation to break the type chain.
@@ -39,8 +44,20 @@ impl<R> Relation<R> {
     where
         R: Op<T> + 'a,
     {
-        Relation::new(Box::new(self.inner))
+        Relation {
+            inner: Box::new(self.inner),
+            commit_id: self.commit_id,
+        }
     }
+}
+
+/// Check that two commit IDs point to the same Rc.
+/// Panics if they are different.
+pub(crate) fn assert_same_commit_id(left: &Rc<Cell<CommitId>>, right: &Rc<Cell<CommitId>>) {
+    assert!(
+        Rc::ptr_eq(left, right),
+        "Relations from different databases cannot be combined"
+    );
 }
 
 impl<T, R: Op<T>> Op<T> for Relation<R> {

@@ -89,11 +89,14 @@ where
     FV: Fn(&T) -> V,
     R: Op<T>,
 {
-    Relation::new(MaxOp {
-        inner: input.inner,
-        key_fn,
-        val_fn,
-        values: HashMap::new(),
-        _phantom: std::marker::PhantomData,
-    })
+    Relation {
+        inner: MaxOp {
+            inner: input.inner,
+            key_fn,
+            val_fn,
+            values: HashMap::new(),
+            _phantom: std::marker::PhantomData,
+        },
+        commit_id: input.commit_id,
+    }
 }

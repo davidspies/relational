@@ -52,6 +52,12 @@ impl Database {
         }
     }
 
+    /// Increment the commit ID counter.
+    fn increment_commit_id(&self) {
+        let current_id = self.commit_id.get();
+        self.commit_id.set(CommitId::new(current_id.raw() + 1));
+    }
+
     /// Create an input and register it with the database.
     ///
     /// Returns a handle for inserting/deleting tuples and a relation for reading.
@@ -64,9 +70,12 @@ impl Database {
         let handle = InputHandle {
             state: state.clone(),
         };
-        let relation = Relation::new(InputRelation {
-            state: state.clone(),
-        });
+        let relation = Relation::new(
+            InputRelation {
+                state: state.clone(),
+            },
+            self.commit_id.clone(),
+        );
 
         // Create wrapper for type-erased operations
         let mut wrapper = InputWrapper::new(state);
@@ -90,9 +99,12 @@ impl Database {
         let handle = PersistentInputHandle {
             state: state.clone(),
         };
-        let relation = Relation::new(InputRelation {
-            state: state.clone(),
-        });
+        let relation = Relation::new(
+            InputRelation {
+                state: state.clone(),
+            },
+            self.commit_id.clone(),
+        );
 
         (handle, relation)
     }
@@ -115,21 +127,19 @@ impl Database {
         let var = Variable {
             inner: inner.clone(),
         };
-        let rel = Relation::new(VariableRelation { inner });
+        let rel = Relation::new(VariableRelation { inner }, self.commit_id.clone());
         (var, rel)
     }
 
     /// Commit staged changes and run stratified fixpoint.
     pub fn commit(&mut self) {
-        // Increment commit ID for this commit
-        let current_id = self.commit_id.get();
-        let new_id = CommitId::new(current_id.raw() + 1);
-        self.commit_id.set(new_id);
-
         // Record any pending inserts to the current checkpoint level
         for input in &mut self.inputs {
             input.record_pending_inserts();
         }
+
+        // Increment commit ID after making changes dirty
+        self.increment_commit_id();
 
         // Then run stratified fixpoint (feedbacks commit in step())
         self.run_stratified_fixpoint();
@@ -151,7 +161,7 @@ impl Database {
         variable: Variable<T>,
         input: Relation<R>,
     ) {
-        let mut wrapper = FeedbackWrapper::new(variable.inner, input.inner, self.commit_id.clone());
+        let mut wrapper = FeedbackWrapper::new(variable.inner, input.inner);
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
 
@@ -191,11 +201,8 @@ impl Database {
     }
 
     /// Create a saved relation that can be used in multiple places.
-    ///
-    /// This is an optimized version of the standalone `save()` function that
-    /// tracks the database's commit ID to avoid redundant upstream pulls.
     pub fn save<T: Eq + Hash, R: Op<T>>(&self, upstream: Relation<R>) -> SavedRelation<T, R> {
-        SavedRelation::with_commit_id(upstream.inner, self.commit_id.clone())
+        super::relational::save(upstream)
     }
 
     /// Push a new checkpoint level.
@@ -242,15 +249,13 @@ impl Database {
         for step in &mut self.steps {
             if let StratifiedStep::Feedback(feedback) = step {
                 feedback.send_inverse();
-            }
-        }
-
-        // Step 2: Commit feedback changes so they can be pulled
-        for step in &mut self.steps {
-            if let StratifiedStep::Feedback(feedback) = step {
+                // Step 2: Commit feedback changes so they can be pulled
                 feedback.commit();
             }
         }
+
+        // Increment commit ID after making changes dirty
+        self.increment_commit_id();
 
         // Step 3: In stratified order, for each feedback:
         //   - pull_and_forward_non_checkpoint, pop_and_forward_reachable, commit
@@ -269,6 +274,9 @@ impl Database {
 
                 // Commit the forwarded changes so they can be pulled
                 feedback.commit();
+
+                // Increment commit ID so SavedRelations see the forwarded changes
+                self.increment_commit_id();
 
                 // 3c) Propagate normally all steps up to and including this one
                 self.run_stratified_fixpoint_up_to(i);
@@ -308,6 +316,8 @@ impl Database {
                     }
                     StratifiedStep::Feedback(feedback) => {
                         if feedback.step(recording) {
+                            // Increment commit ID so SavedRelations know to re-pull
+                            self.increment_commit_id();
                             iterations += 1;
                             continue 'outer;
                         }

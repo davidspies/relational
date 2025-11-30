@@ -6,7 +6,7 @@ use std::hash::Hash;
 use crate::change::Diff;
 use crate::collection::Multiset;
 
-use super::relation::{Op, Relation};
+use super::relation::{Op, Relation, assert_same_commit_id};
 
 /// A join operator - joins left and right on matching keys.
 /// Tracks both input states to compute correct output deltas.
@@ -104,12 +104,16 @@ where
     RL: Op<L>,
     RR: Op<R>,
 {
-    Relation::new(JoinOp {
-        left: left.inner,
-        right: right.inner,
-        key_left,
-        key_right,
-        left_index: HashMap::new(),
-        right_index: HashMap::new(),
-    })
+    assert_same_commit_id(&left.commit_id, &right.commit_id);
+    Relation {
+        inner: JoinOp {
+            left: left.inner,
+            right: right.inner,
+            key_left,
+            key_right,
+            left_index: HashMap::new(),
+            right_index: HashMap::new(),
+        },
+        commit_id: left.commit_id,
+    }
 }

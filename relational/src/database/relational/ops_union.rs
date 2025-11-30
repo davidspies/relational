@@ -2,7 +2,7 @@
 
 use crate::change::Diff;
 
-use super::relation::{Op, Relation};
+use super::relation::{Op, Relation, assert_same_commit_id};
 
 /// A union operator - combines changes from both inputs.
 pub struct UnionOp<T, L, R>
@@ -32,9 +32,13 @@ where
     L: Op<T>,
     R: Op<T>,
 {
-    Relation::new(UnionOp {
-        left: left.inner,
-        right: right.inner,
-        _phantom: std::marker::PhantomData,
-    })
+    assert_same_commit_id(&left.commit_id, &right.commit_id);
+    Relation {
+        inner: UnionOp {
+            left: left.inner,
+            right: right.inner,
+            _phantom: std::marker::PhantomData,
+        },
+        commit_id: left.commit_id,
+    }
 }

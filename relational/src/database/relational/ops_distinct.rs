@@ -52,8 +52,11 @@ pub fn distinct<T, R>(input: Relation<R>) -> Relation<DistinctOp<T, R>>
 where
     R: Op<T>,
 {
-    Relation::new(DistinctOp {
-        inner: input.inner,
-        counts: HashMap::new(),
-    })
+    Relation {
+        inner: DistinctOp {
+            inner: input.inner,
+            counts: HashMap::new(),
+        },
+        commit_id: input.commit_id,
+    }
 }

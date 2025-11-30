@@ -1,6 +1,6 @@
 //! SavedRelation - for using a relation in multiple places.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
@@ -12,11 +12,9 @@ use super::relation::{Op, Relation};
 
 /// Shared state for a saved relation.
 struct SavedState<T, R: Op<T>> {
-    upstream: R,
+    upstream: Relation<R>,
     /// Separate pending multiset for each consumer.
     consumer_queues: Vec<Rc<RefCell<Multiset<T>>>>,
-    /// Optional commit ID tracker for optimization.
-    commit_id: Option<Rc<Cell<CommitId>>>,
     /// The commit ID when we last pulled from upstream.
     last_update_commit_id: CommitId,
 }
@@ -24,14 +22,12 @@ struct SavedState<T, R: Op<T>> {
 impl<T: Clone + Eq + Hash, R: Op<T>> SavedState<T, R> {
     /// Pull changes from upstream and distribute to all consumer queues.
     fn update(&mut self) {
-        // Optimization: skip pull if commit ID hasn't changed since last update
-        if let Some(ref commit_id) = self.commit_id {
-            let current = commit_id.get();
-            if current == self.last_update_commit_id {
-                return;
-            }
-            self.last_update_commit_id = current;
+        // Skip pull if commit ID hasn't changed since last update.
+        let current = self.upstream.commit_id.get();
+        if current == self.last_update_commit_id {
+            return;
         }
+        self.last_update_commit_id = current;
 
         self.upstream.foreach(&mut |t, diff| {
             for queue in &self.consumer_queues {
@@ -52,40 +48,20 @@ pub struct SavedRelation<T, R: Op<T>> {
 }
 
 impl<T: Eq + Hash, R: Op<T>> SavedRelation<T, R> {
-    /// Create a new saved relation from an upstream relation.
-    pub(crate) fn new(upstream: R) -> Self {
-        SavedRelation {
-            state: Rc::new(RefCell::new(SavedState {
-                upstream,
-                consumer_queues: Vec::new(),
-                commit_id: None,
-                last_update_commit_id: CommitId::default(),
-            })),
-        }
-    }
-
-    /// Create a new saved relation with commit ID tracking for optimization.
-    pub(crate) fn with_commit_id(upstream: R, commit_id: Rc<Cell<CommitId>>) -> Self {
-        SavedRelation {
-            state: Rc::new(RefCell::new(SavedState {
-                upstream,
-                consumer_queues: Vec::new(),
-                commit_id: Some(commit_id),
-                last_update_commit_id: CommitId::default(),
-            })),
-        }
-    }
-
     /// Get a relation handle for this saved relation.
     ///
     /// Each call returns a new consumer. All consumers receive the same changes.
     pub fn get(&self) -> Relation<SavedGetter<T, R>> {
         let queue = Rc::new(RefCell::new(Multiset::new()));
+        let commit_id = self.state.borrow().upstream.commit_id.clone();
         self.state.borrow_mut().consumer_queues.push(queue.clone());
-        Relation::new(SavedGetter {
-            state: self.state.clone(),
-            queue,
-        })
+        Relation::new(
+            SavedGetter {
+                state: self.state.clone(),
+                queue,
+            },
+            commit_id,
+        )
     }
 }
 
@@ -110,5 +86,11 @@ impl<T: Clone + Eq + Hash, R: Op<T>> Op<T> for SavedGetter<T, R> {
 
 /// Create a saved relation.
 pub fn save<T: Eq + Hash, R: Op<T>>(upstream: Relation<R>) -> SavedRelation<T, R> {
-    SavedRelation::new(upstream.inner)
+    SavedRelation {
+        state: Rc::new(RefCell::new(SavedState {
+            upstream,
+            consumer_queues: Vec::new(),
+            last_update_commit_id: CommitId::default(),
+        })),
+    }
 }

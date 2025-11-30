@@ -78,11 +78,14 @@ where
     FV: Fn(&T) -> V,
     R: Op<T>,
 {
-    Relation::new(SumOp {
-        inner: input.inner,
-        key_fn,
-        val_fn,
-        sums: HashMap::new(),
-        _phantom: std::marker::PhantomData,
-    })
+    Relation {
+        inner: SumOp {
+            inner: input.inner,
+            key_fn,
+            val_fn,
+            sums: HashMap::new(),
+            _phantom: std::marker::PhantomData,
+        },
+        commit_id: input.commit_id,
+    }
 }
