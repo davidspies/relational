@@ -163,7 +163,7 @@ impl Solver {
             },
             state: State {
                 current_level: Level::TOP,
-                next_learned_id: ClauseId::new(1_000_000),
+                next_learned_id: ClauseId::new(1),
                 num_vars,
                 decision_stack: Vec::new(),
                 clause_db: std::collections::HashMap::new(),

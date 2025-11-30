@@ -66,6 +66,10 @@ impl Solver {
         }
         // Cache clause contents for conflict analysis
         self.state.clause_db.insert(clause_id, literals.to_vec());
+        // Ensure learned clause IDs don't overlap with original clause IDs
+        if clause_id >= self.state.next_learned_id {
+            self.state.next_learned_id = ClauseId::new(clause_id.raw() + 1);
+        }
         self.db.commit();
     }
 
