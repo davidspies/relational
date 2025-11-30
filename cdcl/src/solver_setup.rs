@@ -95,7 +95,7 @@ impl Solver {
         );
         let units_from_sat = map(unit_clause_sat_check, |((cid, lit), _)| (cid, lit)).boxed();
 
-        let units = db.save(difference(potential_units.get(), units_from_sat).boxed());
+        let units = difference(potential_units.get(), units_from_sat).boxed();
 
         // === Conflict Detection ===
         let all_clause_ids = map(all_clauses.get(), |(cid, _)| cid).boxed();
@@ -129,7 +129,7 @@ impl Solver {
         db.interrupt(conflicts.get());
 
         // === Set up the feedback loop ===
-        let unit_with_level = join(units.get(), current_level_rel, |_| (), |_| ());
+        let unit_with_level = join(units, current_level_rel, |_| (), |_| ());
         let unit_lit_level_cid =
             map(unit_with_level, |((cid, lit), level)| (lit, level, cid)).boxed();
 
@@ -142,10 +142,9 @@ impl Solver {
         db.commit();
 
         // Create outputs from relations (need to box them to store in struct)
-        let assignments_out = output(assignments.get().boxed());
+        let assignments_out = output_with_sink(assignments.get().boxed());
         let causes_out = output_with_sink(causes.boxed());
         let assigned_out = output(assigned.get().boxed());
-        let units_out = output(units.get().boxed());
         let conflicts_out = output(conflicts.get().boxed());
 
         Solver {
@@ -160,7 +159,6 @@ impl Solver {
                 assignments: assignments_out,
                 causes: causes_out,
                 assigned: assigned_out,
-                units: units_out,
                 conflicts: conflicts_out,
             },
             state: State {

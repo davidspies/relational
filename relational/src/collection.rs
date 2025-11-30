@@ -57,21 +57,31 @@ impl<T: Eq + Hash> Multiset<T> {
 
     /// Delete a tuple (decrement multiplicity by 1).
     pub fn delete(&mut self, tuple: T) {
-        self.apply_change(Change::delete(tuple));
+        self.update(tuple, Diff(-1));
+    }
+
+    /// Update the multiplicity of a tuple by a diff.
+    pub fn update(&mut self, tuple: T, diff: Diff) {
+        if diff.is_zero() {
+            return;
+        }
+        use std::collections::hash_map::Entry;
+        match self.data.entry(tuple) {
+            Entry::Occupied(mut e) => {
+                *e.get_mut() += diff;
+                if e.get().is_zero() {
+                    e.remove();
+                }
+            }
+            Entry::Vacant(e) => {
+                e.insert(diff);
+            }
+        }
     }
 
     /// Apply a single change to the collection.
     pub(crate) fn apply_change(&mut self, change: Change<T>) {
-        if change.diff.is_zero() {
-            return;
-        }
-        let entry = self.data.entry(change.tuple).or_insert(Diff::ZERO);
-        *entry += change.diff;
-        // Clean up zero entries
-        if entry.is_zero() {
-            // We need to re-lookup since we can't remove while holding the mutable ref
-            // This is a bit awkward, but necessary
-        }
+        self.update(change.tuple, change.diff);
     }
 
     /// Apply a batch of changes to the collection.
@@ -79,12 +89,6 @@ impl<T: Eq + Hash> Multiset<T> {
         for change in changes {
             self.apply_change(change);
         }
-        self.compact();
-    }
-
-    /// Remove all zero-multiplicity entries.
-    pub fn compact(&mut self) {
-        self.data.retain(|_, diff| !diff.is_zero());
     }
 
     /// Iterate over tuples with positive multiplicity.
@@ -176,7 +180,7 @@ mod tests {
 
         assert_eq!(coll.get(&1), Diff(1));
         coll.delete(1);
-        coll.compact();
         assert!(!coll.contains(&1));
+        assert!(coll.is_empty());
     }
 }

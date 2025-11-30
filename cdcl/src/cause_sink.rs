@@ -27,17 +27,6 @@ pub struct CauseSink {
 }
 
 impl CauseSink {
-    pub fn new() -> Self {
-        CauseSink {
-            data: HashMap::new(),
-        }
-    }
-
-    /// Get a reference to the accumulated data.
-    pub fn data(&self) -> &CauseData {
-        &self.data
-    }
-
     /// Get the reason clause for a literal (the clause from the earliest commit).
     pub fn get_reason(&self, lit: Lit) -> Option<ClauseId> {
         self.data.get(&lit).and_then(|commits| {

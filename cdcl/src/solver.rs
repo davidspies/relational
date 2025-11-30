@@ -4,11 +4,13 @@ use std::collections::HashMap;
 
 use relational::database::{CommitId, Database, InputHandle, Output, PersistentInputHandle};
 
+use super::assignments_sink::AssignmentsSink;
 use super::cause_sink::CauseSink;
 use super::types::{ClauseId, Conflict, Level, Lit, Var};
 
 /// Type alias for the causes output (complex due to nested structure).
 type CausesOutput = Output<((Lit, CommitId), (ClauseId, Level)), CauseSink>;
+type AssignmentsOutput = Output<(Lit, Level), AssignmentsSink>;
 
 /// Input handles for the solver.
 pub(super) struct Inputs {
@@ -25,13 +27,11 @@ pub(super) struct Inputs {
 /// Output relations from the dataflow.
 pub(super) struct Outputs {
     /// Final assignments: (lit, level) - derived by taking min commit_id per lit
-    pub assignments: Output<(Lit, Level)>,
+    pub assignments: AssignmentsOutput,
     /// Causes: ((lit, commit_id), (clause_id, level)) with CauseSink for efficient lookup
     pub causes: CausesOutput,
     /// The "assigned" relation - just tracks which literals are assigned true
     pub assigned: Output<Lit>,
-    /// Unit clauses that need propagation: (clause_id, implied_literal)
-    pub units: Output<(ClauseId, Lit)>,
     /// Conflicts detected during propagation
     pub conflicts: Output<Conflict>,
 }
@@ -95,8 +95,7 @@ impl Solver {
     /// Propagate units until fixpoint or conflict.
     /// Returns Ok(()) if no conflict, Err(conflict) if conflict found.
     pub fn propagate(&mut self) -> Result<(), Conflict> {
-        let conflicts: Vec<_> = self.outputs.conflicts.collect();
-        if let Some(&conflict) = conflicts.first() {
+        if let Some(&conflict) = self.outputs.conflicts.get().iter().next() {
             return Err(conflict);
         }
         Ok(())

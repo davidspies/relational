@@ -12,7 +12,6 @@ pub struct Diff(pub i64);
 impl Diff {
     pub(crate) const ZERO: Diff = Diff(0);
     pub(crate) const ONE: Diff = Diff(1);
-    pub(crate) const NEG_ONE: Diff = Diff(-1);
 
     #[inline]
     pub(crate) fn is_zero(self) -> bool {
@@ -98,10 +97,6 @@ impl<T> Change<T> {
     pub(crate) fn insert(tuple: T) -> Self {
         Change::new(tuple, Diff::ONE)
     }
-
-    pub(crate) fn delete(tuple: T) -> Self {
-        Change::new(tuple, Diff::NEG_ONE)
-    }
 }
 
 #[cfg(test)]
@@ -121,9 +116,5 @@ mod tests {
         let insert = Change::insert(42);
         assert_eq!(insert.tuple, 42);
         assert_eq!(insert.diff, Diff::ONE);
-
-        let delete = Change::delete(42);
-        assert_eq!(delete.tuple, 42);
-        assert_eq!(delete.diff, Diff::NEG_ONE);
     }
 }

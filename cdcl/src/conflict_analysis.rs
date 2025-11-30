@@ -8,9 +8,10 @@
 //!    (exactly one literal at the current decision level in the learned clause)
 //! 3. The backtrack level is the second-highest level among literals in the clause
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use super::Solver;
+use super::assignments_sink::AssignmentsSink;
 use super::cause_sink::CauseSink;
 use super::types::{Conflict, Level, Lit};
 
@@ -24,14 +25,10 @@ pub struct AnalysisResult {
 }
 
 /// Count literals at the given decision level.
-fn count_at_level(
-    working: &HashSet<Lit>,
-    assignments: &HashMap<Lit, Level>,
-    level: Level,
-) -> usize {
+fn count_at_level(working: &HashSet<Lit>, assignments: &AssignmentsSink, level: Level) -> usize {
     working
         .iter()
-        .filter(|lit| assignments.get(lit).copied().unwrap_or(Level::TOP) == level)
+        .filter(|lit| assignments.get(lit).unwrap_or(Level::TOP) == level)
         .count()
 }
 
@@ -51,8 +48,8 @@ impl Solver {
         }
 
         // Get the implication graph and assignments
-        let causes = self.get_causes();
-        let assignments: HashMap<Lit, Level> = self.get_assignments().into_iter().collect();
+        let causes = self.outputs.causes.get();
+        let assignments = self.outputs.assignments.get();
 
         // Initialize the working set (nogood): the true assignments that caused conflict
         let mut working: HashSet<Lit> = match conflict {
@@ -113,7 +110,7 @@ impl Solver {
         // Find backtrack level: second-highest level among learned clause literals
         let mut levels: Vec<Level> = learned_clause
             .iter()
-            .filter_map(|lit| assignments.get(&lit.negated()).copied())
+            .filter_map(|lit| assignments.get(&lit.negated()))
             .collect();
         levels.sort();
         levels.dedup();
@@ -135,13 +132,13 @@ impl Solver {
 fn find_most_recent_at_level(
     working: &HashSet<Lit>,
     causes: &CauseSink,
-    assignments: &HashMap<Lit, Level>,
+    assignments: &AssignmentsSink,
     current_level: Level,
 ) -> Option<Lit> {
     // Get literals at current level that have reasons (not decisions)
     let mut candidates: Vec<_> = working
         .iter()
-        .filter(|lit| assignments.get(lit).copied() == Some(current_level))
+        .filter(|lit| assignments.get(lit) == Some(current_level))
         .filter_map(|&lit| causes.get_commit_id(lit).map(|cid| (lit, cid)))
         .collect();
 
