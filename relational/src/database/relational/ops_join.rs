@@ -5,6 +5,7 @@ use std::hash::Hash;
 
 use crate::Tuple;
 use crate::change::Diff;
+use crate::collection::Multiset;
 
 use super::relation::Relation;
 
@@ -41,20 +42,20 @@ where
     RR: Relation<R>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut((L, R), Diff)) {
-        // Collect changes from both sides first to avoid borrow issues
-        let mut left_changes: Vec<(L, Diff)> = Vec::new();
-        let mut right_changes: Vec<(R, Diff)> = Vec::new();
+        // Collect changes from both sides using Multiset to consolidate duplicates
+        let mut left_changes = Multiset::new();
+        let mut right_changes = Multiset::new();
 
         self.left.foreach(&mut |l, diff| {
-            left_changes.push((l, diff));
+            left_changes.update(l, diff);
         });
         self.right.foreach(&mut |r, diff| {
-            right_changes.push((r, diff));
+            right_changes.update(r, diff);
         });
 
         // Process left changes - join with existing right state
-        for (l, l_diff) in &left_changes {
-            let k = (self.key_left)(l);
+        for (l, l_diff) in left_changes {
+            let k = (self.key_left)(&l);
 
             // Join with existing right tuples
             if let Some(rights) = self.right_index.get(&k) {
@@ -68,12 +69,12 @@ where
 
             // Update left index
             let entry = self.left_index.entry(k).or_default();
-            update_index_entry(entry, l.clone(), l_diff.0);
+            update_index_entry(entry, l, l_diff.0);
         }
 
         // Process right changes - join with updated left state (includes new left tuples)
-        for (r, r_diff) in &right_changes {
-            let k = (self.key_right)(r);
+        for (r, r_diff) in right_changes {
+            let k = (self.key_right)(&r);
 
             // Join with left tuples (now includes newly added ones)
             if let Some(lefts) = self.left_index.get(&k) {
@@ -87,7 +88,7 @@ where
 
             // Update right index
             let entry = self.right_index.entry(k).or_default();
-            update_index_entry(entry, r.clone(), r_diff.0);
+            update_index_entry(entry, r, r_diff.0);
         }
     }
 }

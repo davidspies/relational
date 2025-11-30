@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use crate::Tuple;
 use crate::change::Diff;
+use crate::collection::Multiset;
 use crate::database::commit_id::CommitId;
 use crate::database::feedback::Variable;
 use crate::database::relational::Relation;
@@ -130,9 +131,9 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWrapp
     }
 
     fn pull_and_forward_non_checkpoint(&mut self) {
-        let mut changes = Vec::new();
+        let mut changes = Multiset::new();
         self.input.foreach(&mut |tuple: T, diff: Diff| {
-            changes.push((tuple, diff));
+            changes.update(tuple, diff);
         });
 
         let mut var = self.variable.borrow_mut();
@@ -147,9 +148,13 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWrapp
     }
 
     fn step(&mut self, _recording: bool) -> bool {
-        let mut changes = Vec::new();
+        // Consolidate changes per tuple using Multiset to handle cases where
+        // upstream emits both +1 and -1 for the same tuple within a single step.
+        // Without consolidation, the Variable's seen-set semantics would incorrectly
+        // add tuples that net to zero.
+        let mut changes = Multiset::new();
         self.input.foreach(&mut |tuple: T, diff: Diff| {
-            changes.push((tuple, diff));
+            changes.update(tuple, diff);
         });
 
         if changes.is_empty() {
@@ -262,30 +267,23 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWithI
     }
 
     fn pull_and_forward_non_checkpoint(&mut self) {
-        let mut changes = Vec::new();
+        let mut changes = Multiset::new();
         self.input.foreach(&mut |tuple: T, diff: Diff| {
-            changes.push((tuple, diff));
+            changes.update(tuple, diff);
         });
 
-        // Update our T-keyed input_totals
-        for (tuple, diff) in &changes {
-            *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff.0;
-        }
-
-        // For each T that changed, look up the actual (T, CommitId) in our mapping
-        // and forward if not in checkpoint
+        // Update input_totals and forward in a single pass
         let mut var = self.variable.borrow_mut();
-        for (tuple, _) in changes {
+        for (tuple, diff) in changes {
+            // Update our T-keyed input_totals
+            let input_total = self.input_totals_by_t.entry(tuple.clone()).or_insert(0);
+            *input_total += diff.0;
+
+            // Look up the actual (T, CommitId) in our mapping and forward if not in checkpoint
             if let Some(&commit_id) = self.t_to_commit_id.get(&tuple) {
                 let full_tuple = (tuple, commit_id);
-                // Update the variable's input_total for the full tuple
-                let input_total = self
-                    .input_totals_by_t
-                    .get(&full_tuple.0)
-                    .copied()
-                    .unwrap_or(0);
                 // We need to sync the variable's view - set it to match our tracking
-                var.set_input_total(full_tuple.clone(), input_total);
+                var.set_input_total(full_tuple.clone(), *input_total);
                 var.forward_if_not_in_checkpoint(&full_tuple);
             }
         }
@@ -316,9 +314,13 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWithI
     }
 
     fn step(&mut self, _recording: bool) -> bool {
-        let mut changes = Vec::new();
+        // Consolidate changes per tuple using Multiset to handle cases where
+        // upstream emits both +1 and -1 for the same tuple within a single step.
+        // Without consolidation, the Variable's seen-set semantics would incorrectly
+        // add tuples that net to zero.
+        let mut changes = Multiset::new();
         self.input.foreach(&mut |tuple: T, diff: Diff| {
-            changes.push((tuple, diff));
+            changes.update(tuple, diff);
         });
 
         if changes.is_empty() {

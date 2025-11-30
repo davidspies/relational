@@ -64,10 +64,9 @@ pub struct InputRelation<T: Tuple> {
 impl<T: Tuple + 'static> Relation<T> for InputRelation<T> {
     fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
         let mut state = self.state.borrow_mut();
-        for (t, diff) in state.pending.iter_with_multiplicity() {
-            f(t.clone(), diff);
+        for (t, diff) in state.pending.drain() {
+            f(t, diff);
         }
-        state.pending.clear();
     }
 }
 

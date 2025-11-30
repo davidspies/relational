@@ -102,10 +102,9 @@ impl<T: Tuple + 'static, R: Relation<T>> Relation<T> for SavedGetter<T, R> {
 
         // Then drain our queue
         let mut queue = self.queue.borrow_mut();
-        for (t, diff) in queue.iter_with_multiplicity() {
-            consumer(t.clone(), diff);
+        for (t, diff) in queue.drain() {
+            consumer(t, diff);
         }
-        queue.clear();
     }
 }
 
