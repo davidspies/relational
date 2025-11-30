@@ -7,7 +7,7 @@ use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
 /// A difference/multiplicity value. Positive means insertions, negative means deletions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Diff(pub(crate) i64);
+pub struct Diff(pub i64);
 
 impl Diff {
     pub(crate) const ZERO: Diff = Diff(0);

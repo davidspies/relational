@@ -1128,3 +1128,64 @@ fn test_push_no_changes_pop() {
     let paths = path_out.collect();
     assert_eq!(paths.len(), 0, "Should be empty after pop: {:?}", paths);
 }
+
+/// Test regular feedback (not feedback_with_id) with persistent inputs and pop.
+/// This tests if the issue is specific to feedback_with_id.
+#[test]
+fn test_regular_feedback_with_persistent_input_and_pop() {
+    let mut db = Database2::new();
+
+    // Persistent edges - survive pop
+    let (mut edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();
+
+    // Create path variable (no CommitId tracking)
+    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut path_rel = save(path_var_rel);
+
+    // path(a, c) :- path(a, b), edges(b, c)
+    let mut edges_saved = save(edges_rel);
+    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
+    let new_paths = map(extended, |((a, _), (_, c))| (a, c));
+    let all_paths = union(edges_saved.get(), new_paths);
+
+    db.feedback(path_var, all_paths);
+
+    let mut path_out = output(path_rel.get().boxed());
+
+    // Initial edge
+    edges_h.insert((1, 2));
+    db.commit();
+
+    let paths_before: Vec<_> = path_out.collect();
+    assert_eq!(paths_before.len(), 1);
+    assert!(paths_before.contains(&(1, 2)));
+
+    // Push checkpoint
+    db.push();
+
+    // Add edge to persistent input - this survives pop!
+    edges_h.insert((2, 3));
+    db.commit();
+
+    // Now we should have 3 paths: (1,2), (2,3), (1,3)
+    let paths_during: Vec<_> = path_out.collect();
+    assert_eq!(paths_during.len(), 3);
+    assert!(paths_during.contains(&(1, 2)));
+    assert!(paths_during.contains(&(2, 3)));
+    assert!(paths_during.contains(&(1, 3)));
+
+    // Pop - but edges is persistent, so (2,3) survives!
+    db.pop();
+
+    // All three paths should still exist (because the persistent edge survived)
+    let paths_after: Vec<_> = path_out.collect();
+    assert_eq!(
+        paths_after.len(),
+        3,
+        "All paths should survive because edge is persistent: {:?}",
+        paths_after
+    );
+    assert!(paths_after.contains(&(1, 2)));
+    assert!(paths_after.contains(&(2, 3)));
+    assert!(paths_after.contains(&(1, 3)));
+}

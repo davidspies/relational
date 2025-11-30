@@ -16,14 +16,16 @@ use super::relational::{
 };
 
 use wrappers::{
-    AnyFeedback, AnyInput, AnyInterrupt, FeedbackWithIdWrapper, FeedbackWrapper, InputWrapper,
-    InterruptWrapper,
+    AnyFeedback, AnyInput, AnyInterrupt, AnyPersistentInput, FeedbackWithIdWrapper,
+    FeedbackWrapper, InputWrapper, InterruptWrapper, PersistentInputWrapper,
 };
 
 /// The main database type for coordinating differential dataflow.
 pub struct Database2 {
     /// All registered inputs (type-erased).
     inputs: Vec<Box<dyn AnyInput>>,
+    /// All registered persistent inputs (type-erased).
+    persistent_inputs: Vec<Box<dyn AnyPersistentInput>>,
     /// All registered feedbacks (type-erased).
     feedbacks: Vec<Box<dyn AnyFeedback>>,
     /// All registered interrupts (type-erased).
@@ -43,6 +45,7 @@ impl Database2 {
     pub fn new() -> Self {
         Database2 {
             inputs: Vec::new(),
+            persistent_inputs: Vec::new(),
             feedbacks: Vec::new(),
             interrupts: Vec::new(),
             checkpoint_depth: 0,
@@ -72,7 +75,7 @@ impl Database2 {
         };
 
         // Create wrapper for type-erased operations
-        let wrapper = InputWrapper::new(state);
+        let mut wrapper = InputWrapper::new(state);
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
 
         self.inputs.push(Box::new(wrapper));
@@ -96,6 +99,10 @@ impl Database2 {
         let relation = InputRelation {
             state: state.clone(),
         };
+
+        // Register for refresh during pop
+        let wrapper = PersistentInputWrapper::new(state);
+        self.persistent_inputs.push(Box::new(wrapper));
 
         (handle, relation)
     }
@@ -126,7 +133,7 @@ impl Database2 {
         self.was_interrupted = false;
 
         // Record any pending inserts to the current checkpoint level
-        for input in &self.inputs {
+        for input in &mut self.inputs {
             input.record_pending_inserts();
         }
 
@@ -155,7 +162,7 @@ impl Database2 {
                 }
             }
 
-            for feedback in &self.feedbacks {
+            for feedback in &mut self.feedbacks {
                 if feedback.step(recording) {
                     iterations += 1;
                     continue 'outer;
@@ -176,7 +183,7 @@ impl Database2 {
         variable: Variable<T>,
         input: R,
     ) {
-        let wrapper = FeedbackWrapper::new(variable.inner, input);
+        let mut wrapper = FeedbackWrapper::new(variable.inner, input);
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.feedbacks.push(Box::new(wrapper));
 
@@ -197,7 +204,8 @@ impl Database2 {
         variable: Variable<(T, CommitId)>,
         input: R,
     ) {
-        let wrapper = FeedbackWithIdWrapper::new(variable.inner, input, self.commit_id.clone());
+        let mut wrapper =
+            FeedbackWithIdWrapper::new(variable.inner, input, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.feedbacks.push(Box::new(wrapper));
     }
@@ -219,10 +227,10 @@ impl Database2 {
     /// Push a new checkpoint level.
     pub fn push(&mut self) {
         self.checkpoint_depth += 1;
-        for input in &self.inputs {
+        for input in &mut self.inputs {
             input.push_checkpoint();
         }
-        for feedback in &self.feedbacks {
+        for feedback in &mut self.feedbacks {
             feedback.push_checkpoint();
         }
     }
@@ -241,6 +249,7 @@ impl Database2 {
     ///       checkpoint whose tracked input value is still non-zero
     ///    c) Propagate normally all feedbacks up to and including this one
     ///       (using nested loop approach where you restart from beginning if changes)
+    #[must_use]
     pub fn pop(&mut self) -> bool {
         if self.checkpoint_depth == 0 {
             return false;
@@ -250,16 +259,16 @@ impl Database2 {
 
         // Step 1: Unapply non-persistent input AND feedback changes by sending -1's
         // For non-persistent inputs, also pop the checkpoint from the stack
-        for input in &self.inputs {
+        for input in &mut self.inputs {
             input.send_inverse_and_pop();
         }
         // For feedbacks, send -1's but don't pop yet
-        for feedback in &self.feedbacks {
+        for feedback in &mut self.feedbacks {
             feedback.send_inverse();
         }
 
         // Step 2: Commit feedback changes so they can be pulled
-        for feedback in &self.feedbacks {
+        for feedback in &mut self.feedbacks {
             feedback.commit();
         }
 
@@ -273,6 +282,9 @@ impl Database2 {
             //     checkpoint whose tracked input value is still non-zero
             self.feedbacks[i].pop_and_forward_reachable();
 
+            // Commit the forwarded changes so they can be pulled
+            self.feedbacks[i].commit();
+
             // 3c) Propagate normally all feedbacks up to and including this one
             self.run_stratified_fixpoint_up_to(i);
         }
@@ -281,7 +293,7 @@ impl Database2 {
     }
 
     /// Run stratified fixpoint up to and including the given feedback index.
-    fn run_stratified_fixpoint_up_to(&self, limit: usize) {
+    fn run_stratified_fixpoint_up_to(&mut self, limit: usize) {
         let recording = self.checkpoint_depth > 0;
         let mut iterations = 0;
 
