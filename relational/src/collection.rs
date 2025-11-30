@@ -104,31 +104,6 @@ impl<T: Eq + Hash> Multiset<T> {
         self.data.iter().map(|(t, d)| (t, *d))
     }
 
-    /// Iterate over tuples, repeating each one by its positive multiplicity.
-    pub fn iter_flat(&self) -> impl Iterator<Item = &T> {
-        self.data.iter().flat_map(|(tuple, diff)| {
-            let count = if diff.is_positive() {
-                diff.0 as usize
-            } else {
-                0
-            };
-            std::iter::repeat_n(tuple, count)
-        })
-    }
-
-    /// Convert the collection to a Vec of its tuples (with positive multiplicity).
-    pub fn to_vec(&self) -> Vec<T>
-    where
-        T: Clone,
-    {
-        self.iter().cloned().collect()
-    }
-
-    /// Get the internal data map.
-    pub fn data(&self) -> &HashMap<T, Diff> {
-        &self.data
-    }
-
     /// Clear the collection.
     pub fn clear(&mut self) {
         self.data.clear();
