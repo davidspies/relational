@@ -4,7 +4,7 @@
 //! excluding any operations that were inside popped frames.
 
 use proptest::prelude::*;
-use relational::database::{Database, Op, join, map, output, save, union};
+use relational::database::{Database, join, map, output, save, union};
 
 /// An operation that can be performed on the database.
 #[derive(Debug, Clone)]

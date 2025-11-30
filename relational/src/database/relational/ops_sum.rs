@@ -6,11 +6,11 @@ use std::ops::{Add, Mul, Sub};
 
 use crate::change::Diff;
 
-use super::relation::Op;
+use super::relation::{Op, Relation};
 
-/// A sum relation - sums values by key.
+/// A sum operator - sums values by key.
 /// Output is (key, sum) pairs.
-pub struct SumRelation<T, K, V, FK, FV, R>
+pub struct SumOp<T, K, V, FK, FV, R>
 where
     K: Eq + Hash,
     V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
@@ -26,7 +26,7 @@ where
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, K, V, FK, FV, R> Op<(K, V)> for SumRelation<T, K, V, FK, FV, R>
+impl<T, K, V, FK, FV, R> Op<(K, V)> for SumOp<T, K, V, FK, FV, R>
 where
     K: Clone + Eq + Hash,
     V: Clone + Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
@@ -66,7 +66,11 @@ where
 }
 
 /// Create a sum relation - sums values by key.
-pub fn sum<T, K, V, FK, FV, R>(input: R, key_fn: FK, val_fn: FV) -> SumRelation<T, K, V, FK, FV, R>
+pub fn sum<T, K, V, FK, FV, R>(
+    input: Relation<R>,
+    key_fn: FK,
+    val_fn: FV,
+) -> Relation<SumOp<T, K, V, FK, FV, R>>
 where
     K: Eq + Hash,
     V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
@@ -74,11 +78,11 @@ where
     FV: Fn(&T) -> V,
     R: Op<T>,
 {
-    SumRelation {
-        inner: input,
+    Relation::new(SumOp {
+        inner: input.inner,
         key_fn,
         val_fn,
         sums: HashMap::new(),
         _phantom: std::marker::PhantomData,
-    }
+    })
 }

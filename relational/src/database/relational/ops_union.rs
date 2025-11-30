@@ -2,10 +2,10 @@
 
 use crate::change::Diff;
 
-use super::relation::Op;
+use super::relation::{Op, Relation};
 
-/// A union relation - combines changes from both inputs.
-pub struct UnionRelation<T, L, R>
+/// A union operator - combines changes from both inputs.
+pub struct UnionOp<T, L, R>
 where
     L: Op<T>,
     R: Op<T>,
@@ -15,7 +15,7 @@ where
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, L, R> Op<T> for UnionRelation<T, L, R>
+impl<T, L, R> Op<T> for UnionOp<T, L, R>
 where
     L: Op<T>,
     R: Op<T>,
@@ -27,14 +27,14 @@ where
 }
 
 /// Create a union relation.
-pub fn union<T, L, R>(left: L, right: R) -> UnionRelation<T, L, R>
+pub fn union<T, L, R>(left: Relation<L>, right: Relation<R>) -> Relation<UnionOp<T, L, R>>
 where
     L: Op<T>,
     R: Op<T>,
 {
-    UnionRelation {
-        left,
-        right,
+    Relation::new(UnionOp {
+        left: left.inner,
+        right: right.inner,
         _phantom: std::marker::PhantomData,
-    }
+    })
 }

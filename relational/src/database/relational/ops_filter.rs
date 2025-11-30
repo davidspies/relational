@@ -3,10 +3,10 @@
 //! Implemented using flat_map.
 
 use super::ops_flat_map::flat_map;
-use super::relation::Op;
+use super::relation::{Op, Relation};
 
 /// Create a filter relation.
-pub fn filter<T, F, R>(input: R, pred: F) -> impl Op<T>
+pub fn filter<T, F, R>(input: Relation<R>, pred: F) -> Relation<impl Op<T>>
 where
     F: Fn(&T) -> bool,
     R: Op<T>,

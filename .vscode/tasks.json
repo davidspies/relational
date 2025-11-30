@@ -38,6 +38,16 @@
       "problemMatcher": [
         "$rustc"
       ]
+    },
+    {
+      "label": "cargo fmt",
+      "type": "process",
+      "command": "cargo",
+      "args": [
+        "fmt",
+        "--all"
+      ],
+      "group": "build"
     }
   ]
 }

@@ -7,10 +7,14 @@ use std::hash::Hash;
 
 use super::ops_map::map;
 use super::ops_max::max;
-use super::relation::Op;
+use super::relation::{Op, Relation};
 
 /// Create a min relation - minimum value by key.
-pub fn min<T, K, V, FK, FV, R>(input: R, key_fn: FK, val_fn: FV) -> impl Op<(K, V)>
+pub fn min<T, K, V, FK, FV, R>(
+    input: Relation<R>,
+    key_fn: FK,
+    val_fn: FV,
+) -> Relation<impl Op<(K, V)>>
 where
     K: Clone + Eq + Hash,
     V: Clone + Ord,

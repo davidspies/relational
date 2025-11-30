@@ -11,7 +11,8 @@ use super::feedback::Variable as InternalVariable;
 use super::relational::input::InputState;
 use super::relational::saved::SavedRelation;
 use super::relational::{
-    InputHandle, Op, PersistentInputHandle, Variable, VariableRelation, input::InputRelation,
+    InputHandle, Op, PersistentInputHandle, Relation, Variable, VariableRelation,
+    input::InputRelation,
 };
 
 use wrappers::{
@@ -60,15 +61,15 @@ impl Database {
     /// Changes are staged until `db.commit()` is called.
     pub fn create_input<T: Clone + Eq + Hash + 'static>(
         &mut self,
-    ) -> (InputHandle<T>, InputRelation<T>) {
+    ) -> (InputHandle<T>, Relation<InputRelation<T>>) {
         let state = Rc::new(RefCell::new(InputState::new()));
 
         let handle = InputHandle {
             state: state.clone(),
         };
-        let relation = InputRelation {
+        let relation = Relation::new(InputRelation {
             state: state.clone(),
-        };
+        });
 
         // Create wrapper for type-erased operations
         let mut wrapper = InputWrapper::new(state);
@@ -86,22 +87,22 @@ impl Database {
     /// Returns a `PersistentInputHandle` which supports both insert and delete.
     pub fn create_persistent_input<T: Clone + Eq + Hash>(
         &mut self,
-    ) -> (PersistentInputHandle<T>, InputRelation<T>) {
+    ) -> (PersistentInputHandle<T>, Relation<InputRelation<T>>) {
         let state = Rc::new(RefCell::new(InputState::new()));
 
         let handle = PersistentInputHandle {
             state: state.clone(),
         };
-        let relation = InputRelation {
+        let relation = Relation::new(InputRelation {
             state: state.clone(),
-        };
+        });
 
         (handle, relation)
     }
 
     /// Create a feedback variable.
     ///
-    /// Returns a `Variable` handle (to pass to `feedback()`) and a `VariableRelation`
+    /// Returns a `Variable` handle (to pass to `feedback()`) and a `Relation<VariableRelation>`
     /// (to use in your dataflow graph).
     ///
     /// # Example
@@ -110,12 +111,14 @@ impl Database {
     /// let derived = map(var_rel, |x| x * 2);
     /// db.feedback(var, some_input_relation);
     /// ```
-    pub fn create_variable<T: Clone + Eq + Hash>(&self) -> (Variable<T>, VariableRelation<T>) {
+    pub fn create_variable<T: Clone + Eq + Hash>(
+        &self,
+    ) -> (Variable<T>, Relation<VariableRelation<T>>) {
         let inner = Rc::new(RefCell::new(InternalVariable::new()));
         let var = Variable {
             inner: inner.clone(),
         };
-        let rel = VariableRelation { inner };
+        let rel = Relation::new(VariableRelation { inner });
         (var, rel)
     }
 
@@ -180,9 +183,9 @@ impl Database {
     pub fn feedback<T: Clone + Eq + Hash + 'static, R: Op<T> + 'static>(
         &mut self,
         variable: Variable<T>,
-        input: R,
+        input: Relation<R>,
     ) {
-        let mut wrapper = FeedbackWrapper::new(variable.inner, input, self.commit_id.clone());
+        let mut wrapper = FeedbackWrapper::new(variable.inner, input.inner, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
 
@@ -201,9 +204,10 @@ impl Database {
     pub fn feedback_with_id<T: Clone + Eq + Hash + 'static, R: Op<T> + 'static>(
         &mut self,
         variable: Variable<(T, CommitId)>,
-        input: R,
+        input: Relation<R>,
     ) {
-        let mut wrapper = FeedbackWithIdWrapper::new(variable.inner, input, self.commit_id.clone());
+        let mut wrapper =
+            FeedbackWithIdWrapper::new(variable.inner, input.inner, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
     }
@@ -213,10 +217,10 @@ impl Database {
     /// If the relation produces any positive tuples during fixpoint propagation,
     /// the fixpoint stops immediately. Check `was_interrupted()` after `commit()`
     /// to see if an interrupt fired.
-    pub fn interrupt<T: 'static, R: Op<T> + 'static>(&mut self, input: R) {
+    pub fn interrupt<T: 'static, R: Op<T> + 'static>(&mut self, input: Relation<R>) {
         self.steps
             .push(StratifiedStep::Interrupt(Box::new(InterruptWrapper::new(
-                input,
+                input.inner,
             ))));
     }
 
@@ -229,8 +233,8 @@ impl Database {
     ///
     /// This is an optimized version of the standalone `save()` function that
     /// tracks the database's commit ID to avoid redundant upstream pulls.
-    pub fn save<T: Eq + Hash, R: Op<T>>(&self, upstream: R) -> SavedRelation<T, R> {
-        SavedRelation::with_commit_id(upstream, self.commit_id.clone())
+    pub fn save<T: Eq + Hash, R: Op<T>>(&self, upstream: Relation<R>) -> SavedRelation<T, R> {
+        SavedRelation::with_commit_id(upstream.inner, self.commit_id.clone())
     }
 
     /// Push a new checkpoint level.

@@ -6,11 +6,11 @@ use std::hash::Hash;
 use crate::change::Diff;
 use crate::collection::Multiset;
 
-use super::relation::Op;
+use super::relation::{Op, Relation};
 
-/// A join relation - joins left and right on matching keys.
+/// A join operator - joins left and right on matching keys.
 /// Tracks both input states to compute correct output deltas.
-pub struct JoinRelation<L, R, K, FL, FR, RL, RR>
+pub struct JoinOp<L, R, K, FL, FR, RL, RR>
 where
     K: Eq + Hash + Clone,
     FL: Fn(&L) -> K,
@@ -28,7 +28,7 @@ where
     right_index: HashMap<K, Multiset<R>>,
 }
 
-impl<L, R, K, FL, FR, RL, RR> Op<(L, R)> for JoinRelation<L, R, K, FL, FR, RL, RR>
+impl<L, R, K, FL, FR, RL, RR> Op<(L, R)> for JoinOp<L, R, K, FL, FR, RL, RR>
 where
     L: Clone + Eq + Hash,
     R: Clone + Eq + Hash,
@@ -92,11 +92,11 @@ where
 
 /// Create a join relation.
 pub fn join<L, R, K, FL, FR, RL, RR>(
-    left: RL,
-    right: RR,
+    left: Relation<RL>,
+    right: Relation<RR>,
     key_left: FL,
     key_right: FR,
-) -> JoinRelation<L, R, K, FL, FR, RL, RR>
+) -> Relation<JoinOp<L, R, K, FL, FR, RL, RR>>
 where
     K: Eq + Hash + Clone,
     FL: Fn(&L) -> K,
@@ -104,12 +104,12 @@ where
     RL: Op<L>,
     RR: Op<R>,
 {
-    JoinRelation {
-        left,
-        right,
+    Relation::new(JoinOp {
+        left: left.inner,
+        right: right.inner,
         key_left,
         key_right,
         left_index: HashMap::new(),
         right_index: HashMap::new(),
-    }
+    })
 }

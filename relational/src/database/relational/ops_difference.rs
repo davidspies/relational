@@ -5,11 +5,11 @@ use std::hash::Hash;
 
 use crate::change::Diff;
 
-use super::ops_distinct::{DistinctRelation, distinct};
-use super::relation::Op;
+use super::ops_distinct::{DistinctOp, distinct};
+use super::relation::{Op, Relation};
 
-/// A negate relation - negates all diffs.
-pub struct NegateRelation<T, R>
+/// A negate operator - negates all diffs.
+pub struct NegateOp<T, R>
 where
     R: Op<T>,
 {
@@ -17,7 +17,7 @@ where
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, R> Op<T> for NegateRelation<T, R>
+impl<T, R> Op<T> for NegateOp<T, R>
 where
     R: Op<T>,
 {
@@ -29,33 +29,33 @@ where
 }
 
 /// Create a negate relation.
-pub fn negate<T, R>(input: R) -> NegateRelation<T, R>
+pub fn negate<T, R>(input: Relation<R>) -> Relation<NegateOp<T, R>>
 where
     R: Op<T>,
 {
-    NegateRelation {
-        inner: input,
+    Relation::new(NegateOp {
+        inner: input.inner,
         _phantom: std::marker::PhantomData,
-    }
+    })
 }
 
-/// A difference relation - combines left with negated right, then distinct.
-pub struct DifferenceRelation<T, L, R>
+/// A difference operator - combines left with negated right, then distinct.
+pub struct DifferenceOp<T, L, R>
 where
     L: Op<T>,
     R: Op<T>,
 {
-    inner: DistinctRelation<T, DifferenceUnion<T, L, R>>,
+    inner: DistinctOp<T, DifferenceUnion<T, L, R>>,
 }
 
 /// Union of left and negated right for difference.
-pub struct DifferenceUnion<T, L, R>
+struct DifferenceUnion<T, L, R>
 where
     L: Op<T>,
     R: Op<T>,
 {
     left: L,
-    right: NegateRelation<T, R>,
+    right: NegateOp<T, R>,
     _phantom: std::marker::PhantomData<T>,
 }
 
@@ -70,7 +70,7 @@ where
     }
 }
 
-impl<T: Clone + Eq + Hash, L, R> Op<T> for DifferenceRelation<T, L, R>
+impl<T: Clone + Eq + Hash, L, R> Op<T> for DifferenceOp<T, L, R>
 where
     L: Op<T>,
     R: Op<T>,
@@ -81,17 +81,20 @@ where
 }
 
 /// Create a difference relation (left - right).
-pub fn difference<T, L, R>(left: L, right: R) -> DifferenceRelation<T, L, R>
+pub fn difference<T, L, R>(left: Relation<L>, right: Relation<R>) -> Relation<DifferenceOp<T, L, R>>
 where
     L: Op<T>,
     R: Op<T>,
 {
     let union = DifferenceUnion {
-        left,
-        right: negate(right),
+        left: left.inner,
+        right: NegateOp {
+            inner: right.inner,
+            _phantom: std::marker::PhantomData,
+        },
         _phantom: std::marker::PhantomData,
     };
-    DifferenceRelation {
-        inner: distinct(union),
-    }
+    Relation::new(DifferenceOp {
+        inner: distinct(Relation::new(union)).inner,
+    })
 }

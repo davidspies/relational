@@ -1,7 +1,7 @@
 //! CDCL Solver dataflow setup and constructor.
 
 use relational::database::{
-    CommitId, Database, Op, count, difference, distinct, filter, join, map, max, min, output,
+    CommitId, Database, count, difference, distinct, filter, join, map, max, min, output,
     output_with_sink, union,
 };
 

@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 
 use crate::collection::Multiset;
 
-use super::relation::Op;
+use super::relation::{Op, Relation};
 use super::sink::Sink;
 
 /// An output that accumulates changes from a relation into a Sink.
@@ -71,11 +71,13 @@ impl<T: Clone + Eq + Hash, R: Op<T>> Output<T, Multiset<T>, R> {
 }
 
 /// Create an output from a relation with Multiset state.
-pub fn output<T: Eq + Hash, R: Op<T>>(relation: R) -> Output<T, Multiset<T>, R> {
-    Output::new(relation)
+pub fn output<T: Eq + Hash, R: Op<T>>(relation: Relation<R>) -> Output<T, Multiset<T>, R> {
+    Output::new(relation.inner)
 }
 
 /// Create an output from a relation with a custom sink type.
-pub fn output_with_sink<T, S: Default + Sink<T>, R: Op<T>>(relation: R) -> Output<T, S, R> {
-    Output::new(relation)
+pub fn output_with_sink<T, S: Default + Sink<T>, R: Op<T>>(
+    relation: Relation<R>,
+) -> Output<T, S, R> {
+    Output::new(relation.inner)
 }

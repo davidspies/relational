@@ -8,7 +8,7 @@ use crate::change::{Change, Diff};
 use crate::collection::Multiset;
 use crate::database::commit_id::CommitId;
 
-use super::relation::Op;
+use super::relation::{Op, Relation};
 
 /// Shared state for a saved relation.
 struct SavedState<T, R: Op<T>> {
@@ -79,13 +79,13 @@ impl<T: Eq + Hash, R: Op<T>> SavedRelation<T, R> {
     /// Get a relation handle for this saved relation.
     ///
     /// Each call returns a new consumer. All consumers receive the same changes.
-    pub fn get(&self) -> SavedGetter<T, R> {
+    pub fn get(&self) -> Relation<SavedGetter<T, R>> {
         let queue = Rc::new(RefCell::new(Multiset::new()));
         self.state.borrow_mut().consumer_queues.push(queue.clone());
-        SavedGetter {
+        Relation::new(SavedGetter {
             state: self.state.clone(),
             queue,
-        }
+        })
     }
 }
 
@@ -109,6 +109,6 @@ impl<T: Clone + Eq + Hash, R: Op<T>> Op<T> for SavedGetter<T, R> {
 }
 
 /// Create a saved relation.
-pub fn save<T: Eq + Hash, R: Op<T>>(upstream: R) -> SavedRelation<T, R> {
-    SavedRelation::new(upstream)
+pub fn save<T: Eq + Hash, R: Op<T>>(upstream: Relation<R>) -> SavedRelation<T, R> {
+    SavedRelation::new(upstream.inner)
 }

@@ -5,11 +5,11 @@ use std::hash::Hash;
 
 use crate::change::Diff;
 
-use super::relation::Op;
+use super::relation::{Op, Relation};
 
-/// A max relation - tracks maximum value by key.
+/// A max operator - tracks maximum value by key.
 /// Output is (key, max_value) pairs.
-pub struct MaxRelation<T, K, V, FK, FV, R>
+pub struct MaxOp<T, K, V, FK, FV, R>
 where
     K: Eq + Hash,
     V: Ord,
@@ -26,7 +26,7 @@ where
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, K, V, FK, FV, R> Op<(K, V)> for MaxRelation<T, K, V, FK, FV, R>
+impl<T, K, V, FK, FV, R> Op<(K, V)> for MaxOp<T, K, V, FK, FV, R>
 where
     K: Clone + Eq + Hash,
     V: Clone + Ord,
@@ -77,7 +77,11 @@ where
 }
 
 /// Create a max relation - maximum value by key.
-pub fn max<T, K, V, FK, FV, R>(input: R, key_fn: FK, val_fn: FV) -> MaxRelation<T, K, V, FK, FV, R>
+pub fn max<T, K, V, FK, FV, R>(
+    input: Relation<R>,
+    key_fn: FK,
+    val_fn: FV,
+) -> Relation<MaxOp<T, K, V, FK, FV, R>>
 where
     K: Eq + Hash,
     V: Ord,
@@ -85,11 +89,11 @@ where
     FV: Fn(&T) -> V,
     R: Op<T>,
 {
-    MaxRelation {
-        inner: input,
+    Relation::new(MaxOp {
+        inner: input.inner,
         key_fn,
         val_fn,
         values: HashMap::new(),
         _phantom: std::marker::PhantomData,
-    }
+    })
 }

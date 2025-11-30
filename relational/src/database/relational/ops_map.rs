@@ -3,10 +3,10 @@
 //! Implemented using flat_map.
 
 use super::ops_flat_map::flat_map;
-use super::relation::Op;
+use super::relation::{Op, Relation};
 
 /// Create a map relation.
-pub fn map<T, U, F, R>(input: R, f: F) -> impl Op<U>
+pub fn map<T, U, F, R>(input: Relation<R>, f: F) -> Relation<impl Op<U>>
 where
     F: Fn(T) -> U,
     R: Op<T>,
