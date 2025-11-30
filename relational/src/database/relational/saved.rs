@@ -1,11 +1,12 @@
 //! SavedRelation - for using a relation in multiple places.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::Tuple;
 use crate::change::{Change, Diff};
 use crate::collection::Multiset;
+use crate::database::commit_id::CommitId;
 
 use super::relation::Relation;
 
@@ -14,11 +15,24 @@ struct SavedState<T: Tuple, R: Relation<T>> {
     upstream: R,
     /// Separate pending multiset for each consumer.
     consumer_queues: Vec<Rc<RefCell<Multiset<T>>>>,
+    /// Optional commit ID tracker for optimization.
+    commit_id: Option<Rc<Cell<CommitId>>>,
+    /// The commit ID when we last pulled from upstream.
+    last_update_commit_id: CommitId,
 }
 
 impl<T: Tuple + 'static, R: Relation<T>> SavedState<T, R> {
     /// Pull changes from upstream and distribute to all consumer queues.
     fn update(&mut self) {
+        // Optimization: skip pull if commit ID hasn't changed since last update
+        if let Some(ref commit_id) = self.commit_id {
+            let current = commit_id.get();
+            if current == self.last_update_commit_id {
+                return;
+            }
+            self.last_update_commit_id = current;
+        }
+
         self.upstream.foreach(&mut |t, diff| {
             for queue in &self.consumer_queues {
                 queue
@@ -44,6 +58,20 @@ impl<T: Tuple + 'static, R: Relation<T>> SavedRelation<T, R> {
             state: Rc::new(RefCell::new(SavedState {
                 upstream,
                 consumer_queues: Vec::new(),
+                commit_id: None,
+                last_update_commit_id: CommitId::default(),
+            })),
+        }
+    }
+
+    /// Create a new saved relation with commit ID tracking for optimization.
+    pub(crate) fn with_commit_id(upstream: R, commit_id: Rc<Cell<CommitId>>) -> Self {
+        SavedRelation {
+            state: Rc::new(RefCell::new(SavedState {
+                upstream,
+                consumer_queues: Vec::new(),
+                commit_id: Some(commit_id),
+                last_update_commit_id: CommitId::default(),
             })),
         }
     }

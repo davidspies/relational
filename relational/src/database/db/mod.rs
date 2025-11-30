@@ -10,6 +10,7 @@ use crate::Tuple;
 use super::commit_id::CommitId;
 use super::feedback::Variable as InternalVariable;
 use super::relational::input::InputState;
+use super::relational::saved::SavedRelation;
 use super::relational::{
     InputHandle, PersistentInputHandle, Relation, Variable, VariableRelation, input::InputRelation,
 };
@@ -221,6 +222,14 @@ impl Database {
     /// Check if the last fixpoint was interrupted.
     pub fn was_interrupted(&self) -> bool {
         self.was_interrupted
+    }
+
+    /// Create a saved relation that can be used in multiple places.
+    ///
+    /// This is an optimized version of the standalone `save()` function that
+    /// tracks the database's commit ID to avoid redundant upstream pulls.
+    pub fn save<T: Tuple + 'static, R: Relation<T>>(&self, upstream: R) -> SavedRelation<T, R> {
+        SavedRelation::with_commit_id(upstream, self.commit_id.clone())
     }
 
     /// Push a new checkpoint level.
