@@ -1,0 +1,7 @@
+c Unit propagation test
+c (x1) AND (NOT x1 OR x2) AND (NOT x2 OR x3)
+c Unit prop: x1=T -> x2=T -> x3=T
+p cnf 3 3
+1 0
+-1 2 0
+-2 3 0

@@ -2,8 +2,8 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A unique identifier for a node in the dataflow graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -121,7 +121,10 @@ impl Graph {
             let name = node.name.as_deref().unwrap_or("(unnamed)");
             eprintln!(
                 "  Node {}: {} [{}] - {} elements",
-                node.id.index(), name, node.op_type, count
+                node.id.index(),
+                name,
+                node.op_type,
+                count
             );
             if !node.parents.is_empty() {
                 let parents: Vec<_> = node.parents.iter().map(|p| p.index().to_string()).collect();

@@ -33,7 +33,11 @@ impl Solver {
             .boxed();
 
         // All clauses (original + learned)
-        let all_clauses = clauses_rel.union(learned_rel).named("all_clauses").boxed().save();
+        let all_clauses = clauses_rel
+            .union(learned_rel)
+            .named("all_clauses")
+            .boxed()
+            .save();
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
@@ -59,7 +63,12 @@ impl Solver {
             .boxed();
 
         // Derived: which literals are assigned true
-        let assigned = assignments.get().map(|(lit, _)| lit).named("assigned").boxed().save();
+        let assigned = assignments
+            .get()
+            .map(|(lit, _)| lit)
+            .named("assigned")
+            .boxed()
+            .save();
 
         // === Compute Units ===
         let clause_lit_true = all_clauses

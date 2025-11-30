@@ -1,0 +1,14 @@
+c Pigeonhole principle: 2 pigeons, 1 hole
+c This is UNSAT - can't fit 2 pigeons in 1 hole
+c Variables: x_ij means pigeon i goes in hole j
+c x1 = pigeon 1 in hole 1
+c x2 = pigeon 2 in hole 1
+c At least one pigeon in hole: (x1 OR x2)
+c At most one pigeon per hole: (NOT x1 OR NOT x2)
+c Each pigeon must be somewhere: (x1) AND (x2)
+c Combined: UNSAT because both must be in hole 1 but only one can fit
+p cnf 2 4
+1 2 0
+-1 -2 0
+1 0
+2 0

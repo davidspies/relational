@@ -1,0 +1,6 @@
+c Simple satisfiable formula
+c (x1 OR x2) AND (x1 OR NOT x2)
+c Solution: x1 = true
+p cnf 2 2
+1 2 0
+1 -2 0

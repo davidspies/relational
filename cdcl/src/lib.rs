@@ -8,6 +8,7 @@
 
 mod assignments_sink;
 mod cause_sink;
+pub mod cnf;
 mod conflict_analysis;
 mod queries;
 mod solve;
@@ -18,5 +19,6 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use cnf::{Cnf, SolveResult};
 pub use solver::Solver;
 pub use types::{ClauseId, Conflict, Level, Lit, Var};

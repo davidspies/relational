@@ -111,7 +111,15 @@ impl<L> Relation<L> {
         };
         Relation::new(
             DifferenceOp {
-                inner: Relation::new(union, commit_id.clone(), graph.clone(), "diff_union", vec![left_node, right_node]).distinct().inner,
+                inner: Relation::new(
+                    union,
+                    commit_id.clone(),
+                    graph.clone(),
+                    "diff_union",
+                    vec![left_node, right_node],
+                )
+                .distinct()
+                .inner,
             },
             commit_id,
             graph,

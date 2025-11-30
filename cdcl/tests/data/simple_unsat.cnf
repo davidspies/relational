@@ -1,0 +1,5 @@
+c Simple unsatisfiable formula
+c (x1) AND (NOT x1)
+p cnf 1 2
+1 0
+-1 0
