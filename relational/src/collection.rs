@@ -137,19 +137,16 @@ impl<T: Eq + Hash> Multiset<T> {
     /// Drain the collection, returning an iterator over (tuple, diff) pairs.
     /// The collection will be empty after this call.
     pub fn drain(&mut self) -> impl Iterator<Item = (T, Diff)> + '_ {
-        self.data.drain().map(|(t, d)| (t, d))
+        self.data.drain()
     }
 }
 
 impl<T: Eq + Hash> IntoIterator for Multiset<T> {
     type Item = (T, Diff);
-    type IntoIter = std::iter::Map<
-        std::collections::hash_map::IntoIter<T, Diff>,
-        fn((T, Diff)) -> (T, Diff),
-    >;
+    type IntoIter = std::collections::hash_map::IntoIter<T, Diff>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.data.into_iter().map(|(t, d)| (t, d))
+        self.data.into_iter()
     }
 }
 
