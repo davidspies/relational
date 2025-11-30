@@ -18,7 +18,7 @@ where
     FV: Fn(&T) -> V,
     R: Op<T>,
 {
-    inner: R,
+    inner: Relation<R>,
     key_fn: FK,
     val_fn: FV,
     /// Track sum per key
@@ -76,16 +76,18 @@ impl<R> Relation<R> {
         FV: Fn(&T) -> V,
     {
         let node_id = self.node_id;
+        let commit_id = self.commit_id.clone();
+        let graph = self.graph.clone();
         Relation::new(
             SumOp {
-                inner: self.inner,
+                inner: self,
                 key_fn,
                 val_fn,
                 sums: HashMap::new(),
                 _phantom: std::marker::PhantomData,
             },
-            self.commit_id,
-            self.graph,
+            commit_id,
+            graph,
             "sum",
             vec![node_id],
         )

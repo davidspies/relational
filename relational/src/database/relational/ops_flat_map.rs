@@ -11,7 +11,7 @@ where
     F: Fn(T) -> I,
     R: Op<T>,
 {
-    inner: R,
+    inner: Relation<R>,
     f: F,
     _phantom: std::marker::PhantomData<(T, I)>,
 }
@@ -40,16 +40,19 @@ impl<R> Relation<R> {
         I: IntoIterator<Item = U>,
         F: Fn(T) -> I,
     {
+        let node_id = self.node_id;
+        let commit_id = self.commit_id.clone();
+        let graph = self.graph.clone();
         Relation::new(
             FlatMapOp {
-                inner: self.inner,
+                inner: self,
                 f,
                 _phantom: std::marker::PhantomData,
             },
-            self.commit_id,
-            self.graph,
+            commit_id,
+            graph,
             "flat_map",
-            vec![self.node_id],
+            vec![node_id],
         )
     }
 }

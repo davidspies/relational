@@ -10,3 +10,4 @@ ctrlc = ["dep:ctrlc"]
 [dependencies]
 relational = { path = "../relational" }
 ctrlc = { version = "*", optional = true }
+anyhow = "*"

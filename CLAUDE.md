@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This is a personal project. I don't mind resolving dependency conflicts when major versions of things change. So just use `"*"` for all dependency versions in Cargo.toml to stay up to date.
+
 ## Project Guidelines
 
 ### Code Style
@@ -20,6 +22,8 @@ Bad patterns that hide bugs:
 - `.min()` / `.max()` to clamp values that should already be in range
 - Silent fallbacks for cases that "can't happen"
 - Default values that mask logic errors
+- `let _ = ...` or `if let Ok(_) = ...` to discard errors silently
+- `match ... { Ok(x) => use(x), Err(_) => {} }` - either handle the error or propagate it
 
 Good patterns:
 - `.unwrap()` or `.expect("explanation")` for cases that indicate bugs

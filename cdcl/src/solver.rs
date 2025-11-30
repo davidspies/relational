@@ -140,18 +140,4 @@ impl Solver {
     pub fn graph(&self) -> relational::database::GraphHandle {
         self.db.graph()
     }
-
-    /// Install a ctrl-C handler that dumps the dataflow graph on interrupt.
-    ///
-    /// This is useful for debugging long-running solver instances.
-    /// Call this after creating the solver but before solving.
-    #[cfg(feature = "ctrlc")]
-    pub fn install_ctrlc_handler(&self) {
-        let graph = self.graph();
-        ctrlc::set_handler(move || {
-            graph.dump();
-            std::process::exit(130); // Standard exit code for Ctrl+C
-        })
-        .expect("Error setting Ctrl-C handler");
-    }
 }

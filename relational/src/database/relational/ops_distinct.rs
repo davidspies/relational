@@ -13,7 +13,7 @@ pub struct DistinctOp<T, R>
 where
     R: Op<T>,
 {
-    pub(super) inner: R,
+    pub(super) inner: Relation<R>,
     /// Track input multiplicities
     counts: HashMap<T, i64>,
 }
@@ -54,13 +54,15 @@ impl<R> Relation<R> {
         R: Op<T>,
     {
         let node_id = self.node_id;
+        let commit_id = self.commit_id.clone();
+        let graph = self.graph.clone();
         Relation::new(
             DistinctOp {
-                inner: self.inner,
+                inner: self,
                 counts: HashMap::new(),
             },
-            self.commit_id,
-            self.graph,
+            commit_id,
+            graph,
             "distinct",
             vec![node_id],
         )

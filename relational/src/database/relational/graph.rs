@@ -92,7 +92,8 @@ impl Graph {
 
     /// Export the graph to SVG using the `dot` command.
     /// Returns an error if graphviz is not installed.
-    pub fn to_svg(&self) -> Result<String, std::io::Error> {
+    pub fn to_svg(&self) -> anyhow::Result<String> {
+        use anyhow::Context;
         use std::io::Write;
         use std::process::{Command, Stdio};
 
@@ -101,15 +102,23 @@ impl Graph {
             .args(["-Tsvg"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .spawn()?;
+            .spawn()
+            .context("failed to run 'dot' command (is graphviz installed?)")?;
 
-        child.stdin.as_mut().unwrap().write_all(dot.as_bytes())?;
-        let output = child.wait_with_output()?;
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(dot.as_bytes())
+            .context("failed to write to dot stdin")?;
+        let output = child
+            .wait_with_output()
+            .context("failed to read dot output")?;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
-            Err(std::io::Error::other("dot command failed"))
+            anyhow::bail!("dot command failed with status {}", output.status)
         }
     }
 

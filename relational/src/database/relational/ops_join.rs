@@ -18,8 +18,8 @@ where
     RL: Op<L>,
     RR: Op<R>,
 {
-    left: RL,
-    right: RR,
+    left: Relation<RL>,
+    right: Relation<RR>,
     key_left: FL,
     key_right: FR,
     /// Index of left tuples by key: key -> [(tuple, count)]
@@ -108,17 +108,19 @@ impl<RL> Relation<RL> {
         assert_same_commit_id(&self.commit_id, &right.commit_id);
         let left_node = self.node_id;
         let right_node = right.node_id;
+        let commit_id = self.commit_id.clone();
+        let graph = self.graph.clone();
         Relation::new(
             JoinOp {
-                left: self.inner,
-                right: right.inner,
+                left: self,
+                right,
                 key_left,
                 key_right,
                 left_index: HashMap::new(),
                 right_index: HashMap::new(),
             },
-            self.commit_id,
-            self.graph,
+            commit_id,
+            graph,
             "join",
             vec![left_node, right_node],
         )

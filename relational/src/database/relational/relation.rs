@@ -18,12 +18,34 @@ use super::graph::{GraphBuilder, NodeId};
 pub trait Op<T> {
     /// Iterate over pending changes, calling f for each (tuple, count) pair.
     fn foreach(&mut self, f: &mut dyn FnMut(T, Diff));
+
+    /// Box this operator to allow type erasure.
+    /// Use this when the compiler struggles with deeply nested types.
+    fn boxed<'a>(self) -> Box<dyn Op<T> + 'a>
+    where
+        Self: Sized + 'a,
+    {
+        Box::new(self)
+    }
 }
 
 /// Implement Op for Box<dyn Op<T>> to allow type erasure.
-impl<T, R: Op<T> + ?Sized> Op<T> for Box<R> {
+impl<T, R: Op<T>> Op<T> for Box<R> {
     fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
         (**self).foreach(f);
+    }
+}
+
+impl<T> Op<T> for Box<dyn Op<T>> {
+    fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
+        (**self).foreach(f);
+    }
+
+    fn boxed<'a>(self) -> Box<dyn Op<T> + 'a>
+    where
+        Self: Sized + 'a,
+    {
+        self
     }
 }
 
@@ -71,20 +93,17 @@ impl<R> Relation<R> {
 
     /// Box this relation to break the type chain.
     /// Use this when the compiler struggles with deeply nested types.
+    /// This doesn't create a new node in the graph - it reuses the parent's node.
     pub fn boxed<'a, T>(self) -> Relation<Box<dyn Op<T> + 'a>>
     where
         R: Op<T> + 'a,
     {
-        let (node_id, counter) = self
-            .graph
-            .borrow_mut()
-            .add_node("boxed", vec![self.node_id]);
         Relation {
-            inner: Box::new(self.inner),
+            inner: self.inner.boxed(),
             commit_id: self.commit_id,
             graph: self.graph,
-            node_id,
-            counter,
+            node_id: self.node_id,
+            counter: self.counter,
         }
     }
 }

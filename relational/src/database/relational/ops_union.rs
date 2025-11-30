@@ -10,8 +10,8 @@ where
     L: Op<T>,
     R: Op<T>,
 {
-    left: L,
-    right: R,
+    left: Relation<L>,
+    right: Relation<R>,
     _phantom: std::marker::PhantomData<T>,
 }
 
@@ -36,14 +36,16 @@ impl<L> Relation<L> {
         assert_same_commit_id(&self.commit_id, &right.commit_id);
         let left_node = self.node_id;
         let right_node = right.node_id;
+        let commit_id = self.commit_id.clone();
+        let graph = self.graph.clone();
         Relation::new(
             UnionOp {
-                left: self.inner,
-                right: right.inner,
+                left: self,
+                right,
                 _phantom: std::marker::PhantomData,
             },
-            self.commit_id,
-            self.graph,
+            commit_id,
+            graph,
             "union",
             vec![left_node, right_node],
         )
