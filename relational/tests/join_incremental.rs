@@ -22,7 +22,7 @@ fn test_join_simultaneous_inserts() {
 
     // Join on the first element (key)
     let joined = join(left_rel, right_rel, |(k, _)| *k, |(k, _)| *k);
-    let mut joined_out = output(joined.boxed());
+    let joined_out = output(joined.boxed());
 
     // Initial state: left has (1, 10), right has (1, 100)
     left.insert((1, 10));
@@ -75,7 +75,7 @@ fn test_join_both_sides_from_empty() {
 
     // Join where left == right (identity key)
     let joined = join(left_rel, right_rel, |x| *x, |x| *x);
-    let mut joined_out = output(joined.boxed());
+    let joined_out = output(joined.boxed());
 
     // Insert 1 into both sides in a single commit
     left.insert(1);

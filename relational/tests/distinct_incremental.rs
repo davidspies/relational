@@ -25,7 +25,7 @@ fn test_distinct_after_map() {
     // Extract clause IDs and deduplicate
     let clause_ids = map(clauses_rel, |(cid, _)| cid);
     let clause_ids_distinct = distinct(clause_ids);
-    let mut out = output(clause_ids_distinct.boxed());
+    let out = output(clause_ids_distinct.boxed());
 
     // Add clauses: clause 1 has literals 1 and 2, clause 2 has literal -1
     clauses.insert((1, 1));
@@ -51,7 +51,7 @@ fn test_distinct_incremental_insert() {
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = distinct(input_rel);
-    let mut out = output(distinct_rel.boxed());
+    let out = output(distinct_rel.boxed());
 
     // Initial state: one copy of 1
     input.insert(1);
@@ -79,7 +79,7 @@ fn test_distinct_incremental_with_pop() {
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = distinct(input_rel);
-    let mut out = output(distinct_rel.boxed());
+    let out = output(distinct_rel.boxed());
 
     // Initial state: 1
     input.insert(1);
@@ -114,7 +114,7 @@ fn test_distinct_with_push_pop() {
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = distinct(input_rel);
-    let mut out = output(distinct_rel.boxed());
+    let out = output(distinct_rel.boxed());
 
     // Initial state
     input.insert(1);
@@ -220,7 +220,7 @@ fn test_distinct_multiplicity() {
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = distinct(input_rel);
-    let mut out = output(distinct_rel.boxed());
+    let out = output(distinct_rel.boxed());
 
     // Add same value multiple times
     input.insert(1);

@@ -8,7 +8,7 @@ fn test_pop_duplicate_insert() {
     let mut db = Database::new();
     let (mut handle, rel) = db.create_input::<i32>();
 
-    let mut out = output(rel.boxed());
+    let out = output(rel.boxed());
 
     // Insert 0 before push
     handle.insert(0);

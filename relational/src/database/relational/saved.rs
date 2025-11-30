@@ -51,7 +51,7 @@ impl<T: Tuple + 'static, R: Relation<T>> SavedRelation<T, R> {
     /// Get a relation handle for this saved relation.
     ///
     /// Each call returns a new consumer. All consumers receive the same changes.
-    pub fn get(&mut self) -> SavedGetter<T, R> {
+    pub fn get(&self) -> SavedGetter<T, R> {
         let queue = Rc::new(RefCell::new(Multiset::new()));
         self.state.borrow_mut().consumer_queues.push(queue.clone());
         SavedGetter {

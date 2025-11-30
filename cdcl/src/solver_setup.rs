@@ -1,8 +1,8 @@
 //! CDCL Solver dataflow setup and constructor.
 
 use relational::database::{
-    CommitId, Database, Relation, count, difference, distinct, filter, join, map, max, min, output,
-    output_with_sink, save, union,
+    CommitId, Database, Relation, SavedRelation, count, difference, distinct, filter, join, map,
+    max, min, output, output_with_sink, save, union,
 };
 
 use super::solver::{Inputs, Outputs, Solver, State};
@@ -117,19 +117,16 @@ impl Solver {
         let direct_conflict_vars = map(conflicting_pairs, |((_, v), _)| v).boxed();
         let direct_conflict_vars_distinct = distinct(direct_conflict_vars).boxed();
 
-        let mut clause_conflict_enums = save(map(clause_conflicts, Conflict::EmptyClause).boxed());
-        let mut direct_conflict_enums = save(
-            map(direct_conflict_vars_distinct, |v| {
-                Conflict::DirectConflict(v)
-            })
-            .boxed(),
-        );
+        let clause_conflict_enums = map(clause_conflicts, Conflict::EmptyClause).boxed();
+        let direct_conflict_enums = map(direct_conflict_vars_distinct, |v| {
+            Conflict::DirectConflict(v)
+        })
+        .boxed();
 
-        let conflicts = union(clause_conflict_enums.get(), direct_conflict_enums.get()).boxed();
+        let conflicts = save(union(clause_conflict_enums, direct_conflict_enums).boxed());
 
         // === Set up interrupts for early conflict detection ===
-        db.interrupt(clause_conflict_enums.get());
-        db.interrupt(direct_conflict_enums.get());
+        db.interrupt(conflicts.get());
 
         // === Set up the feedback loop ===
         let unit_with_level = join(units.get(), current_level_rel, |_| (), |_| ());
@@ -149,7 +146,7 @@ impl Solver {
         let causes_out = output_with_sink(causes.boxed());
         let assigned_out = output(assigned.get().boxed());
         let units_out = output(units.get().boxed());
-        let conflicts_out = output(conflicts.boxed());
+        let conflicts_out = output(conflicts.get().boxed());
 
         Solver {
             db,
