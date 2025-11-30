@@ -906,3 +906,76 @@ fn test_push_pop_simple() {
     let after_pop = collect_to_map(&mut rel);
     assert_eq!(after_pop.get(&3), Some(&-1)); // deletion
 }
+
+#[test]
+fn test_consolidate() {
+    let mut db = Database::new();
+    let (mut handle_a, rel_a) = db.create_input::<i32>();
+    let (mut handle_b, rel_b) = db.create_input::<i32>();
+
+    // Create a union that will have duplicates
+    handle_a.insert(1);
+    handle_a.insert(2);
+    handle_b.insert(1); // duplicate with a
+    handle_b.insert(3);
+    db.commit();
+
+    // Union produces: 1 (+1), 2 (+1), 1 (+1), 3 (+1) = 1 with mult 2
+    let unioned = rel_a.union(rel_b);
+    let mut consolidated = unioned.consolidate();
+
+    let changes = collect_to_map(&mut consolidated);
+    // After consolidation, we should see net multiplicities
+    assert_eq!(changes.get(&1), Some(&2)); // 1 appears twice
+    assert_eq!(changes.get(&2), Some(&1));
+    assert_eq!(changes.get(&3), Some(&1));
+}
+
+#[test]
+fn test_consolidate_cancellation() {
+    let mut db = Database::new();
+    let (mut handle_a, rel_a) = db.create_input::<i32>();
+    let (mut handle_b, rel_b) = db.create_input::<i32>();
+
+    handle_a.insert(1);
+    handle_b.insert(1);
+    db.commit();
+
+    // a has +1 for 1, b.negate has -1 for 1 -> they cancel
+    let negated_b = rel_b.negate();
+    let combined = rel_a.union(negated_b);
+
+    // This would panic if consolidate forwarded any tuples (since they should all cancel)
+    let mut panicking = combined.consolidate().map(|x| {
+        panic!("consolidate should not forward cancelled tuple: {}", x);
+    });
+
+    // Pull from the relation - if consolidate is working, nothing should be forwarded
+    panicking.foreach(&mut |_, _| {});
+}
+
+#[test]
+fn test_consolidate_incremental() {
+    let mut db = Database::new();
+    let (mut handle_a, rel_a) = db.create_input::<i32>();
+    let (mut handle_b, rel_b) = db.create_input::<i32>();
+
+    // First batch: a has 1, b has 1 -> union has 1 with mult 2
+    handle_a.insert(1);
+    handle_b.insert(1);
+    db.commit();
+
+    let unioned = rel_a.union(rel_b);
+    let mut consolidated = unioned.consolidate();
+
+    let changes1 = collect_to_map(&mut consolidated);
+    assert_eq!(changes1.get(&1), Some(&2)); // 1 appears twice
+
+    // Second batch: add more to both
+    handle_a.insert(2);
+    handle_b.insert(2);
+    db.commit();
+
+    let changes2 = collect_to_map(&mut consolidated);
+    assert_eq!(changes2.get(&2), Some(&2)); // 2 appears twice
+}

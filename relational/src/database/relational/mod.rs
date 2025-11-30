@@ -7,6 +7,7 @@
 //! - Use `.boxed()` to break type chains when needed
 
 pub(crate) mod input;
+mod ops_consolidate;
 mod ops_count;
 mod ops_difference;
 mod ops_distinct;
