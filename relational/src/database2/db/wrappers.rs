@@ -160,6 +160,8 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWrapp
 pub(super) trait AnyInterrupt {
     /// Check if the interrupt condition is met (relation has positive entries).
     fn check(&mut self) -> bool;
+    /// Reset the interrupt state (clear has_positive flag).
+    fn reset(&mut self);
 }
 
 /// Wrapper for interrupt - checks if a relation has any positive entries.
@@ -187,6 +189,10 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyInterrupt for InterruptWra
             }
         });
         self.has_positive
+    }
+
+    fn reset(&mut self) {
+        self.has_positive = false;
     }
 }
 
@@ -308,11 +314,11 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWithI
         let mut var = self.variable.borrow_mut();
         for (tuple, diff) in changes {
             // Track the T -> CommitId mapping (first discovery wins)
-            self.t_to_commit_id.entry(tuple.clone()).or_insert(new_id);
+            let commit_id = *self.t_to_commit_id.entry(tuple.clone()).or_insert(new_id);
             // Also track input totals by T
             *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff.0;
-            // Add to variable with commit ID stamp
-            var.add_change((tuple, new_id), diff);
+            // Add to variable with commit ID stamp (use the mapped commit_id, not new_id)
+            var.add_change((tuple, commit_id), diff);
         }
         var.commit();
 

@@ -19,14 +19,18 @@ use wrappers::{
     InterruptWrapper,
 };
 
+/// A step in the stratified fixpoint - either a feedback or an interrupt.
+enum StratifiedStep {
+    Feedback(Box<dyn AnyFeedback>),
+    Interrupt(Box<dyn AnyInterrupt>),
+}
+
 /// The main database type for coordinating differential dataflow.
 pub struct Database2 {
     /// All registered inputs (type-erased).
     inputs: Vec<Box<dyn AnyInput>>,
-    /// All registered feedbacks (type-erased).
-    feedbacks: Vec<Box<dyn AnyFeedback>>,
-    /// All registered interrupts (type-erased).
-    interrupts: Vec<Box<dyn AnyInterrupt>>,
+    /// Stratified steps (feedbacks and interrupts) in registration order.
+    steps: Vec<StratifiedStep>,
     /// Current checkpoint stack depth.
     checkpoint_depth: usize,
     /// Maximum iterations for fixpoint.
@@ -42,8 +46,7 @@ impl Database2 {
     pub fn new() -> Self {
         Database2 {
             inputs: Vec::new(),
-            feedbacks: Vec::new(),
-            interrupts: Vec::new(),
+            steps: Vec::new(),
             checkpoint_depth: 0,
             max_iterations: 1000,
             commit_id: Rc::new(Cell::new(CommitId::new(0))),
@@ -128,7 +131,7 @@ impl Database2 {
         self.run_stratified_fixpoint();
     }
 
-    /// Run stratified fixpoint computation for all feedbacks.
+    /// Run stratified fixpoint computation for all steps (feedbacks and interrupts).
     fn run_stratified_fixpoint(&mut self) {
         let recording = self.checkpoint_depth > 0;
         let mut iterations = 0;
@@ -141,18 +144,20 @@ impl Database2 {
                 );
             }
 
-            // Check interrupts first
-            for interrupt in &mut self.interrupts {
-                if interrupt.check() {
-                    self.was_interrupted = true;
-                    return;
-                }
-            }
-
-            for feedback in &mut self.feedbacks {
-                if feedback.step(recording) {
-                    iterations += 1;
-                    continue 'outer;
+            for step in &mut self.steps {
+                match step {
+                    StratifiedStep::Interrupt(interrupt) => {
+                        if interrupt.check() {
+                            self.was_interrupted = true;
+                            return;
+                        }
+                    }
+                    StratifiedStep::Feedback(feedback) => {
+                        if feedback.step(recording) {
+                            iterations += 1;
+                            continue 'outer;
+                        }
+                    }
                 }
             }
 
@@ -172,7 +177,7 @@ impl Database2 {
     ) {
         let mut wrapper = FeedbackWrapper::new(variable.inner, input);
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
-        self.feedbacks.push(Box::new(wrapper));
+        self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
 
         // Run fixpoint immediately (like old Database did)
         self.run_stratified_fixpoint();
@@ -193,7 +198,7 @@ impl Database2 {
     ) {
         let mut wrapper = FeedbackWithIdWrapper::new(variable.inner, input, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
-        self.feedbacks.push(Box::new(wrapper));
+        self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
     }
 
     /// Register an interrupt that stops fixpoint when the relation becomes non-empty.
@@ -202,7 +207,10 @@ impl Database2 {
     /// the fixpoint stops immediately. Check `was_interrupted()` after `commit()`
     /// to see if an interrupt fired.
     pub fn interrupt<T: Tuple + 'static, R: Relation<T> + 'static>(&mut self, input: R) {
-        self.interrupts.push(Box::new(InterruptWrapper::new(input)));
+        self.steps
+            .push(StratifiedStep::Interrupt(Box::new(InterruptWrapper::new(
+                input,
+            ))));
     }
 
     /// Check if the last fixpoint was interrupted.
@@ -216,8 +224,10 @@ impl Database2 {
         for input in &mut self.inputs {
             input.push_checkpoint();
         }
-        for feedback in &mut self.feedbacks {
-            feedback.push_checkpoint();
+        for step in &mut self.steps {
+            if let StratifiedStep::Feedback(feedback) = step {
+                feedback.push_checkpoint();
+            }
         }
     }
 
@@ -249,37 +259,55 @@ impl Database2 {
             input.send_inverse_and_pop();
         }
         // For feedbacks, send -1's but don't pop yet
-        for feedback in &mut self.feedbacks {
-            feedback.send_inverse();
+        for step in &mut self.steps {
+            if let StratifiedStep::Feedback(feedback) = step {
+                feedback.send_inverse();
+            }
         }
 
         // Step 2: Commit feedback changes so they can be pulled
-        for feedback in &mut self.feedbacks {
-            feedback.commit();
+        for step in &mut self.steps {
+            if let StratifiedStep::Feedback(feedback) = step {
+                feedback.commit();
+            }
         }
 
-        // Step 3: In stratified order of feedbacks, for each feedback:
-        for i in 0..self.feedbacks.len() {
-            // 3a) Pull all changes and update tracked inputs; forward along anything
-            //     which is NOT in the last checkpoint with a +1
-            self.feedbacks[i].pull_and_forward_non_checkpoint();
+        // Step 3: In stratified order, for each feedback:
+        //   - pull_and_forward_non_checkpoint, pop_and_forward_reachable, commit
+        //   - Then run fixpoint up to this step
+        // If an interrupt fires, continue processing feedbacks
 
-            // 3b) Pop the last checkpoint; forward along a +1 for anything in that
-            //     checkpoint whose tracked input value is still non-zero
-            self.feedbacks[i].pop_and_forward_reachable();
+        for i in 0..self.steps.len() {
+            if let StratifiedStep::Feedback(feedback) = &mut self.steps[i] {
+                // 3a) Pull all changes and update tracked inputs; forward along anything
+                //     which is NOT in the last checkpoint with a +1
+                feedback.pull_and_forward_non_checkpoint();
 
-            // Commit the forwarded changes so they can be pulled
-            self.feedbacks[i].commit();
+                // 3b) Pop the last checkpoint; forward along a +1 for anything in that
+                //     checkpoint whose tracked input value is still non-zero
+                feedback.pop_and_forward_reachable();
 
-            // 3c) Propagate normally all feedbacks up to and including this one
-            self.run_stratified_fixpoint_up_to(i);
+                // Commit the forwarded changes so they can be pulled
+                feedback.commit();
+
+                // 3c) Propagate normally all steps up to and including this one
+                self.run_stratified_fixpoint_up_to(i);
+            }
+        }
+
+        // Reset all interrupts so they don't keep firing on subsequent commits
+        for step in &mut self.steps {
+            if let StratifiedStep::Interrupt(interrupt) = step {
+                interrupt.reset();
+            }
         }
 
         true
     }
 
-    /// Run stratified fixpoint up to and including the given feedback index.
-    fn run_stratified_fixpoint_up_to(&mut self, limit: usize) {
+    /// Run stratified fixpoint up to and including the given step index.
+    /// Returns Some(step_index) if an interrupt fired, None otherwise.
+    fn run_stratified_fixpoint_up_to(&mut self, limit: usize) -> Option<usize> {
         let recording = self.checkpoint_depth > 0;
         let mut iterations = 0;
 
@@ -292,15 +320,26 @@ impl Database2 {
             }
 
             for i in 0..=limit {
-                if self.feedbacks[i].step(recording) {
-                    iterations += 1;
-                    continue 'outer;
+                match &mut self.steps[i] {
+                    StratifiedStep::Interrupt(interrupt) => {
+                        if interrupt.check() {
+                            self.was_interrupted = true;
+                            return Some(i);
+                        }
+                    }
+                    StratifiedStep::Feedback(feedback) => {
+                        if feedback.step(recording) {
+                            iterations += 1;
+                            continue 'outer;
+                        }
+                    }
                 }
             }
 
             // No feedback produced new output, we're done
             break;
         }
+        None
     }
 
     /// Get the current checkpoint depth.
