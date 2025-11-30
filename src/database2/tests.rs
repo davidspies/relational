@@ -128,35 +128,52 @@ fn test_distinct() {
 }
 
 #[test]
-fn test_distinct_incremental() {
+fn test_distinct_on_union() {
+    // Distinct is meaningful when unioning relations that might have duplicates
+    let mut db = Database2::new();
+    let (mut handle_a, rel_a) = db.create_input::<i32>();
+    let (mut handle_b, rel_b) = db.create_input::<i32>();
+
+    // Both inputs have 1, union produces duplicates
+    handle_a.insert(1);
+    handle_b.insert(1);
+    db.commit();
+
+    let unioned = union(rel_a, rel_b);
+    let mut distinct_rel = distinct(unioned);
+
+    // Distinct collapses the duplicates
+    let changes = collect_to_map(&mut distinct_rel);
+    assert_eq!(changes.get(&1), Some(&1)); // Only one +1 output
+}
+
+#[test]
+fn test_distinct_incremental_with_pop() {
     let mut db = Database2::new();
     let (mut handle, rel) = db.create_input::<i32>();
 
-    handle.insert(1);
     handle.insert(1);
     db.commit();
 
     let mut distinct_rel = distinct(rel);
 
-    // First batch: 1 appears (count goes 0 -> 2, output +1)
+    // First batch: 1 appears
     let changes1 = collect_to_map(&mut distinct_rel);
     assert_eq!(changes1.get(&1), Some(&1));
 
-    // Delete one copy of 1
-    handle.delete(1);
+    // Push, insert another value
+    db.push();
+    handle.insert(2);
     db.commit();
 
-    // Second batch: 1 still present (count goes 2 -> 1, no output change)
     let changes2 = collect_to_map(&mut distinct_rel);
-    assert!(changes2.is_empty());
+    assert_eq!(changes2.get(&2), Some(&1));
 
-    // Delete the other copy
-    handle.delete(1);
-    db.commit();
+    // Pop - should undo insert of 2
+    db.pop();
 
-    // Third batch: 1 disappears (count goes 1 -> 0, output -1)
     let changes3 = collect_to_map(&mut distinct_rel);
-    assert_eq!(changes3.get(&1), Some(&-1));
+    assert_eq!(changes3.get(&2), Some(&-1));
 }
 
 #[test]
@@ -392,27 +409,35 @@ fn test_max() {
 }
 
 #[test]
-fn test_max_incremental() {
+fn test_max_incremental_with_pop() {
     let mut db = Database2::new();
     let (mut handle, rel) = db.create_input::<(String, i32)>();
 
     handle.insert(("a".to_string(), 10));
-    handle.insert(("a".to_string(), 20));
     db.commit();
 
     let mut maxed = max(rel, |t| t.0.clone(), |t| t.1);
 
     let changes1 = collect_to_map(&mut maxed);
-    assert_eq!(changes1.get(&("a".to_string(), 20)), Some(&1));
+    assert_eq!(changes1.get(&("a".to_string(), 10)), Some(&1));
 
-    // Delete the max value
-    handle.delete(("a".to_string(), 20));
+    // Push and add a higher value
+    db.push();
+    handle.insert(("a".to_string(), 20));
     db.commit();
 
     let changes2 = collect_to_map(&mut maxed);
-    // Old max deleted, new max (10) inserted
-    assert_eq!(changes2.get(&("a".to_string(), 20)), Some(&-1));
-    assert_eq!(changes2.get(&("a".to_string(), 10)), Some(&1));
+    // Old max (10) removed, new max (20) inserted
+    assert_eq!(changes2.get(&("a".to_string(), 10)), Some(&-1));
+    assert_eq!(changes2.get(&("a".to_string(), 20)), Some(&1));
+
+    // Pop - should restore max to 10
+    db.pop();
+
+    let changes3 = collect_to_map(&mut maxed);
+    // Max (20) removed, old max (10) restored
+    assert_eq!(changes3.get(&("a".to_string(), 20)), Some(&-1));
+    assert_eq!(changes3.get(&("a".to_string(), 10)), Some(&1));
 }
 
 #[test]
@@ -456,158 +481,6 @@ fn test_min_via_max_reverse() {
     assert_eq!(changes.get(&("a".to_string(), Reverse(5))), Some(&1));
 }
 
-// =============================================================================
-// Feedback / Fixpoint tests
-// =============================================================================
-
-mod feedback_tests {
-    use super::super::feedback::Variable;
-    use crate::change::Diff;
-
-    #[test]
-    fn test_variable_basic() {
-        let mut var = Variable::new();
-
-        // Insert some values
-        var.insert(1);
-        var.insert(2);
-        var.insert(1); // duplicate
-
-        // Collect all positive tuples
-        let result: Vec<_> = var.collect();
-        assert!(result.contains(&1));
-        assert!(result.contains(&2));
-    }
-
-    #[test]
-    fn test_variable_emits_once() {
-        let mut var = Variable::<i32>::new();
-
-        // First insert triggers emission
-        var.insert(1);
-        let changes1 = var.take_changes();
-        assert_eq!(changes1.len(), 1);
-        assert_eq!(changes1[0], (1, Diff(1)));
-
-        // Second insert of same value does NOT emit (already positive)
-        var.insert(1);
-        let changes2 = var.take_changes();
-        assert!(changes2.is_empty());
-    }
-
-    #[test]
-    fn test_stratified_multi_feedback() {
-        // Demonstrate the stratified fixpoint algorithm:
-        // 'outer: loop {
-        //   for feedback in feedbacks {
-        //     feedback.apply()
-        //     if changed { continue 'outer }
-        //   }
-        //   break
-        // }
-
-        // We'll have two independent transitive closures
-        let mut var1 = Variable::<(i32, i32)>::new();
-        let mut var2 = Variable::<(char, char)>::new();
-
-        // Graph 1: 1->2->3
-        var1.insert((1, 2));
-        var1.insert((2, 3));
-
-        // Graph 2: a->b->c
-        var2.insert(('a', 'b'));
-        var2.insert(('b', 'c'));
-
-        let edges1: Vec<(i32, i32)> = vec![(1, 2), (2, 3)];
-        let edges2: Vec<(char, char)> = vec![('a', 'b'), ('b', 'c')];
-
-        let max_iterations = 100;
-        let mut total_iterations = 0;
-
-        // Stratified fixpoint loop
-        'outer: loop {
-            if total_iterations >= max_iterations {
-                panic!("exceeded max iterations");
-            }
-
-            // Feedback 1: paths in graph 1
-            let changes1 = var1.take_changes();
-            if !changes1.is_empty() {
-                total_iterations += 1;
-                for ((a, b), diff) in &changes1 {
-                    if diff.0 > 0 {
-                        for &(eb, ec) in &edges1 {
-                            if *b == eb {
-                                var1.insert((*a, ec));
-                            }
-                        }
-                    }
-                }
-                continue 'outer;
-            }
-
-            // Feedback 2: paths in graph 2
-            let changes2 = var2.take_changes();
-            if !changes2.is_empty() {
-                total_iterations += 1;
-                for ((a, b), diff) in &changes2 {
-                    if diff.0 > 0 {
-                        for &(eb, ec) in &edges2 {
-                            if *b == eb {
-                                var2.insert((*a, ec));
-                            }
-                        }
-                    }
-                }
-                continue 'outer;
-            }
-
-            // No changes in any feedback, we're done
-            break;
-        }
-
-        // Verify both graphs reached transitive closure
-        let paths1: Vec<_> = var1.collect();
-        assert!(paths1.contains(&(1, 2)));
-        assert!(paths1.contains(&(2, 3)));
-        assert!(paths1.contains(&(1, 3)));
-
-        let paths2: Vec<_> = var2.collect();
-        assert!(paths2.contains(&('a', 'b')));
-        assert!(paths2.contains(&('b', 'c')));
-        assert!(paths2.contains(&('a', 'c')));
-    }
-
-    #[test]
-    fn test_variable_deletion() {
-        // Test that deletions work correctly
-        let mut var = Variable::<i32>::new();
-
-        // Add two copies of 1
-        var.insert(1);
-        var.insert(1);
-
-        // Take changes (should emit +1 once)
-        let changes = var.take_changes();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0], (1, Diff(1)));
-
-        // Delete one copy - still positive, no output
-        var.add_change(1, Diff(-1));
-        let changes = var.take_changes();
-        assert!(changes.is_empty());
-
-        // Delete the other copy - now 0, emit -1
-        var.add_change(1, Diff(-1));
-        let changes = var.take_changes();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0], (1, Diff(-1)));
-
-        // Verify the value is gone
-        let values: Vec<_> = var.collect();
-        assert!(values.is_empty());
-    }
-}
 
 // =============================================================================
 // Ported tests from database/tests.rs

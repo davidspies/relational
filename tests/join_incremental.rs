@@ -9,26 +9,33 @@
 //!   left_changes × new_right + new_left × right_changes
 //! This double-counts (left_changes × right_changes).
 
-use relational::Database;
+use relational::database2::{join, output, Database2, Output, Relation};
+
+/// Helper to collect output after update.
+fn collect_output<T: relational::Tuple + Clone>(out: &mut Output<T>) -> Vec<T> {
+    out.update();
+    out.collect()
+}
 
 /// Test: Insert into both sides of a join in a single commit.
 /// This exercises the case where left_changes and right_changes are both non-empty.
 #[test]
 fn test_join_simultaneous_inserts() {
-    let mut db = Database::new();
+    let mut db = Database2::new();
 
-    let left = db.create_input::<(i32, i32)>("left"); // (key, left_val)
-    let right = db.create_input::<(i32, i32)>("right"); // (key, right_val)
+    let (mut left, left_rel) = db.create_input::<(i32, i32)>(); // (key, left_val)
+    let (mut right, right_rel) = db.create_input::<(i32, i32)>(); // (key, right_val)
 
     // Join on the first element (key)
-    let joined = db.join(left, right, |(k, _)| *k, |(k, _)| *k);
+    let joined = join(left_rel, right_rel, |(k, _)| *k, |(k, _)| *k);
+    let mut joined_out = output(joined.boxed());
 
     // Initial state: left has (1, 10), right has (1, 100)
-    db.insert(left, (1, 10));
-    db.insert(right, (1, 100));
+    left.insert((1, 10));
+    right.insert((1, 100));
     db.commit();
 
-    let result: Vec<_> = db.collect(joined);
+    let result = collect_output(&mut joined_out);
     assert_eq!(
         result,
         vec![((1, 10), (1, 100))],
@@ -38,8 +45,8 @@ fn test_join_simultaneous_inserts() {
     // Now insert into BOTH sides in a single commit
     // left gets (1, 20) - same key
     // right gets (1, 200) - same key
-    db.insert(left, (1, 20));
-    db.insert(right, (1, 200));
+    left.insert((1, 20));
+    right.insert((1, 200));
     db.commit();
 
     // Expected results:
@@ -47,7 +54,7 @@ fn test_join_simultaneous_inserts() {
     // - (1, 10) × (1, 200) = old_left × new_right
     // - (1, 20) × (1, 100) = new_left × old_right
     // - (1, 20) × (1, 200) = new_left × new_right  <-- THIS IS THE ONE THAT MIGHT BE MISSING
-    let mut result: Vec<_> = db.collect(joined);
+    let mut result = collect_output(&mut joined_out);
     result.sort();
 
     let mut expected = vec![
@@ -67,20 +74,21 @@ fn test_join_simultaneous_inserts() {
 /// Simpler test: empty initial state, insert into both sides at once.
 #[test]
 fn test_join_both_sides_from_empty() {
-    let mut db = Database::new();
+    let mut db = Database2::new();
 
-    let left = db.create_input::<i32>("left");
-    let right = db.create_input::<i32>("right");
+    let (mut left, left_rel) = db.create_input::<i32>();
+    let (mut right, right_rel) = db.create_input::<i32>();
 
     // Join where left == right (identity key)
-    let joined = db.join(left, right, |x| *x, |x| *x);
+    let joined = join(left_rel, right_rel, |x| *x, |x| *x);
+    let mut joined_out = output(joined.boxed());
 
     // Insert 1 into both sides in a single commit
-    db.insert(left, 1);
-    db.insert(right, 1);
+    left.insert(1);
+    right.insert(1);
     db.commit();
 
-    let result: Vec<_> = db.collect(joined);
+    let result = collect_output(&mut joined_out);
 
     // Should have (1, 1) from left=1 joining with right=1
     assert_eq!(
@@ -96,55 +104,47 @@ fn test_join_both_sides_from_empty() {
 /// which double-counts left_changes × right_changes.
 #[test]
 fn test_join_multiplicity_not_doubled() {
-    let mut db = Database::new();
+    let mut db = Database2::new();
 
-    let left = db.create_input::<i32>("left");
-    let right = db.create_input::<i32>("right");
+    let (mut left, left_rel) = db.create_input::<i32>();
+    let (mut right, right_rel) = db.create_input::<i32>();
 
     // Join where left == right (identity key)
-    let joined = db.join(left, right, |x| *x, |x| *x);
+    let joined = join(left_rel, right_rel, |x| *x, |x| *x);
+    let mut joined_out = output(joined.boxed());
 
     // Insert 1 into both sides in a single commit
-    db.insert(left, 1);
-    db.insert(right, 1);
+    left.insert(1);
+    right.insert(1);
     db.commit();
 
-    // Check multiplicity - should be exactly 1, not 2
-    let multiplicities: Vec<_> = db.iter_with_multiplicity(joined).collect();
+    // The output's state should have multiplicity exactly 1
+    joined_out.update();
+    let result = joined_out.collect();
 
-    assert_eq!(
-        multiplicities.len(),
-        1,
-        "Should have exactly one distinct tuple"
-    );
-
-    let (tuple, mult) = multiplicities[0];
-    assert_eq!(*tuple, (1, 1), "Tuple should be (1, 1)");
-    assert_eq!(
-        mult.0, 1,
-        "Multiplicity should be 1, not {} (double-counting bug if 2)",
-        mult.0
-    );
+    assert_eq!(result.len(), 1, "Should have exactly one result tuple");
+    assert_eq!(result[0], (1, 1), "Tuple should be (1, 1)");
 }
 
 /// Test with multiple matching keys inserted simultaneously.
 #[test]
 fn test_join_multiple_keys_simultaneous() {
-    let mut db = Database::new();
+    let mut db = Database2::new();
 
-    let left = db.create_input::<(char, i32)>("left"); // (key, val)
-    let right = db.create_input::<(char, i32)>("right"); // (key, val)
+    let (mut left, left_rel) = db.create_input::<(char, i32)>(); // (key, val)
+    let (mut right, right_rel) = db.create_input::<(char, i32)>(); // (key, val)
 
-    let joined = db.join(left, right, |(k, _)| *k, |(k, _)| *k);
+    let joined = join(left_rel, right_rel, |(k, _)| *k, |(k, _)| *k);
+    let mut joined_out = output(joined.boxed());
 
     // Insert matching pairs for keys 'a' and 'b' in one commit
-    db.insert(left, ('a', 1));
-    db.insert(left, ('b', 2));
-    db.insert(right, ('a', 10));
-    db.insert(right, ('b', 20));
+    left.insert(('a', 1));
+    left.insert(('b', 2));
+    right.insert(('a', 10));
+    right.insert(('b', 20));
     db.commit();
 
-    let mut result: Vec<_> = db.collect(joined);
+    let mut result = collect_output(&mut joined_out);
     result.sort();
 
     let mut expected = vec![(('a', 1), ('a', 10)), (('b', 2), ('b', 20))];

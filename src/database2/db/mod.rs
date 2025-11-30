@@ -2,16 +2,20 @@
 
 mod wrappers;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::Tuple;
 
+use super::commit_id::CommitId;
 use super::feedback::Variable;
 use super::relational::input::InputState;
-use super::relational::{InputHandle, InputRelation, Relation};
+use super::relational::{InputHandle, InputRelation, PersistentInputHandle, Relation};
 
-use wrappers::{AnyFeedback, AnyInput, FeedbackWrapper, InputWrapper};
+use wrappers::{
+    AnyFeedback, AnyInput, AnyInterrupt, FeedbackWithIdWrapper, FeedbackWrapper, InputWrapper,
+    InterruptWrapper,
+};
 
 /// The main database type for coordinating differential dataflow.
 pub struct Database2 {
@@ -19,10 +23,16 @@ pub struct Database2 {
     inputs: Vec<Box<dyn AnyInput>>,
     /// All registered feedbacks (type-erased).
     feedbacks: Vec<Box<dyn AnyFeedback>>,
+    /// All registered interrupts (type-erased).
+    interrupts: Vec<Box<dyn AnyInterrupt>>,
     /// Current checkpoint stack depth.
     checkpoint_depth: usize,
     /// Maximum iterations for fixpoint.
     max_iterations: usize,
+    /// Shared commit ID counter for feedback_with_id.
+    commit_id: Rc<Cell<CommitId>>,
+    /// Whether the last fixpoint was interrupted.
+    was_interrupted: bool,
 }
 
 impl Database2 {
@@ -31,9 +41,17 @@ impl Database2 {
         Database2 {
             inputs: Vec::new(),
             feedbacks: Vec::new(),
+            interrupts: Vec::new(),
             checkpoint_depth: 0,
             max_iterations: 1000,
+            commit_id: Rc::new(Cell::new(CommitId::new(0))),
+            was_interrupted: false,
         }
+    }
+
+    /// Get the current commit ID.
+    pub fn commit_id(&self) -> CommitId {
+        self.commit_id.get()
     }
 
     /// Create an input and register it with the database.
@@ -58,19 +76,43 @@ impl Database2 {
         (handle, relation)
     }
 
+    /// Create a persistent input that survives pop().
+    ///
+    /// Like `create_input`, but changes are not undone when `pop()` is called.
+    /// Use this for learned clauses, facts that should persist through backtracking, etc.
+    ///
+    /// Returns a `PersistentInputHandle` which supports both insert and delete.
+    pub fn create_persistent_input<T: Tuple + 'static>(
+        &mut self,
+    ) -> (PersistentInputHandle<T>, InputRelation<T>) {
+        let state = Rc::new(RefCell::new(InputState::new()));
+
+        let handle = PersistentInputHandle {
+            state: state.clone(),
+        };
+        let relation = InputRelation {
+            state: state.clone(),
+        };
+
+        (handle, relation)
+    }
+
     /// Commit staged changes and run stratified fixpoint.
     pub fn commit(&mut self) {
-        // First, commit all inputs (staged -> pending)
+        // Reset interrupt flag
+        self.was_interrupted = false;
+
+        // Record any pending inserts to the current checkpoint level
         for input in &self.inputs {
-            input.commit();
+            input.record_pending_inserts();
         }
 
-        // Then run stratified fixpoint
+        // Then run stratified fixpoint (feedbacks commit in step())
         self.run_stratified_fixpoint();
     }
 
     /// Run stratified fixpoint computation for all feedbacks.
-    fn run_stratified_fixpoint(&self) {
+    fn run_stratified_fixpoint(&mut self) {
         let recording = self.checkpoint_depth > 0;
         let mut iterations = 0;
 
@@ -80,6 +122,14 @@ impl Database2 {
                     "Stratified fixpoint exceeded max_iterations ({}) - possible infinite loop",
                     self.max_iterations
                 );
+            }
+
+            // Check interrupts first
+            for interrupt in &mut self.interrupts {
+                if interrupt.check() {
+                    self.was_interrupted = true;
+                    return;
+                }
             }
 
             for feedback in &self.feedbacks {
@@ -97,7 +147,7 @@ impl Database2 {
     /// Register a feedback: connect a variable to its input relation.
     ///
     /// The input relation computes new tuples to feed into the variable.
-    /// During `commit()`, the database will run all feedbacks to fixpoint.
+    /// This immediately runs stratified fixpoint to compute initial values.
     pub fn feedback<T: Tuple + 'static, R: Relation<T> + 'static>(
         &mut self,
         variable: Rc<RefCell<Variable<T>>>,
@@ -106,6 +156,41 @@ impl Database2 {
         let wrapper = FeedbackWrapper::new(variable, input);
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.feedbacks.push(Box::new(wrapper));
+
+        // Run fixpoint immediately (like old Database did)
+        self.run_stratified_fixpoint();
+    }
+
+    /// Register a feedback that tracks discovery time.
+    ///
+    /// Like `feedback`, but the variable holds `(T, CommitId)` where the CommitId
+    /// records when each tuple was first discovered. This allows deriving relations
+    /// that depend on discovery order (e.g., taking the tuple with minimum CommitId).
+    ///
+    /// The `input` is `Relation<T>`, but the variable holds `(T, CommitId)`.
+    /// When a tuple T is first seen, it's added to the variable with the current commit ID.
+    pub fn feedback_with_id<T: Tuple + 'static, R: Relation<T> + 'static>(
+        &mut self,
+        variable: Rc<RefCell<Variable<(T, CommitId)>>>,
+        input: R,
+    ) {
+        let wrapper = FeedbackWithIdWrapper::new(variable, input, self.commit_id.clone());
+        wrapper.push_initial_checkpoints(self.checkpoint_depth);
+        self.feedbacks.push(Box::new(wrapper));
+    }
+
+    /// Register an interrupt that stops fixpoint when the relation becomes non-empty.
+    ///
+    /// If the relation produces any positive tuples during fixpoint propagation,
+    /// the fixpoint stops immediately. Check `was_interrupted()` after `commit()`
+    /// to see if an interrupt fired.
+    pub fn interrupt<T: Tuple + 'static, R: Relation<T> + 'static>(&mut self, input: R) {
+        self.interrupts.push(Box::new(InterruptWrapper::new(input)));
+    }
+
+    /// Check if the last fixpoint was interrupted.
+    pub fn was_interrupted(&self) -> bool {
+        self.was_interrupted
     }
 
     /// Push a new checkpoint level.
@@ -120,6 +205,19 @@ impl Database2 {
     }
 
     /// Pop a checkpoint level, undoing all changes since the matching push.
+    ///
+    /// Algorithm:
+    /// 1. Unapply non-persistent input AND feedback changes by sending -1's
+    ///    - For non-persistent inputs, also pop the checkpoint from the stack
+    ///    - Don't pop for feedbacks yet
+    /// 2. Commit changes
+    /// 3. In stratified order of feedbacks, for each feedback:
+    ///    a) Pull all changes and update tracked inputs; forward along anything
+    ///       which is NOT in the last checkpoint with a +1
+    ///    b) Pop the last checkpoint; forward along a +1 for anything in that
+    ///       checkpoint whose tracked input value is still non-zero
+    ///    c) Propagate normally all feedbacks up to and including this one
+    ///       (using nested loop approach where you restart from beginning if changes)
     pub fn pop(&mut self) -> bool {
         if self.checkpoint_depth == 0 {
             return false;
@@ -127,25 +225,32 @@ impl Database2 {
 
         self.checkpoint_depth -= 1;
 
-        // Step 1: Revert feedback outputs (emits -1 changes)
+        // Step 1: Unapply non-persistent input AND feedback changes by sending -1's
+        // For non-persistent inputs, also pop the checkpoint from the stack
+        for input in &self.inputs {
+            input.send_inverse_and_pop();
+        }
+        // For feedbacks, send -1's but don't pop yet
         for feedback in &self.feedbacks {
-            feedback.pop_checkpoint();
+            feedback.send_inverse();
         }
 
-        // Step 2: Revert input changes (queues inverse diffs to pending)
-        for input in &self.inputs {
-            input.pop_checkpoint();
+        // Step 2: Commit feedback changes so they can be pulled
+        for feedback in &self.feedbacks {
+            feedback.commit();
         }
 
-        // Step 3: Commit to make inverse diffs available
-        for input in &self.inputs {
-            input.commit();
-        }
-
-        // Step 4: For each feedback in stratified order:
-        // Pull input to update input_counts, readd, run fixpoint up to that point
+        // Step 3: In stratified order of feedbacks, for each feedback:
         for i in 0..self.feedbacks.len() {
-            self.feedbacks[i].pull_and_readd();
+            // 3a) Pull all changes and update tracked inputs; forward along anything
+            //     which is NOT in the last checkpoint with a +1
+            self.feedbacks[i].pull_and_forward_non_checkpoint();
+
+            // 3b) Pop the last checkpoint; forward along a +1 for anything in that
+            //     checkpoint whose tracked input value is still non-zero
+            self.feedbacks[i].pop_and_forward_reachable();
+
+            // 3c) Propagate normally all feedbacks up to and including this one
             self.run_stratified_fixpoint_up_to(i);
         }
 

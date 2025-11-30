@@ -1,6 +1,12 @@
 //! CDCL Solver dataflow setup and constructor.
 
-use crate::Database;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::database2::{
+    count, difference, distinct, filter, join, map, max, min, output, save, union, CommitId,
+    Database2, Output, Relation, Variable, VariableRelation,
+};
 
 use super::solver::Solver;
 use super::types::{var, ClauseId, Conflict, Level};
@@ -8,122 +14,151 @@ use super::types::{var, ClauseId, Conflict, Level};
 impl Solver {
     /// Create a new solver for the given number of variables.
     pub fn new(num_vars: super::types::Var) -> Self {
-        let mut db = Database::new();
+        let mut db = Database2::new();
 
         // === Input Relations ===
-        let clauses = db.create_input::<(ClauseId, super::types::Lit)>("clauses");
-        let learned = db.create_persistent_input::<(ClauseId, super::types::Lit)>("learned");
+        let (clauses, clauses_rel) = db.create_input::<(ClauseId, super::types::Lit)>();
+        let (learned, learned_rel) = db.create_persistent_input::<(ClauseId, super::types::Lit)>();
 
         // Levels input - we insert decision levels here
-        let levels = db.create_input::<Level>("levels");
+        let (mut levels, levels_rel) = db.create_input::<Level>();
 
         // Decision assignments - inserted directly for decisions (with ClauseId::DECISION)
-        let decision_assignments =
-            db.create_input::<(super::types::Lit, Level, ClauseId)>("decision_assignments");
+        let (decision_assignments, decision_assignments_rel) =
+            db.create_input::<(super::types::Lit, Level, ClauseId)>();
 
         // Current level = max(levels)
-        let current_level_rel = db.max(levels);
+        let current_level_rel = max(levels_rel, |_| (), |l| *l);
+        let current_level_rel = map(current_level_rel, |((), level)| level).boxed();
 
         // All clauses (original + learned)
-        let all_clauses = db.union(clauses, learned);
+        let mut all_clauses = save(union(clauses_rel, learned_rel).boxed());
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
-        let (prep_var, prep_assignments) = db.variable::<(
+        let prep_var = Rc::new(RefCell::new(Variable::<(
             (super::types::Lit, Level, ClauseId),
-            crate::database::CommitId,
-        )>("prep_assignments");
+            CommitId,
+        )>::new()));
+        let mut prep_rel = save(VariableRelation::new(prep_var.clone()));
 
         // Final assignments: for each literal, take the entry with minimum CommitId
-        let assignments_with_id = db.group_min(
-            prep_assignments,
+        let assignments_with_id = min(
+            prep_rel.get(),
             |((lit, _, _), _)| *lit,
             |((_, level, _), id)| (*level, *id),
         );
-        let assignments = db.map(assignments_with_id, |(lit, (level, _id))| (*lit, *level));
+        let mut assignments = save(map(
+            assignments_with_id,
+            |(lit, (level, _id))| (lit, level),
+        ).boxed());
 
         // Causes: tracks all ways each literal was derived
-        let causes = db.map(prep_assignments, |((lit, level, cid), commit_id)| {
-            ((*lit, *commit_id), (*cid, *level))
-        });
+        let causes = map(prep_rel.get(), |((lit, level, cid), commit_id)| {
+            ((lit, commit_id), (cid, level))
+        }).boxed();
 
         // Derived: which literals are assigned true
-        let assigned = db.map(assignments, |(lit, _)| *lit);
+        let mut assigned = save(map(assignments.get(), |(lit, _)| lit).boxed());
 
         // === Compute Units ===
-        let clause_lit_true = db.join(all_clauses, assigned, |(_, lit)| *lit, |lit| *lit);
-        let satisfied_clauses = db.map(clause_lit_true, |((cid, _), _)| *cid);
+        let clause_lit_true = join(
+            all_clauses.get(),
+            assigned.get(),
+            |(_, lit)| *lit,
+            |lit| *lit,
+        );
+        let satisfied_clauses = map(clause_lit_true, |((cid, _), _)| cid).boxed();
 
-        let assigned_vars = db.map(assigned, |lit| var(*lit));
-        let clause_lit_with_var = db.map(all_clauses, |(cid, lit)| (*cid, *lit, var(*lit)));
-        let clause_assigned_lits =
-            db.join(clause_lit_with_var, assigned_vars, |(_, _, v)| *v, |v| *v);
-        let clause_assigned_lit_ids =
-            db.map(clause_assigned_lits, |((cid, lit, _), _)| (*cid, *lit));
+        let assigned_vars = map(assigned.get(), |lit| var(lit)).boxed();
+        let clause_lit_with_var = map(all_clauses.get(), |(cid, lit)| (cid, lit, var(lit))).boxed();
+        let clause_assigned_lits = join(clause_lit_with_var, assigned_vars, |(_, _, v)| *v, |v| *v);
+        let clause_assigned_lit_ids = map(clause_assigned_lits, |((cid, lit, _), _)| (cid, lit)).boxed();
 
-        let clause_unassigned_lits = db.difference(all_clauses, clause_assigned_lit_ids);
-        let unassigned_count = db.group_count(clause_unassigned_lits, |(cid, _)| *cid);
+        let mut clause_unassigned_lits =
+            save(difference(all_clauses.get(), clause_assigned_lit_ids).boxed());
+        let mut unassigned_count = save(count(clause_unassigned_lits.get(), |(cid, _)| *cid).boxed());
 
-        let unit_candidate_clauses = db.filter(unassigned_count, |(_, count)| *count == 1);
-        let unit_clause_ids = db.map(unit_candidate_clauses, |(cid, _)| *cid);
+        let unit_candidate_clauses = filter(unassigned_count.get(), |(_, cnt)| *cnt == 1);
+        let unit_clause_ids = map(unit_candidate_clauses, |(cid, _)| cid).boxed();
 
-        let units_with_lit = db.join(
+        let units_with_lit = join(
             unit_clause_ids,
-            clause_unassigned_lits,
+            clause_unassigned_lits.get(),
             |cid| *cid,
             |(cid, _)| *cid,
         );
-        let potential_units = db.map(units_with_lit, |(cid, (_, lit))| (*cid, *lit));
+        let mut potential_units = save(map(units_with_lit, |(cid, (_, lit))| (cid, lit)).boxed());
 
-        let satisfied_set = db.map(satisfied_clauses, |cid| *cid);
-        let unit_clause_sat_check =
-            db.join(potential_units, satisfied_set, |(cid, _)| *cid, |cid| *cid);
-        let units_from_sat = db.map(unit_clause_sat_check, |((cid, lit), _)| (*cid, *lit));
+        let mut satisfied_set = save(satisfied_clauses);
+        let unit_clause_sat_check = join(
+            potential_units.get(),
+            satisfied_set.get(),
+            |(cid, _)| *cid,
+            |cid| *cid,
+        );
+        let units_from_sat = map(unit_clause_sat_check, |((cid, lit), _)| (cid, lit)).boxed();
 
-        let units = db.difference(potential_units, units_from_sat);
+        let mut units = save(difference(potential_units.get(), units_from_sat).boxed());
 
         // === Conflict Detection ===
-        let all_clause_ids = db.map(all_clauses, |(cid, _)| *cid);
-        let all_clause_ids_distinct = db.distinct(all_clause_ids);
-        let clauses_with_unassigned = db.map(unassigned_count, |(cid, _)| *cid);
-        let fully_assigned_clauses =
-            db.difference(all_clause_ids_distinct, clauses_with_unassigned);
-        let satisfied_distinct = db.distinct(satisfied_set);
-        let clause_conflicts = db.difference(fully_assigned_clauses, satisfied_distinct);
+        let all_clause_ids = map(all_clauses.get(), |(cid, _)| cid).boxed();
+        let all_clause_ids_distinct = distinct(all_clause_ids).boxed();
+        let clauses_with_unassigned = map(unassigned_count.get(), |(cid, _)| cid).boxed();
+        let fully_assigned_clauses = difference(all_clause_ids_distinct, clauses_with_unassigned).boxed();
+        let satisfied_distinct = distinct(satisfied_set.get()).boxed();
+        let clause_conflicts = difference(fully_assigned_clauses, satisfied_distinct).boxed();
 
-        let assigned_with_var = db.map(assigned, |lit| (*lit, var(*lit)));
-        let both_polarities = db.join(
-            assigned_with_var,
-            assigned_with_var,
+        let mut assigned_with_var = save(map(assigned.get(), |lit| (lit, var(lit))).boxed());
+        let both_polarities = join(
+            assigned_with_var.get(),
+            assigned_with_var.get(),
             |(_, v)| *v,
             |(_, v)| *v,
         );
-        let conflicting_pairs = db.filter(both_polarities, |((lit1, _), (lit2, _))| lit1 != lit2);
-        let direct_conflict_vars = db.map(conflicting_pairs, |((_, v), _)| *v);
-        let direct_conflict_vars_distinct = db.distinct(direct_conflict_vars);
+        let conflicting_pairs = filter(both_polarities, |((lit1, _), (lit2, _))| lit1 != lit2);
+        let direct_conflict_vars = map(conflicting_pairs, |((_, v), _)| v).boxed();
+        let direct_conflict_vars_distinct = distinct(direct_conflict_vars).boxed();
 
-        let clause_conflict_enums = db.map(clause_conflicts, |cid| Conflict::EmptyClause(*cid));
-        let direct_conflict_enums =
-            db.map(direct_conflict_vars_distinct, |v| Conflict::DirectConflict(*v));
+        let mut clause_conflict_enums =
+            save(map(clause_conflicts, |cid| Conflict::EmptyClause(cid)).boxed());
+        let mut direct_conflict_enums = save(map(direct_conflict_vars_distinct, |v| {
+            Conflict::DirectConflict(v)
+        }).boxed());
 
-        let conflicts = db.union(clause_conflict_enums, direct_conflict_enums);
+        let conflicts = union(clause_conflict_enums.get(), direct_conflict_enums.get()).boxed();
 
         // === Set up interrupts for early conflict detection ===
-        db.interrupt(clause_conflict_enums);
-        db.interrupt(direct_conflict_enums);
+        db.interrupt(clause_conflict_enums.get());
+        db.interrupt(direct_conflict_enums.get());
 
         // === Set up the feedback loop ===
-        let unit_with_level = db.join(units, current_level_rel, |_| (), |_| ());
-        let unit_lit_level_cid =
-            db.map(unit_with_level, |((cid, lit), level)| (*lit, *level, *cid));
+        let unit_with_level = join(units.get(), current_level_rel, |_| (), |_| ());
+        let unit_lit_level_cid = map(unit_with_level, |((cid, lit), level)| (lit, level, cid)).boxed();
 
-        let all_new_assignments = db.union(decision_assignments, unit_lit_level_cid);
+        let all_new_assignments = union(decision_assignments_rel, unit_lit_level_cid).boxed();
 
         db.feedback_with_id(prep_var, all_new_assignments);
 
         // Initialize with Level::TOP so unit propagation works at level 0
-        db.insert(levels, Level::TOP);
+        levels.insert(Level::TOP);
         db.commit();
+
+        // Create outputs from relations (need to box them to store in struct)
+        let mut assignments_out: Output<(super::types::Lit, Level)> =
+            output(assignments.get().boxed());
+        let mut causes_out: Output<((super::types::Lit, CommitId), (ClauseId, Level))> =
+            output(causes.boxed());
+        let mut assigned_out: Output<super::types::Lit> = output(assigned.get().boxed());
+        let mut units_out: Output<(ClauseId, super::types::Lit)> = output(units.get().boxed());
+        let mut conflicts_out: Output<Conflict> = output(conflicts.boxed());
+
+        // Pull initial state
+        assignments_out.update();
+        causes_out.update();
+        assigned_out.update();
+        units_out.update();
+        conflicts_out.update();
 
         Solver {
             db,
@@ -131,13 +166,11 @@ impl Solver {
             learned,
             levels,
             decision_assignments,
-            current_level_rel,
-            prep_assignments,
-            assignments,
-            causes,
-            assigned,
-            units,
-            conflicts,
+            assignments: assignments_out,
+            causes: causes_out,
+            assigned: assigned_out,
+            units: units_out,
+            conflicts: conflicts_out,
             current_level: Level::TOP,
             next_learned_id: ClauseId::new(1_000_000),
             num_vars,

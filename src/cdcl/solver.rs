@@ -1,51 +1,41 @@
 //! CDCL SAT Solver structure and methods.
 
-use crate::database::CommitId;
-use crate::relation::Relation;
-use crate::Database;
+use crate::database2::{CommitId, Database2, InputHandle, Output, PersistentInputHandle};
 
 use super::types::{ClauseId, Conflict, Level, Lit, Var};
 
 /// CDCL SAT Solver.
 pub struct Solver {
-    pub(super) db: Database,
+    pub(super) db: Database2,
 
-    // === Input Relations ===
+    // === Input Handles ===
     /// Original clauses: (clause_id, literal)
-    pub(super) clauses: Relation<(ClauseId, Lit)>,
+    pub(super) clauses: InputHandle<(ClauseId, Lit)>,
 
     /// Learned clauses (persistent - survive backtracking)
-    pub(super) learned: Relation<(ClauseId, Lit)>,
+    pub(super) learned: PersistentInputHandle<(ClauseId, Lit)>,
 
     /// Decision levels - we insert the current level here
-    pub(super) levels: Relation<Level>,
+    pub(super) levels: InputHandle<Level>,
 
     /// Decision assignments (lit, level, clause_id) - inserted directly for decisions
-    pub(super) decision_assignments: Relation<(Lit, Level, ClauseId)>,
+    pub(super) decision_assignments: InputHandle<(Lit, Level, ClauseId)>,
 
-    // === Derived/State Relations ===
-    /// Current level = max(levels)
-    #[allow(dead_code)]
-    pub(super) current_level_rel: Relation<Level>,
-
-    /// Prep assignments from feedback_with_id: ((lit, level, clause_id), commit_id)
-    #[allow(dead_code)]
-    pub(super) prep_assignments: Relation<((Lit, Level, ClauseId), CommitId)>,
-
+    // === Output Relations ===
     /// Final assignments: (lit, level) - derived by taking min commit_id per lit
-    pub(super) assignments: Relation<(Lit, Level)>,
+    pub(super) assignments: Output<(Lit, Level)>,
 
     /// Causes: ((lit, commit_id), (clause_id, level))
-    pub(super) causes: Relation<((Lit, CommitId), (ClauseId, Level))>,
+    pub(super) causes: Output<((Lit, CommitId), (ClauseId, Level))>,
 
     /// The "assigned" relation - just tracks which literals are assigned true
-    pub(super) assigned: Relation<Lit>,
+    pub(super) assigned: Output<Lit>,
 
     /// Unit clauses that need propagation: (clause_id, implied_literal)
-    pub(super) units: Relation<(ClauseId, Lit)>,
+    pub(super) units: Output<(ClauseId, Lit)>,
 
     /// Conflicts detected during propagation
-    pub(super) conflicts: Relation<Conflict>,
+    pub(super) conflicts: Output<Conflict>,
 
     // === Solver State ===
     /// Current decision level (local copy for convenience).
@@ -65,7 +55,7 @@ impl Solver {
     /// Add an original clause to the solver.
     pub fn add_clause(&mut self, clause_id: ClauseId, literals: &[Lit]) {
         for &lit in literals {
-            self.db.insert(self.clauses, (clause_id, lit));
+            self.clauses.insert((clause_id, lit));
         }
         self.db.commit();
     }
@@ -73,16 +63,14 @@ impl Solver {
     /// Make a decision: assign a literal at a new decision level.
     /// `tried_opposite` indicates if we've already tried the opposite polarity.
     pub(super) fn decide_internal(&mut self, lit: Lit, tried_opposite: bool) {
-        self.db.push(None);
+        self.db.push();
         self.current_level.inc();
         self.decision_stack
             .push((self.current_level, lit, tried_opposite));
 
-        self.db.insert(self.levels, self.current_level);
-        self.db.insert(
-            self.decision_assignments,
-            (lit, self.current_level, ClauseId::DECISION),
-        );
+        self.levels.insert(self.current_level);
+        self.decision_assignments
+            .insert((lit, self.current_level, ClauseId::DECISION));
         self.db.commit();
     }
 
@@ -94,7 +82,7 @@ impl Solver {
     /// Propagate units until fixpoint or conflict.
     /// Returns Ok(()) if no conflict, Err(conflict) if conflict found.
     pub fn propagate(&mut self) -> Result<(), Conflict> {
-        let conflicts: Vec<_> = self.db.collect(self.conflicts);
+        let conflicts: Vec<_> = self.conflicts.collect();
         if let Some(&conflict) = conflicts.first() {
             return Err(conflict);
         }
@@ -115,7 +103,7 @@ impl Solver {
         let cid = self.next_learned_id;
         self.next_learned_id = ClauseId::new(self.next_learned_id.raw() + 1);
         for &lit in literals {
-            self.db.insert(self.learned, (cid, lit));
+            self.learned.insert((cid, lit));
         }
         self.db.commit();
         cid

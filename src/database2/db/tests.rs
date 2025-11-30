@@ -1,6 +1,90 @@
 //! Tests for Database2.
 
-use crate::database2::{Database2, Relation};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::database2::{join, map, save, union, Database2, Relation, Variable, VariableRelation};
+
+/// Test that re-inserting already-present item during push doesn't affect pop.
+#[test]
+fn test_pop_duplicate_insert() {
+    use crate::database2::output;
+
+    let mut db = Database2::new();
+    let (mut handle, rel) = db.create_input::<i32>();
+
+    let mut out = output(rel.boxed());
+
+    // Insert 0 before push
+    handle.insert(0);
+    db.commit();
+    out.update();
+
+    assert_eq!(out.collect(), vec![0]);
+
+    // Push
+    db.push();
+
+    // Insert 0 again - should be no-op since already in seen set
+    handle.insert(0);
+    db.commit();
+    out.update();
+
+    // Still just 0
+    assert_eq!(out.collect(), vec![0]);
+
+    // Pop - should undo nothing since the insert was a no-op
+    db.pop();
+    out.update();
+
+    // 0 should still be present
+    assert_eq!(out.collect(), vec![0], "0 should survive pop");
+}
+
+/// Test push/pop with transitive closure feedback.
+#[test]
+fn test_pop_transitive_closure() {
+    let mut db = Database2::new();
+    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+
+    // Set up transitive closure: path = edges ∪ (path ⋈ edges)
+    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
+    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+
+    let mut edges_saved = save(edges_rel);
+    let extended = join(
+        path_rel.get(),
+        edges_saved.get(),
+        |(_, b)| *b,
+        |(b, _)| *b,
+    );
+    let new_paths = map(extended, |((a, _), (_, c))| (a, c));
+    let all_paths = union(edges_saved.get(), new_paths);
+    db.feedback(path_var.clone(), all_paths);
+
+    // Push
+    db.push();
+
+    // InsertEdge(1, 3)
+    edges_h.insert((1, 3));
+    db.commit();
+
+    // InsertEdge(3, 1)
+    edges_h.insert((3, 1));
+    db.commit();
+
+    // Should have paths: (1,3), (3,1), (1,1), (3,3)
+    let mut paths: Vec<_> = path_var.borrow().collect();
+    paths.sort();
+    assert_eq!(paths, vec![(1, 1), (1, 3), (3, 1), (3, 3)]);
+
+    // Pop - should undo all edges
+    db.pop();
+
+    let result: Vec<_> = path_var.borrow().collect();
+    // Expected: [] (all edges were added inside pushed frame)
+    assert!(result.is_empty(), "Expected empty, got {:?}", result);
+}
 
 #[test]
 fn test_db_create_input_and_commit() {
@@ -10,19 +94,21 @@ fn test_db_create_input_and_commit() {
     handle.insert(1);
     handle.insert(2);
 
-    // Before commit, nothing available
+    // With seen-set semantics, changes are immediately in pending
+    // (no staging step). commit() records to checkpoint and runs fixpoint.
     let mut count = 0;
-    rel.foreach(&mut |_, _| count += 1);
-    assert_eq!(count, 0);
-
-    // After commit, changes are available
-    db.commit();
     rel.foreach(&mut |t, diff| {
         assert!(diff.0 > 0);
         assert!(t == 1 || t == 2);
         count += 1;
     });
     assert_eq!(count, 2);
+
+    // After foreach drains pending, commit has nothing new to process
+    db.commit();
+    let mut count2 = 0;
+    rel.foreach(&mut |_, _| count2 += 1);
+    assert_eq!(count2, 0); // already drained
 }
 
 #[test]

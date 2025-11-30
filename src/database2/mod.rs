@@ -5,6 +5,7 @@
 //! - `feedback`: Push-based feedback/fixpoint primitives
 //! - `db`: Central Database2 for coordinating commit, push/pop, and fixpoint
 
+mod commit_id;
 mod db;
 pub mod feedback;
 pub mod relational;
@@ -19,4 +20,5 @@ pub use relational::*;
 pub use feedback::Variable;
 
 // Re-export database
+pub use commit_id::CommitId;
 pub use db::Database2;

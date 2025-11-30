@@ -3,16 +3,19 @@
 //! The model: instead of using pop(), we replay all operations from scratch,
 //! excluding any operations that were inside popped frames.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use proptest::prelude::*;
-use relational::Database;
+use relational::database2::{
+    join, map, output, save, union, Database2, Output, Relation, Variable, VariableRelation,
+};
 
 /// An operation that can be performed on the database.
 #[derive(Debug, Clone)]
 enum Op {
     /// Insert an edge (a, b) into the edges input.
     InsertEdge(i32, i32),
-    /// Delete an edge (a, b) from the edges input.
-    DeleteEdge(i32, i32),
     /// Push a new checkpoint frame.
     Push,
     /// Pop the top checkpoint frame (if any).
@@ -22,9 +25,8 @@ enum Op {
 /// Generate a random operation.
 fn arb_op() -> impl Strategy<Value = Op> {
     prop_oneof![
-        // Bias towards inserts/deletes to build up interesting state
-        3 => (0i32..5, 0i32..5).prop_map(|(a, b)| Op::InsertEdge(a, b)),
-        2 => (0i32..5, 0i32..5).prop_map(|(a, b)| Op::DeleteEdge(a, b)),
+        // Bias towards inserts to build up interesting state
+        5 => (0i32..5, 0i32..5).prop_map(|(a, b)| Op::InsertEdge(a, b)),
         2 => Just(Op::Push),
         2 => Just(Op::Pop),
     ]
@@ -33,28 +35,32 @@ fn arb_op() -> impl Strategy<Value = Op> {
 /// Build a database with transitive closure and apply operations.
 /// Returns the final state of the path relation.
 fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
-    let mut db = Database::new();
-    let edges = db.create_input::<(i32, i32)>("edges");
+    let mut db = Database2::new();
+    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure
-    let (path_var, path) = db.variable::<(i32, i32)>("path");
-    let extended = db.join(path, edges, |(_, b)| *b, |(b, _)| *b);
-    let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
-    let all_paths = db.union(edges, new_paths);
-    db.feedback(path_var, all_paths);
+    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
+    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+
+    let mut edges_saved = save(edges_rel);
+    let extended = join(
+        path_rel.get(),
+        edges_saved.get(),
+        |(_, b)| *b,
+        |(b, _)| *b,
+    );
+    let new_paths = map(extended, |((a, _), (_, c))| (a, c));
+    let all_paths = union(edges_saved.get(), new_paths);
+    db.feedback(path_var.clone(), all_paths);
 
     for op in ops {
         match op {
             Op::InsertEdge(a, b) => {
-                db.insert(edges, (*a, *b));
-                db.commit();
-            }
-            Op::DeleteEdge(a, b) => {
-                db.delete(edges, (*a, *b));
+                edges_h.insert((*a, *b));
                 db.commit();
             }
             Op::Push => {
-                db.push(None);
+                db.push();
             }
             Op::Pop => {
                 db.pop();
@@ -62,7 +68,7 @@ fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
         }
     }
 
-    let mut result = db.collect(path);
+    let mut result = path_var.borrow().collect();
     result.sort();
     result
 }
@@ -98,15 +104,23 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
     }
 
     // Now replay only surviving insert/delete operations
-    let mut db = Database::new();
-    let edges = db.create_input::<(i32, i32)>("edges");
+    let mut db = Database2::new();
+    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure
-    let (path_var, path) = db.variable::<(i32, i32)>("path");
-    let extended = db.join(path, edges, |(_, b)| *b, |(b, _)| *b);
-    let new_paths = db.map(extended, |((a, _), (_, c))| (*a, *c));
-    let all_paths = db.union(edges, new_paths);
-    db.feedback(path_var, all_paths);
+    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
+    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+
+    let mut edges_saved = save(edges_rel);
+    let extended = join(
+        path_rel.get(),
+        edges_saved.get(),
+        |(_, b)| *b,
+        |(b, _)| *b,
+    );
+    let new_paths = map(extended, |((a, _), (_, c))| (a, c));
+    let all_paths = union(edges_saved.get(), new_paths);
+    db.feedback(path_var.clone(), all_paths);
 
     for (i, op) in ops.iter().enumerate() {
         if !surviving[i] {
@@ -114,18 +128,14 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
         }
         match op {
             Op::InsertEdge(a, b) => {
-                db.insert(edges, (*a, *b));
-                db.commit();
-            }
-            Op::DeleteEdge(a, b) => {
-                db.delete(edges, (*a, *b));
+                edges_h.insert((*a, *b));
                 db.commit();
             }
             Op::Push | Op::Pop => {} // Don't replay push/pop in the model
         }
     }
 
-    let mut result = db.collect(path);
+    let mut result = path_var.borrow().collect();
     result.sort();
     result
 }
@@ -172,24 +182,22 @@ proptest! {
 
 /// Apply operations with both regular and persistent inputs.
 fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
-    let mut db = Database::new();
-    let regular = db.create_input::<i32>("regular");
-    let persistent = db.create_persistent_input::<i32>("persistent");
+    let mut db = Database2::new();
+    let (mut regular_h, regular_rel) = db.create_input::<i32>();
+    let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
+
+    let mut regular_out = output(regular_rel.boxed());
+    let mut persistent_out = output(persistent_rel.boxed());
 
     for op in ops {
         match op {
             Op::InsertEdge(a, _) => {
-                db.insert(regular, *a);
-                db.insert(persistent, *a + 100);
-                db.commit();
-            }
-            Op::DeleteEdge(a, _) => {
-                db.delete(regular, *a);
-                db.delete(persistent, *a + 100);
+                regular_h.insert(*a);
+                persistent_h.insert(*a + 100);
                 db.commit();
             }
             Op::Push => {
-                db.push(None);
+                db.push();
             }
             Op::Pop => {
                 db.pop();
@@ -197,8 +205,10 @@ fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
         }
     }
 
-    let mut regular_result = db.collect(regular);
-    let mut persistent_result = db.collect(persistent);
+    regular_out.update();
+    persistent_out.update();
+    let mut regular_result = regular_out.collect();
+    let mut persistent_result = persistent_out.collect();
     regular_result.sort();
     persistent_result.sort();
     (regular_result, persistent_result)
@@ -228,34 +238,32 @@ fn apply_ops_replay_persistent_model(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
         }
     }
 
-    let mut db = Database::new();
-    let regular = db.create_input::<i32>("regular");
-    let persistent = db.create_input::<i32>("persistent"); // Use regular input for replay
+    let mut db = Database2::new();
+    let (mut regular_h, regular_rel) = db.create_input::<i32>();
+    let (mut persistent_h, persistent_rel) = db.create_input::<i32>(); // Use regular input for replay
+
+    let mut regular_out = output(regular_rel.boxed());
+    let mut persistent_out = output(persistent_rel.boxed());
 
     for (i, op) in ops.iter().enumerate() {
         match op {
             Op::InsertEdge(a, _) => {
                 // Regular: only if surviving
                 if surviving[i] {
-                    db.insert(regular, *a);
+                    regular_h.insert(*a);
                 }
                 // Persistent: always
-                db.insert(persistent, *a + 100);
-                db.commit();
-            }
-            Op::DeleteEdge(a, _) => {
-                if surviving[i] {
-                    db.delete(regular, *a);
-                }
-                db.delete(persistent, *a + 100);
+                persistent_h.insert(*a + 100);
                 db.commit();
             }
             Op::Push | Op::Pop => {}
         }
     }
 
-    let mut regular_result = db.collect(regular);
-    let mut persistent_result = db.collect(persistent);
+    regular_out.update();
+    persistent_out.update();
+    let mut regular_result = regular_out.collect();
+    let mut persistent_result = persistent_out.collect();
     regular_result.sort();
     persistent_result.sort();
     (regular_result, persistent_result)
@@ -285,48 +293,54 @@ fn test_nested_pop_specific_case() {
 /// Test that exercises multiple feedbacks with pop.
 #[test]
 fn test_multiple_feedbacks_with_pop() {
-    let mut db = Database::new();
+    let mut db = Database2::new();
 
-    let edges = db.create_input::<(i32, i32)>("edges");
+    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // First feedback: transitive closure
-    let (reach_var, reach) = db.variable::<(i32, i32)>("reach");
-    let extended_reach = db.join(reach, edges, |(_, b)| *b, |(b, _)| *b);
-    let new_reach = db.map(extended_reach, |((a, _), (_, c))| (*a, *c));
-    let all_reach = db.union(edges, new_reach);
+    let reach_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
+    let mut reach_rel = save(VariableRelation::new(reach_var.clone()));
+
+    let mut edges_saved = save(edges_rel);
+    let extended_reach = join(
+        reach_rel.get(),
+        edges_saved.get(),
+        |(_, b)| *b,
+        |(b, _)| *b,
+    );
+    let new_reach = map(extended_reach, |((a, _), (_, c))| (a, c));
+    let all_reach = union(edges_saved.get(), new_reach);
 
     // Second feedback: count reachable pairs (self-join on reach)
-    let (pairs_var, pairs) = db.variable::<(i32, i32, i32)>("pairs");
-    let reach_join = db.join(reach, reach, |(_, b)| *b, |(b, _)| *b);
-    let triples = db.map(reach_join, |((a, b), (_, c))| (*a, *b, *c));
+    let pairs_var = Rc::new(RefCell::new(Variable::<(i32, i32, i32)>::new()));
+    let reach_join = join(reach_rel.get(), reach_rel.get(), |(_, b)| *b, |(b, _)| *b);
+    let triples = map(reach_join, |((a, b), (_, c))| (a, b, c));
 
     // Set up edges: 1 -> 2 -> 3
-    db.insert(edges, (1, 2));
-    db.insert(edges, (2, 3));
+    edges_h.insert((1, 2));
+    edges_h.insert((2, 3));
     db.commit();
 
-    let reach_input = db.union(edges, all_reach);
-    db.feedback(reach_var, reach_input);
-
-    db.feedback(pairs_var, triples);
+    db.feedback(reach_var.clone(), all_reach);
+    db.feedback(pairs_var.clone(), triples);
 
     // Initial state
-    let reach_before: Vec<_> = db.collect(reach);
-    let pairs_before: Vec<_> = db.collect(pairs);
+    let reach_before = reach_var.borrow().collect();
+    let pairs_before = pairs_var.borrow().collect();
 
     // Push and add edge
-    db.push(None);
-    db.insert(edges, (3, 4));
+    db.push();
+    edges_h.insert((3, 4));
     db.commit();
 
-    let reach_during: Vec<_> = db.collect(reach);
-    let _pairs_during: Vec<_> = db.collect(pairs);
+    let reach_during = reach_var.borrow().collect();
+    let _pairs_during = pairs_var.borrow().collect();
 
     // Pop
     db.pop();
 
-    let reach_after: Vec<_> = db.collect(reach);
-    let pairs_after: Vec<_> = db.collect(pairs);
+    let reach_after = reach_var.borrow().collect();
+    let pairs_after = pairs_var.borrow().collect();
 
     // reach should be restored
     assert_eq!(

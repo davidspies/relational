@@ -1,0 +1,62 @@
+//! Output - accumulates relation changes into a queryable Multiset.
+
+use crate::change::Change;
+use crate::collection::Multiset;
+use crate::Tuple;
+
+use super::relation::Relation;
+
+/// An output that accumulates changes from a relation into a Multiset.
+///
+/// Call `update()` to pull pending changes, then query the accumulated state.
+/// Changes accumulate - you don't need to call `update()` every iteration.
+///
+/// Default type parameter allows `Output<T>` as shorthand for boxed relations.
+pub struct Output<T: Tuple, R: Relation<T> = Box<dyn Relation<T>>> {
+    relation: R,
+    state: Multiset<T>,
+}
+
+impl<T: Tuple + 'static, R: Relation<T>> Output<T, R> {
+    /// Create a new output wrapping the given relation.
+    pub fn new(relation: R) -> Self {
+        Output {
+            relation,
+            state: Multiset::new(),
+        }
+    }
+
+    /// Pull all pending changes from the relation into the accumulated state.
+    pub fn update(&mut self) {
+        self.relation.foreach(&mut |t, diff| {
+            self.state.apply_change(Change::new(t, diff));
+        });
+    }
+
+    /// Get the accumulated state (call `update()` first to ensure it's current).
+    pub fn state(&self) -> &Multiset<T> {
+        &self.state
+    }
+
+    /// Check if the state is empty.
+    pub fn is_empty(&self) -> bool {
+        self.state.is_empty()
+    }
+
+    /// Collect all tuples with positive multiplicity into a Vec.
+    /// Automatically calls `update()` first to pull pending changes.
+    pub fn collect(&mut self) -> Vec<T> {
+        self.update();
+        self.state.iter().cloned().collect()
+    }
+
+    /// Iterate over tuples with positive multiplicity.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.state.iter()
+    }
+}
+
+/// Create an output from a relation.
+pub fn output<T: Tuple + 'static, R: Relation<T>>(relation: R) -> Output<T, R> {
+    Output::new(relation)
+}
