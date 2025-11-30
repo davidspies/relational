@@ -38,8 +38,6 @@ pub struct Database {
     max_iterations: usize,
     /// Shared commit ID counter for feedback_with_id.
     commit_id: Rc<Cell<CommitId>>,
-    /// Whether the last fixpoint was interrupted.
-    was_interrupted: bool,
 }
 
 impl Database {
@@ -51,7 +49,6 @@ impl Database {
             checkpoint_depth: 0,
             max_iterations: 1000,
             commit_id: Rc::new(Cell::new(CommitId::new(0))),
-            was_interrupted: false,
         }
     }
 
@@ -124,9 +121,6 @@ impl Database {
 
     /// Commit staged changes and run stratified fixpoint.
     pub fn commit(&mut self) {
-        // Reset interrupt flag
-        self.was_interrupted = false;
-
         // Increment commit ID for this commit
         let current_id = self.commit_id.get();
         let new_id = CommitId::new(current_id.raw() + 1);
@@ -143,36 +137,8 @@ impl Database {
 
     /// Run stratified fixpoint computation for all steps (feedbacks and interrupts).
     fn run_stratified_fixpoint(&mut self) {
-        let recording = self.checkpoint_depth > 0;
-        let mut iterations = 0;
-
-        'outer: loop {
-            if iterations >= self.max_iterations {
-                panic!(
-                    "Stratified fixpoint exceeded max_iterations ({}) - possible infinite loop",
-                    self.max_iterations
-                );
-            }
-
-            for step in &mut self.steps {
-                match step {
-                    StratifiedStep::Interrupt(interrupt) => {
-                        if interrupt.check() {
-                            self.was_interrupted = true;
-                            return;
-                        }
-                    }
-                    StratifiedStep::Feedback(feedback) => {
-                        if feedback.step(recording) {
-                            iterations += 1;
-                            continue 'outer;
-                        }
-                    }
-                }
-            }
-
-            // No feedback produced new output, we're done
-            break;
+        if !self.steps.is_empty() {
+            self.run_stratified_fixpoint_up_to(self.steps.len() - 1);
         }
     }
 
@@ -222,11 +188,6 @@ impl Database {
             .push(StratifiedStep::Interrupt(Box::new(InterruptWrapper::new(
                 input.inner,
             ))));
-    }
-
-    /// Check if the last fixpoint was interrupted.
-    pub fn was_interrupted(&self) -> bool {
-        self.was_interrupted
     }
 
     /// Create a saved relation that can be used in multiple places.
@@ -326,7 +287,7 @@ impl Database {
 
     /// Run stratified fixpoint up to and including the given step index.
     /// Returns Some(step_index) if an interrupt fired, None otherwise.
-    fn run_stratified_fixpoint_up_to(&mut self, limit: usize) -> Option<usize> {
+    fn run_stratified_fixpoint_up_to(&mut self, limit: usize) {
         let recording = self.checkpoint_depth > 0;
         let mut iterations = 0;
 
@@ -342,8 +303,7 @@ impl Database {
                 match &mut self.steps[i] {
                     StratifiedStep::Interrupt(interrupt) => {
                         if interrupt.check() {
-                            self.was_interrupted = true;
-                            return Some(i);
+                            return;
                         }
                     }
                     StratifiedStep::Feedback(feedback) => {
@@ -358,7 +318,6 @@ impl Database {
             // No feedback produced new output, we're done
             break;
         }
-        None
     }
 
     /// Get the current checkpoint depth.
