@@ -9,7 +9,7 @@ use crate::change::Diff;
 use crate::collection::Multiset;
 use crate::database::commit_id::CommitId;
 use crate::database::feedback::Variable;
-use crate::database::relational::Relation;
+use crate::database::relational::Op;
 use crate::database::relational::input::InputState;
 
 /// Type-erased input handle operations.
@@ -88,7 +88,7 @@ pub(super) trait AnyFeedback {
 }
 
 /// Wrapper to make feedback type-erased.
-pub(super) struct FeedbackWrapper<T, R: Relation<T>> {
+pub(super) struct FeedbackWrapper<T, R: Op<T>> {
     /// Shared variable state (also accessed by VariableRelation).
     variable: Rc<RefCell<Variable<T>>>,
     /// The input relation that feeds into this variable.
@@ -97,7 +97,7 @@ pub(super) struct FeedbackWrapper<T, R: Relation<T>> {
     commit_id: Rc<Cell<CommitId>>,
 }
 
-impl<T: Clone + Eq + Hash, R: Relation<T>> FeedbackWrapper<T, R> {
+impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWrapper<T, R> {
     pub(super) fn new(
         variable: Rc<RefCell<Variable<T>>>,
         input: R,
@@ -117,7 +117,7 @@ impl<T: Clone + Eq + Hash, R: Relation<T>> FeedbackWrapper<T, R> {
     }
 }
 
-impl<T: Clone + Eq + Hash, R: Relation<T>> AnyFeedback for FeedbackWrapper<T, R> {
+impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
     fn push_checkpoint(&mut self) {
         self.variable.borrow_mut().push_checkpoint();
     }
@@ -185,13 +185,13 @@ pub(super) trait AnyInterrupt {
 }
 
 /// Wrapper for interrupt - checks if a relation has any positive entries.
-pub(super) struct InterruptWrapper<T, R: Relation<T>> {
+pub(super) struct InterruptWrapper<T, R: Op<T>> {
     input: R,
     has_positive: bool,
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, R: Relation<T>> InterruptWrapper<T, R> {
+impl<T, R: Op<T>> InterruptWrapper<T, R> {
     pub(super) fn new(input: R) -> Self {
         InterruptWrapper {
             input,
@@ -201,7 +201,7 @@ impl<T, R: Relation<T>> InterruptWrapper<T, R> {
     }
 }
 
-impl<T, R: Relation<T>> AnyInterrupt for InterruptWrapper<T, R> {
+impl<T, R: Op<T>> AnyInterrupt for InterruptWrapper<T, R> {
     fn check(&mut self) -> bool {
         self.input.foreach(&mut |_, diff| {
             if diff.0 > 0 {
@@ -218,7 +218,7 @@ impl<T, R: Relation<T>> AnyInterrupt for InterruptWrapper<T, R> {
 
 /// Wrapper for feedback_with_id - stamps tuples with CommitId when first seen.
 /// Input relation produces T, variable stores (T, CommitId).
-pub(super) struct FeedbackWithIdWrapper<T, R: Relation<T>> {
+pub(super) struct FeedbackWithIdWrapper<T, R: Op<T>> {
     /// Shared variable state (also accessed by VariableRelation).
     variable: Rc<RefCell<Variable<(T, CommitId)>>>,
     /// Shared commit ID counter.
@@ -231,7 +231,7 @@ pub(super) struct FeedbackWithIdWrapper<T, R: Relation<T>> {
     t_to_commit_id: HashMap<T, CommitId>,
 }
 
-impl<T: Clone + Eq + Hash, R: Relation<T>> FeedbackWithIdWrapper<T, R> {
+impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
     pub(super) fn new(
         variable: Rc<RefCell<Variable<(T, CommitId)>>>,
         input: R,
@@ -253,7 +253,7 @@ impl<T: Clone + Eq + Hash, R: Relation<T>> FeedbackWithIdWrapper<T, R> {
     }
 }
 
-impl<T: Clone + Eq + Hash, R: Relation<T>> AnyFeedback for FeedbackWithIdWrapper<T, R> {
+impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R> {
     fn push_checkpoint(&mut self) {
         self.variable.borrow_mut().push_checkpoint();
     }

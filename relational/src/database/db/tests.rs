@@ -1,6 +1,6 @@
 //! Tests for Database.
 
-use crate::database::{Database, Relation, join, map, output, save, union};
+use crate::database::{Database, Op, join, map, output, save, union};
 
 /// Test that re-inserting already-present item during push doesn't affect pop.
 #[test]

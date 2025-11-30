@@ -5,7 +5,7 @@ use std::hash::Hash;
 
 use crate::change::Diff;
 
-use super::relation::Relation;
+use super::relation::Op;
 
 /// A max relation - tracks maximum value by key.
 /// Output is (key, max_value) pairs.
@@ -15,7 +15,7 @@ where
     V: Ord,
     FK: Fn(&T) -> K,
     FV: Fn(&T) -> V,
-    R: Relation<T>,
+    R: Op<T>,
 {
     inner: R,
     key_fn: FK,
@@ -26,13 +26,13 @@ where
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, K, V, FK, FV, R> Relation<(K, V)> for MaxRelation<T, K, V, FK, FV, R>
+impl<T, K, V, FK, FV, R> Op<(K, V)> for MaxRelation<T, K, V, FK, FV, R>
 where
     K: Clone + Eq + Hash,
     V: Clone + Ord,
     FK: Fn(&T) -> K,
     FV: Fn(&T) -> V,
-    R: Relation<T>,
+    R: Op<T>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
         let key_fn = &self.key_fn;
@@ -83,7 +83,7 @@ where
     V: Ord,
     FK: Fn(&T) -> K,
     FV: Fn(&T) -> V,
-    R: Relation<T>,
+    R: Op<T>,
 {
     MaxRelation {
         inner: input,

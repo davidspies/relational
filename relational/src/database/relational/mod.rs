@@ -26,7 +26,7 @@ mod variable_relation;
 
 // Core types - InputHandle and InputRelation are created via Database2::create_input()
 pub use input::{InputHandle, PersistentInputHandle};
-pub use relation::Relation;
+pub use relation::Op;
 pub use saved::{SavedRelation, save};
 pub use variable_relation::{Variable, VariableRelation};
 

@@ -6,7 +6,7 @@ use std::hash::Hash;
 use crate::change::Diff;
 use crate::collection::Multiset;
 
-use super::relation::Relation;
+use super::relation::Op;
 
 /// A join relation - joins left and right on matching keys.
 /// Tracks both input states to compute correct output deltas.
@@ -15,8 +15,8 @@ where
     K: Eq + Hash + Clone,
     FL: Fn(&L) -> K,
     FR: Fn(&R) -> K,
-    RL: Relation<L>,
-    RR: Relation<R>,
+    RL: Op<L>,
+    RR: Op<R>,
 {
     left: RL,
     right: RR,
@@ -28,15 +28,15 @@ where
     right_index: HashMap<K, Multiset<R>>,
 }
 
-impl<L, R, K, FL, FR, RL, RR> Relation<(L, R)> for JoinRelation<L, R, K, FL, FR, RL, RR>
+impl<L, R, K, FL, FR, RL, RR> Op<(L, R)> for JoinRelation<L, R, K, FL, FR, RL, RR>
 where
     L: Clone + Eq + Hash,
     R: Clone + Eq + Hash,
     K: Eq + Hash + Clone,
     FL: Fn(&L) -> K,
     FR: Fn(&R) -> K,
-    RL: Relation<L>,
-    RR: Relation<R>,
+    RL: Op<L>,
+    RR: Op<R>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut((L, R), Diff)) {
         // Collect changes from both sides using Multiset to consolidate duplicates
@@ -101,8 +101,8 @@ where
     K: Eq + Hash + Clone,
     FL: Fn(&L) -> K,
     FR: Fn(&R) -> K,
-    RL: Relation<L>,
-    RR: Relation<R>,
+    RL: Op<L>,
+    RR: Op<R>,
 {
     JoinRelation {
         left,

@@ -4,11 +4,11 @@
 //! excluding any operations that were inside popped frames.
 
 use proptest::prelude::*;
-use relational::database::{Database, Relation, join, map, output, save, union};
+use relational::database::{Database, Op, join, map, output, save, union};
 
 /// An operation that can be performed on the database.
 #[derive(Debug, Clone)]
-enum Op {
+enum ReplayOp {
     /// Insert an edge (a, b) into the edges input.
     InsertEdge(i32, i32),
     /// Push a new checkpoint frame.
@@ -18,18 +18,18 @@ enum Op {
 }
 
 /// Generate a random operation.
-fn arb_op() -> impl Strategy<Value = Op> {
+fn arb_op() -> impl Strategy<Value = ReplayOp> {
     prop_oneof![
         // Bias towards inserts to build up interesting state
-        5 => (0i32..5, 0i32..5).prop_map(|(a, b)| Op::InsertEdge(a, b)),
-        2 => Just(Op::Push),
-        2 => Just(Op::Pop),
+        5 => (0i32..5, 0i32..5).prop_map(|(a, b)| ReplayOp::InsertEdge(a, b)),
+        2 => Just(ReplayOp::Push),
+        2 => Just(ReplayOp::Pop),
     ]
 }
 
 /// Build a database with transitive closure and apply operations.
 /// Returns the final state of the path relation.
-fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
+fn apply_ops_with_pop(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     let mut db = Database::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
@@ -47,14 +47,14 @@ fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
 
     for op in ops {
         match op {
-            Op::InsertEdge(a, b) => {
+            ReplayOp::InsertEdge(a, b) => {
                 edges_h.insert((*a, *b));
                 db.commit();
             }
-            Op::Push => {
+            ReplayOp::Push => {
                 db.push();
             }
-            Op::Pop => {
+            ReplayOp::Pop => {
                 let _ = db.pop();
             }
         }
@@ -70,7 +70,7 @@ fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
 ///
 /// This is the naive model: we track which operations are inside popped frames
 /// and simply don't replay them.
-fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
+fn apply_ops_replay_model(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     // First, figure out which operations survive.
     // We track a stack of "frame start indices" and mark operations as surviving or not.
     let mut surviving = vec![true; ops.len()];
@@ -78,10 +78,10 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
 
     for (i, op) in ops.iter().enumerate() {
         match op {
-            Op::Push => {
+            ReplayOp::Push => {
                 frame_starts.push(i);
             }
-            Op::Pop => {
+            ReplayOp::Pop => {
                 if let Some(start) = frame_starts.pop() {
                     // Mark all operations from start+1 to i-1 as not surviving
                     // (the Push and Pop themselves don't matter)
@@ -116,11 +116,11 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
             continue;
         }
         match op {
-            Op::InsertEdge(a, b) => {
+            ReplayOp::InsertEdge(a, b) => {
                 edges_h.insert((*a, *b));
                 db.commit();
             }
-            Op::Push | Op::Pop => {} // Don't replay push/pop in the model
+            ReplayOp::Push | ReplayOp::Pop => {} // Don't replay push/pop in the model
         }
     }
 
@@ -170,7 +170,7 @@ proptest! {
 }
 
 /// Apply operations with both regular and persistent inputs.
-fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
+fn apply_ops_with_persistent(ops: &[ReplayOp]) -> (Vec<i32>, Vec<i32>) {
     let mut db = Database::new();
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
@@ -180,15 +180,15 @@ fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
 
     for op in ops {
         match op {
-            Op::InsertEdge(a, _) => {
+            ReplayOp::InsertEdge(a, _) => {
                 regular_h.insert(*a);
                 persistent_h.insert(*a + 100);
                 db.commit();
             }
-            Op::Push => {
+            ReplayOp::Push => {
                 db.push();
             }
-            Op::Pop => {
+            ReplayOp::Pop => {
                 let _ = db.pop();
             }
         }
@@ -204,17 +204,17 @@ fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
 /// Replay model for persistent inputs.
 /// Regular inputs: operations inside popped frames are excluded.
 /// Persistent inputs: ALL operations are replayed (nothing is excluded).
-fn apply_ops_replay_persistent_model(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
+fn apply_ops_replay_persistent_model(ops: &[ReplayOp]) -> (Vec<i32>, Vec<i32>) {
     // Figure out which operations survive for regular inputs
     let mut surviving = vec![true; ops.len()];
     let mut frame_starts: Vec<usize> = Vec::new();
 
     for (i, op) in ops.iter().enumerate() {
         match op {
-            Op::Push => {
+            ReplayOp::Push => {
                 frame_starts.push(i);
             }
-            Op::Pop => {
+            ReplayOp::Pop => {
                 if let Some(start) = frame_starts.pop() {
                     for item in surviving.iter_mut().take(i).skip(start + 1) {
                         *item = false;
@@ -234,7 +234,7 @@ fn apply_ops_replay_persistent_model(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
 
     for (i, op) in ops.iter().enumerate() {
         match op {
-            Op::InsertEdge(a, _) => {
+            ReplayOp::InsertEdge(a, _) => {
                 // Regular: only if surviving
                 if surviving[i] {
                     regular_h.insert(*a);
@@ -243,7 +243,7 @@ fn apply_ops_replay_persistent_model(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
                 persistent_h.insert(*a + 100);
                 db.commit();
             }
-            Op::Push | Op::Pop => {}
+            ReplayOp::Push | ReplayOp::Pop => {}
         }
     }
 
@@ -259,14 +259,14 @@ fn apply_ops_replay_persistent_model(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
 fn test_nested_pop_specific_case() {
     // A specific case that exercises nested push/pop with feedback
     let ops = vec![
-        Op::InsertEdge(1, 2),
-        Op::Push,
-        Op::InsertEdge(2, 3),
-        Op::Push,
-        Op::InsertEdge(3, 4),
-        Op::Pop,              // Should undo (3,4)
-        Op::InsertEdge(2, 4), // This survives
-        Op::Pop,              // Should undo (2,3) and (2,4)
+        ReplayOp::InsertEdge(1, 2),
+        ReplayOp::Push,
+        ReplayOp::InsertEdge(2, 3),
+        ReplayOp::Push,
+        ReplayOp::InsertEdge(3, 4),
+        ReplayOp::Pop,              // Should undo (3,4)
+        ReplayOp::InsertEdge(2, 4), // This survives
+        ReplayOp::Pop,              // Should undo (2,3) and (2,4)
     ];
 
     let pop_result = apply_ops_with_pop(&ops);

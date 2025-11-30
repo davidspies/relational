@@ -2,25 +2,25 @@
 
 use crate::change::Diff;
 
-use super::relation::Relation;
+use super::relation::Op;
 
 /// A flat_map relation - transforms each tuple into zero or more tuples.
 pub struct FlatMapRelation<T, U, I, F, R>
 where
     I: IntoIterator<Item = U>,
     F: Fn(T) -> I,
-    R: Relation<T>,
+    R: Op<T>,
 {
     inner: R,
     f: F,
     _phantom: std::marker::PhantomData<(T, I)>,
 }
 
-impl<T, U, I, F, R> Relation<U> for FlatMapRelation<T, U, I, F, R>
+impl<T, U, I, F, R> Op<U> for FlatMapRelation<T, U, I, F, R>
 where
     I: IntoIterator<Item = U>,
     F: Fn(T) -> I,
-    R: Relation<T>,
+    R: Op<T>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut(U, Diff)) {
         let f = &self.f;
@@ -37,7 +37,7 @@ pub fn flat_map<T, U, I, F, R>(input: R, f: F) -> FlatMapRelation<T, U, I, F, R>
 where
     I: IntoIterator<Item = U>,
     F: Fn(T) -> I,
-    R: Relation<T>,
+    R: Op<T>,
 {
     FlatMapRelation {
         inner: input,

@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cargo check",
+      "type": "process",
+      "command": "cargo",
+      "args": [
+        "check",
+        "--all-targets"
+      ],
+      "group": "build",
+      "problemMatcher": [
+        "$rustc"
+      ]
+    },
+    {
+      "label": "cargo clippy",
+      "type": "process",
+      "command": "cargo",
+      "args": [
+        "clippy",
+        "--all-targets"
+      ],
+      "group": "build",
+      "problemMatcher": [
+        "$rustc"
+      ]
+    },
+    {
+      "label": "cargo test",
+      "type": "process",
+      "command": "cargo",
+      "args": [
+        "test"
+      ],
+      "group": "build",
+      "problemMatcher": [
+        "$rustc"
+      ]
+    }
+  ]
+}

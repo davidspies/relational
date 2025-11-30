@@ -2,23 +2,23 @@
 
 use crate::change::Diff;
 
-use super::relation::Relation;
+use super::relation::Op;
 
 /// A union relation - combines changes from both inputs.
 pub struct UnionRelation<T, L, R>
 where
-    L: Relation<T>,
-    R: Relation<T>,
+    L: Op<T>,
+    R: Op<T>,
 {
     left: L,
     right: R,
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, L, R> Relation<T> for UnionRelation<T, L, R>
+impl<T, L, R> Op<T> for UnionRelation<T, L, R>
 where
-    L: Relation<T>,
-    R: Relation<T>,
+    L: Op<T>,
+    R: Op<T>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
         self.left.foreach(consumer);
@@ -29,8 +29,8 @@ where
 /// Create a union relation.
 pub fn union<T, L, R>(left: L, right: R) -> UnionRelation<T, L, R>
 where
-    L: Relation<T>,
-    R: Relation<T>,
+    L: Op<T>,
+    R: Op<T>,
 {
     UnionRelation {
         left,

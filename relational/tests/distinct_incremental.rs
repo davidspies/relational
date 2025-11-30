@@ -4,7 +4,7 @@
 //! When input state is already updated (NEW state) before the incremental function
 //! runs, it must reconstruct OLD state by reversing the changes.
 
-use relational::database::{Database, Relation, difference, distinct, join, map, output, save};
+use relational::database::{Database, Op, difference, distinct, join, map, output, save};
 
 /// Test: distinct after map produces correct results.
 /// This is the pattern used in CDCL: map extracts clause IDs, distinct deduplicates.

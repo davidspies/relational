@@ -11,7 +11,7 @@ use super::feedback::Variable as InternalVariable;
 use super::relational::input::InputState;
 use super::relational::saved::SavedRelation;
 use super::relational::{
-    InputHandle, PersistentInputHandle, Relation, Variable, VariableRelation, input::InputRelation,
+    InputHandle, Op, PersistentInputHandle, Variable, VariableRelation, input::InputRelation,
 };
 
 use wrappers::{
@@ -177,7 +177,7 @@ impl Database {
     ///
     /// The input relation computes new tuples to feed into the variable.
     /// This immediately runs stratified fixpoint to compute initial values.
-    pub fn feedback<T: Clone + Eq + Hash + 'static, R: Relation<T> + 'static>(
+    pub fn feedback<T: Clone + Eq + Hash + 'static, R: Op<T> + 'static>(
         &mut self,
         variable: Variable<T>,
         input: R,
@@ -198,7 +198,7 @@ impl Database {
     ///
     /// The `input` is `Relation<T>`, but the variable holds `(T, CommitId)`.
     /// When a tuple T is first seen, it's added to the variable with the current commit ID.
-    pub fn feedback_with_id<T: Clone + Eq + Hash + 'static, R: Relation<T> + 'static>(
+    pub fn feedback_with_id<T: Clone + Eq + Hash + 'static, R: Op<T> + 'static>(
         &mut self,
         variable: Variable<(T, CommitId)>,
         input: R,
@@ -213,7 +213,7 @@ impl Database {
     /// If the relation produces any positive tuples during fixpoint propagation,
     /// the fixpoint stops immediately. Check `was_interrupted()` after `commit()`
     /// to see if an interrupt fired.
-    pub fn interrupt<T: 'static, R: Relation<T> + 'static>(&mut self, input: R) {
+    pub fn interrupt<T: 'static, R: Op<T> + 'static>(&mut self, input: R) {
         self.steps
             .push(StratifiedStep::Interrupt(Box::new(InterruptWrapper::new(
                 input,
@@ -229,7 +229,7 @@ impl Database {
     ///
     /// This is an optimized version of the standalone `save()` function that
     /// tracks the database's commit ID to avoid redundant upstream pulls.
-    pub fn save<T: Eq + Hash, R: Relation<T>>(&self, upstream: R) -> SavedRelation<T, R> {
+    pub fn save<T: Eq + Hash, R: Op<T>>(&self, upstream: R) -> SavedRelation<T, R> {
         SavedRelation::with_commit_id(upstream, self.commit_id.clone())
     }
 

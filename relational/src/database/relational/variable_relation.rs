@@ -7,7 +7,7 @@ use std::rc::Rc;
 use crate::change::Diff;
 use crate::database::feedback::Variable as InternalVariable;
 
-use super::relation::Relation;
+use super::relation::Op;
 
 /// A handle for a feedback variable.
 ///
@@ -33,7 +33,7 @@ pub struct VariableRelation<T> {
     pub(crate) inner: Rc<RefCell<InternalVariable<T>>>,
 }
 
-impl<T: Clone + Eq + Hash> Relation<T> for VariableRelation<T> {
+impl<T: Clone + Eq + Hash> Op<T> for VariableRelation<T> {
     fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
         let mut var = self.inner.borrow_mut();
         let changes = var.take_changes();

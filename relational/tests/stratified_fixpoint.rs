@@ -3,9 +3,7 @@
 //! These tests verify that feedback loops are processed in declaration order,
 //! with each reaching fixpoint before the next is applied.
 
-use relational::database::{
-    Database, Relation, difference, filter, join, map, max, output, save, union,
-};
+use relational::database::{Database, Op, difference, filter, join, map, max, output, save, union};
 
 /// Test that multiple feedbacks run in stratified order.
 ///

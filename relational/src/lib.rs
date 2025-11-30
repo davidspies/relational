@@ -11,7 +11,7 @@
 //! # Example: Transitive Closure
 //!
 //! ```
-//! use relational::database::{Database, Relation, join, map, output, save, union};
+//! use relational::database::{Database, Op, join, map, output, save, union};
 //!
 //! let mut db = Database::new();
 //!
@@ -50,7 +50,7 @@
 //! # Example: Using Push/Pop Checkpoints
 //!
 //! ```
-//! use relational::database::{Database, Relation, map, output, save};
+//! use relational::database::{Database, Op, map, output, save};
 //!
 //! let mut db = Database::new();
 //! let (mut numbers_h, numbers_rel) = db.create_input::<i32>();

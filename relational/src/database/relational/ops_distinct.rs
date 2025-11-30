@@ -4,23 +4,23 @@ use std::{collections::HashMap, hash::Hash};
 
 use crate::change::Diff;
 
-use super::relation::Relation;
+use super::relation::Op;
 
 /// A distinct relation - outputs each tuple at most once.
 /// Tracks input multiplicities to emit +1 when count goes from 0 to positive,
 /// and -1 when count goes from positive to 0.
 pub struct DistinctRelation<T, R>
 where
-    R: Relation<T>,
+    R: Op<T>,
 {
     inner: R,
     /// Track input multiplicities
     counts: HashMap<T, i64>,
 }
 
-impl<T: Clone + Eq + Hash, R> Relation<T> for DistinctRelation<T, R>
+impl<T: Clone + Eq + Hash, R> Op<T> for DistinctRelation<T, R>
 where
-    R: Relation<T>,
+    R: Op<T>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
         let counts = &mut self.counts;
@@ -50,7 +50,7 @@ where
 /// Create a distinct relation.
 pub fn distinct<T, R>(input: R) -> DistinctRelation<T, R>
 where
-    R: Relation<T>,
+    R: Op<T>,
 {
     DistinctRelation {
         inner: input,

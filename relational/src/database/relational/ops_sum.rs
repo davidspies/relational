@@ -6,7 +6,7 @@ use std::ops::{Add, Mul, Sub};
 
 use crate::change::Diff;
 
-use super::relation::Relation;
+use super::relation::Op;
 
 /// A sum relation - sums values by key.
 /// Output is (key, sum) pairs.
@@ -16,7 +16,7 @@ where
     V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
     FK: Fn(&T) -> K,
     FV: Fn(&T) -> V,
-    R: Relation<T>,
+    R: Op<T>,
 {
     inner: R,
     key_fn: FK,
@@ -26,13 +26,13 @@ where
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, K, V, FK, FV, R> Relation<(K, V)> for SumRelation<T, K, V, FK, FV, R>
+impl<T, K, V, FK, FV, R> Op<(K, V)> for SumRelation<T, K, V, FK, FV, R>
 where
     K: Clone + Eq + Hash,
     V: Clone + Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
     FK: Fn(&T) -> K,
     FV: Fn(&T) -> V,
-    R: Relation<T>,
+    R: Op<T>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
         let key_fn = &self.key_fn;
@@ -72,7 +72,7 @@ where
     V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
     FK: Fn(&T) -> K,
     FV: Fn(&T) -> V,
-    R: Relation<T>,
+    R: Op<T>,
 {
     SumRelation {
         inner: input,

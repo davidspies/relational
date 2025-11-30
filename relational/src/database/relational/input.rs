@@ -13,7 +13,7 @@ use derive_where::derive_where;
 use crate::Multiset;
 use crate::change::Diff;
 
-use super::relation::Relation;
+use super::relation::Op;
 
 /// The internal state of an input relation (seen-set semantics).
 pub(crate) struct InputState<T> {
@@ -65,7 +65,7 @@ pub struct InputRelation<T> {
     pub(crate) state: Rc<RefCell<InputState<T>>>,
 }
 
-impl<T: Eq + Hash> Relation<T> for InputRelation<T> {
+impl<T: Eq + Hash> Op<T> for InputRelation<T> {
     fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
         let mut state = self.state.borrow_mut();
         for (t, diff) in state.pending.drain() {
