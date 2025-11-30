@@ -1,10 +1,13 @@
 //! Main solve loop for the CDCL solver.
 
 use super::Solver;
-use super::types::{Level, Lit, neg};
+use super::types::Lit;
 
 impl Solver {
-    /// Main solve loop.
+    /// Main solve loop with CDCL (Conflict-Driven Clause Learning).
+    ///
+    /// Uses 1-UIP conflict analysis to learn clauses and perform
+    /// non-chronological backtracking.
     pub fn solve(&mut self) -> bool {
         loop {
             // Propagate
@@ -22,31 +25,22 @@ impl Solver {
                         }
                     }
                 }
-                Err(_conflict_clause) => {
-                    // Conflict! Need to backtrack.
-                    // Find a decision level where we haven't tried both polarities.
-                    loop {
-                        if self.current_level == Level::TOP {
+                Err(conflict) => {
+                    // Conflict! Analyze and learn.
+                    match self.analyze_conflict(conflict) {
+                        None => {
                             // Conflict at level 0 = UNSAT
                             return false;
                         }
+                        Some(analysis) => {
+                            // Learn the clause
+                            self.learn_clause(&analysis.learned_clause);
 
-                        // Get the decision at current level
-                        let (_, decision_lit, tried_both) =
-                            self.decision_stack.last().copied().unwrap();
+                            // Non-chronological backtrack to the computed level
+                            self.backtrack_to(analysis.backtrack_level);
 
-                        // Calculate previous level
-                        let prev_level = Level::new(self.current_level.raw().saturating_sub(1));
-
-                        if tried_both {
-                            // Already tried both polarities at this level, backtrack further
-                            self.backtrack_to(prev_level);
-                        } else {
-                            // Haven't tried opposite polarity yet
-                            // Backtrack this level and try the opposite
-                            self.backtrack_to(prev_level);
-                            self.decide_internal(neg(decision_lit), true);
-                            break;
+                            // The learned clause is now unit (asserting), so propagation
+                            // will assign the UIP literal on the next iteration
                         }
                     }
                 }

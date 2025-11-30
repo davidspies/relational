@@ -13,7 +13,6 @@ fn test_pop_duplicate_insert() {
     // Insert 0 before push
     handle.insert(0);
     db.commit();
-    out.update();
 
     assert_eq!(out.collect(), vec![0]);
 
@@ -23,7 +22,6 @@ fn test_pop_duplicate_insert() {
     // Insert 0 again - should be no-op since already in seen set
     handle.insert(0);
     db.commit();
-    out.update();
 
     // Still just 0
     assert_eq!(out.collect(), vec![0]);
@@ -31,7 +29,6 @@ fn test_pop_duplicate_insert() {
     // Pop - should undo nothing since the insert was a no-op
     let popped = db.pop();
     assert!(popped, "Tried to pop past level 0");
-    out.update();
 
     // 0 should still be present
     assert_eq!(out.collect(), vec![0], "0 should survive pop");

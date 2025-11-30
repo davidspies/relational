@@ -21,6 +21,7 @@ mod ops_union;
 mod output;
 mod relation;
 mod saved;
+mod sink;
 mod variable_relation;
 
 // Core types - InputHandle and InputRelation are created via Database2::create_input()
@@ -41,4 +42,5 @@ pub use ops_max::max;
 pub use ops_min::min;
 pub use ops_sum::sum;
 pub use ops_union::union;
-pub use output::{Output, output};
+pub use output::{Output, output, output_with_sink};
+pub use sink::Sink;

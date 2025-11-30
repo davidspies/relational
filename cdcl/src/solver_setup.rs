@@ -1,11 +1,11 @@
 //! CDCL Solver dataflow setup and constructor.
 
 use relational::database::{
-    CommitId, Database, Output, Relation, count, difference, distinct, filter, join, map, max, min,
-    output, save, union,
+    CommitId, Database, Relation, count, difference, distinct, filter, join, map, max, min, output,
+    output_with_sink, save, union,
 };
 
-use super::solver::Solver;
+use super::solver::{Inputs, Outputs, Solver, State};
 use super::types::{ClauseId, Conflict, Level, var};
 
 impl Solver {
@@ -145,28 +145,34 @@ impl Solver {
         db.commit();
 
         // Create outputs from relations (need to box them to store in struct)
-        let assignments_out: Output<(super::types::Lit, Level)> = output(assignments.get().boxed());
-        let causes_out: Output<((super::types::Lit, CommitId), (ClauseId, Level))> =
-            output(causes.boxed());
-        let assigned_out: Output<super::types::Lit> = output(assigned.get().boxed());
-        let units_out: Output<(ClauseId, super::types::Lit)> = output(units.get().boxed());
-        let conflicts_out: Output<Conflict> = output(conflicts.boxed());
+        let assignments_out = output(assignments.get().boxed());
+        let causes_out = output_with_sink(causes.boxed());
+        let assigned_out = output(assigned.get().boxed());
+        let units_out = output(units.get().boxed());
+        let conflicts_out = output(conflicts.boxed());
 
         Solver {
             db,
-            clauses,
-            learned,
-            levels,
-            decision_assignments,
-            assignments: assignments_out,
-            causes: causes_out,
-            assigned: assigned_out,
-            units: units_out,
-            conflicts: conflicts_out,
-            current_level: Level::TOP,
-            next_learned_id: ClauseId::new(1_000_000),
-            num_vars,
-            decision_stack: Vec::new(),
+            inputs: Inputs {
+                clauses,
+                learned,
+                levels,
+                decision_assignments,
+            },
+            outputs: Outputs {
+                assignments: assignments_out,
+                causes: causes_out,
+                assigned: assigned_out,
+                units: units_out,
+                conflicts: conflicts_out,
+            },
+            state: State {
+                current_level: Level::TOP,
+                next_learned_id: ClauseId::new(1_000_000),
+                num_vars,
+                decision_stack: Vec::new(),
+                clause_db: std::collections::HashMap::new(),
+            },
         }
     }
 }

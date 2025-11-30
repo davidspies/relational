@@ -145,8 +145,3 @@ pub enum Conflict {
 pub(super) fn var(lit: Lit) -> Var {
     lit.var()
 }
-
-/// Helper function to negate a literal.
-pub(super) fn neg(lit: Lit) -> Lit {
-    lit.negated()
-}

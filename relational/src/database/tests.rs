@@ -135,7 +135,6 @@ fn test_multiplicities() {
     db.commit();
 
     // Collect into output and check multiplicities
-    out.update();
     let state = out.collect();
     // The input uses seen-set semantics, so (10, 10, 20) collapses to (10, 20)
     assert!(state.contains(&10));

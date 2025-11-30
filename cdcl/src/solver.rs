@@ -1,62 +1,71 @@
 //! CDCL SAT Solver structure and methods.
 
+use std::collections::HashMap;
+
 use relational::database::{CommitId, Database, InputHandle, Output, PersistentInputHandle};
 
+use super::cause_sink::CauseSink;
 use super::types::{ClauseId, Conflict, Level, Lit, Var};
+
+/// Type alias for the causes output (complex due to nested structure).
+type CausesOutput = Output<((Lit, CommitId), (ClauseId, Level)), CauseSink>;
+
+/// Input handles for the solver.
+pub(super) struct Inputs {
+    /// Original clauses: (clause_id, literal)
+    pub clauses: InputHandle<(ClauseId, Lit)>,
+    /// Learned clauses (persistent - survive backtracking)
+    pub learned: PersistentInputHandle<(ClauseId, Lit)>,
+    /// Decision levels - we insert the current level here
+    pub levels: InputHandle<Level>,
+    /// Decision assignments (lit, level, clause_id) - inserted directly for decisions
+    pub decision_assignments: InputHandle<(Lit, Level, ClauseId)>,
+}
+
+/// Output relations from the dataflow.
+pub(super) struct Outputs {
+    /// Final assignments: (lit, level) - derived by taking min commit_id per lit
+    pub assignments: Output<(Lit, Level)>,
+    /// Causes: ((lit, commit_id), (clause_id, level)) with CauseSink for efficient lookup
+    pub causes: CausesOutput,
+    /// The "assigned" relation - just tracks which literals are assigned true
+    pub assigned: Output<Lit>,
+    /// Unit clauses that need propagation: (clause_id, implied_literal)
+    pub units: Output<(ClauseId, Lit)>,
+    /// Conflicts detected during propagation
+    pub conflicts: Output<Conflict>,
+}
+
+/// Solver state that doesn't involve the dataflow.
+pub(super) struct State {
+    /// Current decision level (local copy for convenience).
+    pub current_level: Level,
+    /// Next clause ID for learned clauses.
+    pub next_learned_id: ClauseId,
+    /// Number of variables.
+    pub num_vars: Var,
+    /// Stack of decisions: (level, literal, tried_both)
+    pub decision_stack: Vec<(Level, Lit, bool)>,
+    /// Cache of clause contents: clause_id -> list of literals
+    pub clause_db: HashMap<ClauseId, Vec<Lit>>,
+}
 
 /// CDCL SAT Solver.
 pub struct Solver {
     pub(super) db: Database,
-
-    // === Input Handles ===
-    /// Original clauses: (clause_id, literal)
-    pub(super) clauses: InputHandle<(ClauseId, Lit)>,
-
-    /// Learned clauses (persistent - survive backtracking)
-    pub(super) learned: PersistentInputHandle<(ClauseId, Lit)>,
-
-    /// Decision levels - we insert the current level here
-    pub(super) levels: InputHandle<Level>,
-
-    /// Decision assignments (lit, level, clause_id) - inserted directly for decisions
-    pub(super) decision_assignments: InputHandle<(Lit, Level, ClauseId)>,
-
-    // === Output Relations ===
-    /// Final assignments: (lit, level) - derived by taking min commit_id per lit
-    pub(super) assignments: Output<(Lit, Level)>,
-
-    /// Causes: ((lit, commit_id), (clause_id, level))
-    pub(super) causes: Output<((Lit, CommitId), (ClauseId, Level))>,
-
-    /// The "assigned" relation - just tracks which literals are assigned true
-    pub(super) assigned: Output<Lit>,
-
-    /// Unit clauses that need propagation: (clause_id, implied_literal)
-    pub(super) units: Output<(ClauseId, Lit)>,
-
-    /// Conflicts detected during propagation
-    pub(super) conflicts: Output<Conflict>,
-
-    // === Solver State ===
-    /// Current decision level (local copy for convenience).
-    pub(super) current_level: Level,
-
-    /// Next clause ID for learned clauses.
-    pub(super) next_learned_id: ClauseId,
-
-    /// Number of variables.
-    pub(super) num_vars: Var,
-
-    /// Stack of decisions: (level, literal, tried_both)
-    pub(super) decision_stack: Vec<(Level, Lit, bool)>,
+    pub(super) inputs: Inputs,
+    pub(super) outputs: Outputs,
+    pub(super) state: State,
 }
 
 impl Solver {
     /// Add an original clause to the solver.
     pub fn add_clause(&mut self, clause_id: ClauseId, literals: &[Lit]) {
         for &lit in literals {
-            self.clauses.insert((clause_id, lit));
+            self.inputs.clauses.insert((clause_id, lit));
         }
+        // Cache clause contents for conflict analysis
+        self.state.clause_db.insert(clause_id, literals.to_vec());
         self.db.commit();
     }
 
@@ -64,13 +73,17 @@ impl Solver {
     /// `tried_opposite` indicates if we've already tried the opposite polarity.
     pub(super) fn decide_internal(&mut self, lit: Lit, tried_opposite: bool) {
         self.db.push();
-        self.current_level.inc();
-        self.decision_stack
-            .push((self.current_level, lit, tried_opposite));
+        self.state.current_level.inc();
+        self.state
+            .decision_stack
+            .push((self.state.current_level, lit, tried_opposite));
 
-        self.levels.insert(self.current_level);
-        self.decision_assignments
-            .insert((lit, self.current_level, ClauseId::DECISION));
+        self.inputs.levels.insert(self.state.current_level);
+        self.inputs.decision_assignments.insert((
+            lit,
+            self.state.current_level,
+            ClauseId::DECISION,
+        ));
         self.db.commit();
     }
 
@@ -82,7 +95,7 @@ impl Solver {
     /// Propagate units until fixpoint or conflict.
     /// Returns Ok(()) if no conflict, Err(conflict) if conflict found.
     pub fn propagate(&mut self) -> Result<(), Conflict> {
-        let conflicts: Vec<_> = self.conflicts.collect();
+        let conflicts: Vec<_> = self.outputs.conflicts.collect();
         if let Some(&conflict) = conflicts.first() {
             return Err(conflict);
         }
@@ -91,22 +104,29 @@ impl Solver {
 
     /// Backtrack to the given level, popping decision stack entries.
     pub fn backtrack_to(&mut self, level: Level) {
-        while self.current_level > level {
+        while self.state.current_level > level {
             let popped = self.db.pop();
             assert!(popped, "Tried to backtrack past level 0");
-            self.decision_stack.pop();
-            self.current_level.dec();
+            self.state.decision_stack.pop();
+            self.state.current_level.dec();
         }
     }
 
     /// Learn a clause (adds to persistent learned relation).
     pub fn learn_clause(&mut self, literals: &[Lit]) -> ClauseId {
-        let cid = self.next_learned_id;
-        self.next_learned_id = ClauseId::new(self.next_learned_id.raw() + 1);
+        let cid = self.state.next_learned_id;
+        self.state.next_learned_id = ClauseId::new(self.state.next_learned_id.raw() + 1);
         for &lit in literals {
-            self.learned.insert((cid, lit));
+            self.inputs.learned.insert((cid, lit));
         }
+        // Cache clause contents for conflict analysis
+        self.state.clause_db.insert(cid, literals.to_vec());
         self.db.commit();
         cid
+    }
+
+    /// Get the literals in a clause.
+    pub fn get_clause(&self, clause_id: ClauseId) -> Option<&[Lit]> {
+        self.state.clause_db.get(&clause_id).map(|v| v.as_slice())
     }
 }
