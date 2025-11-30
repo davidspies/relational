@@ -8,7 +8,7 @@
 - Test files (files named `tests.rs` or in a `tests/` directory) are exempt from this limit.
 - **Imports**: One `super::` is fine, but avoid chains like `super::super::`. Use absolute paths like `crate::module::item` instead.
 - **Module file naming**: Rust supports two styles: old-style (`a/mod.rs` + `a/b.rs`) and new-style (`a.rs` + `a/b.rs`). Use new-style until you need a submodule besides just tests, then switch to old-style.
-- **Visibility**: Default to private. Use `pub(crate)` when needed within the crate, and `pub` only for the public API. Don't default to `pub` out of laziness.
+- **Visibility**: Default to private. Use `pub(crate)` when needed within the crate, and `pub` only for items that are intentionally part of the public API. **Never** use `pub` as a default out of laziness - this is a serious code smell. If you're unsure whether something should be public, make it private first.
 - **Option usage**: `Option` is for values that are conceptually optional. Don't use `Option` as a placeholder because you're unsure what to fill in. If a value is required, make the field non-optional and require it in constructors.
 
 ### Error Handling: Fail Fast, Don't Hide Bugs

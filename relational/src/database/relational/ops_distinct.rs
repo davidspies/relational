@@ -53,12 +53,16 @@ impl<R> Relation<R> {
     where
         R: Op<T>,
     {
-        Relation {
-            inner: DistinctOp {
+        let node_id = self.node_id;
+        Relation::new(
+            DistinctOp {
                 inner: self.inner,
                 counts: HashMap::new(),
             },
-            commit_id: self.commit_id,
-        }
+            self.commit_id,
+            self.graph,
+            "distinct",
+            vec![node_id],
+        )
     }
 }

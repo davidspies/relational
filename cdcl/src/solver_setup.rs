@@ -12,29 +12,34 @@ impl Solver {
 
         // === Input Relations ===
         let (clauses, clauses_rel) = db.create_input::<(ClauseId, super::types::Lit)>();
+        let clauses_rel = clauses_rel.named("clauses");
         let (learned, learned_rel) = db.create_persistent_input::<(ClauseId, super::types::Lit)>();
+        let learned_rel = learned_rel.named("learned");
 
         // Levels input - we insert decision levels here
         let (mut levels, levels_rel) = db.create_input::<Level>();
+        let levels_rel = levels_rel.named("levels");
 
         // Decision assignments - inserted directly for decisions (with ClauseId::DECISION)
         let (decision_assignments, decision_assignments_rel) =
             db.create_input::<(super::types::Lit, Level, ClauseId)>();
+        let decision_assignments_rel = decision_assignments_rel.named("decision_assignments");
 
         // Current level = max(levels)
         let current_level_rel = levels_rel
             .max(|_| (), |l| *l)
             .map(|((), level)| level)
+            .named("current_level")
             .boxed();
 
         // All clauses (original + learned)
-        let all_clauses = clauses_rel.union(learned_rel).boxed().save();
+        let all_clauses = clauses_rel.union(learned_rel).named("all_clauses").boxed().save();
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
         let (prep_var, prep_var_rel) =
             db.create_variable::<((super::types::Lit, Level, ClauseId), CommitId)>();
-        let prep_rel = prep_var_rel.save();
+        let prep_rel = prep_var_rel.named("prep_assignments").save();
 
         // Final assignments: for each literal, take the entry with minimum CommitId
         let assignments_with_id = prep_rel
@@ -42,6 +47,7 @@ impl Solver {
             .min(|((lit, _, _), _)| *lit, |((_, level, _), id)| (*level, *id));
         let assignments = assignments_with_id
             .map(|(lit, (level, _id))| (lit, level))
+            .named("assignments")
             .boxed()
             .save();
 
@@ -49,10 +55,11 @@ impl Solver {
         let causes = prep_rel
             .get()
             .map(|((lit, level, cid), commit_id)| ((lit, commit_id), (cid, level)))
+            .named("causes")
             .boxed();
 
         // Derived: which literals are assigned true
-        let assigned = assignments.get().map(|(lit, _)| lit).boxed().save();
+        let assigned = assignments.get().map(|(lit, _)| lit).named("assigned").boxed().save();
 
         // === Compute Units ===
         let clause_lit_true = all_clauses

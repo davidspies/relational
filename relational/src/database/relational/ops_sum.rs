@@ -75,15 +75,19 @@ impl<R> Relation<R> {
         FK: Fn(&T) -> K,
         FV: Fn(&T) -> V,
     {
-        Relation {
-            inner: SumOp {
+        let node_id = self.node_id;
+        Relation::new(
+            SumOp {
                 inner: self.inner,
                 key_fn,
                 val_fn,
                 sums: HashMap::new(),
                 _phantom: std::marker::PhantomData,
             },
-            commit_id: self.commit_id,
-        }
+            self.commit_id,
+            self.graph,
+            "sum",
+            vec![node_id],
+        )
     }
 }

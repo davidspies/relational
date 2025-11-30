@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use super::commit_id::CommitId;
 use super::feedback::Variable as InternalVariable;
+use super::relational::graph::{GraphBuilder, GraphHandle, new_graph_builder};
 use super::relational::input::InputState;
 use super::relational::{
     InputHandle, Op, PersistentInputHandle, Relation, Variable, VariableRelation,
@@ -37,6 +38,8 @@ pub struct Database {
     max_iterations: usize,
     /// Shared commit ID counter for feedback_with_id.
     commit_id: Rc<Cell<CommitId>>,
+    /// Shadow graph for tracking dataflow structure and element counts (mutable during construction).
+    graph: GraphBuilder,
 }
 
 impl Database {
@@ -48,7 +51,17 @@ impl Database {
             checkpoint_depth: 0,
             max_iterations: 1000,
             commit_id: Rc::new(Cell::new(CommitId::new(0))),
+            graph: new_graph_builder(),
         }
+    }
+
+    /// Get a handle to the shadow graph for visualization/debugging.
+    ///
+    /// Clones the current graph state into a thread-safe handle that can be
+    /// sent to another thread (e.g., for a ctrl-C handler).
+    /// Element counts are atomically updated during dataflow execution.
+    pub fn graph(&self) -> GraphHandle {
+        std::sync::Arc::new(self.graph.borrow().clone())
     }
 
     /// Increment the commit ID counter.
@@ -74,6 +87,9 @@ impl Database {
                 state: state.clone(),
             },
             self.commit_id.clone(),
+            self.graph.clone(),
+            "input",
+            vec![],
         );
 
         // Create wrapper for type-erased operations
@@ -103,6 +119,9 @@ impl Database {
                 state: state.clone(),
             },
             self.commit_id.clone(),
+            self.graph.clone(),
+            "persistent_input",
+            vec![],
         );
 
         (handle, relation)
@@ -126,7 +145,13 @@ impl Database {
         let var = Variable {
             inner: inner.clone(),
         };
-        let rel = Relation::new(VariableRelation { inner }, self.commit_id.clone());
+        let rel = Relation::new(
+            VariableRelation { inner },
+            self.commit_id.clone(),
+            self.graph.clone(),
+            "variable",
+            vec![],
+        );
         (var, rel)
     }
 

@@ -5,9 +5,13 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::change::Diff;
 use crate::database::commit_id::CommitId;
+
+use super::graph::{GraphBuilder, NodeId};
 
 /// The core trait for relational operators.
 /// An operator is a stream of changes - call foreach to iterate over pending changes.
@@ -30,12 +34,39 @@ impl<T, R: Op<T> + ?Sized> Op<T> for Box<R> {
 pub struct Relation<R> {
     pub(crate) inner: R,
     pub(crate) commit_id: Rc<Cell<CommitId>>,
+    pub(crate) graph: GraphBuilder,
+    pub(crate) node_id: NodeId,
+    pub(crate) counter: Arc<AtomicUsize>,
 }
 
 impl<R> Relation<R> {
-    /// Create a new relation from an operator with a commit ID.
-    pub(crate) fn new(inner: R, commit_id: Rc<Cell<CommitId>>) -> Self {
-        Relation { inner, commit_id }
+    /// Create a new relation with graph tracking.
+    pub(crate) fn new(
+        inner: R,
+        commit_id: Rc<Cell<CommitId>>,
+        graph: GraphBuilder,
+        op_type: &'static str,
+        parents: Vec<NodeId>,
+    ) -> Self {
+        let (node_id, counter) = graph.borrow_mut().add_node(op_type, parents);
+        Relation {
+            inner,
+            commit_id,
+            graph,
+            node_id,
+            counter,
+        }
+    }
+
+    /// Get the node ID for this relation in the dataflow graph.
+    pub fn node_id(&self) -> NodeId {
+        self.node_id
+    }
+
+    /// Give this relation a name for debugging/visualization.
+    pub fn named(self, name: impl Into<String>) -> Self {
+        self.graph.borrow_mut().set_name(self.node_id, name.into());
+        self
     }
 
     /// Box this relation to break the type chain.
@@ -44,9 +75,16 @@ impl<R> Relation<R> {
     where
         R: Op<T> + 'a,
     {
+        let (node_id, counter) = self
+            .graph
+            .borrow_mut()
+            .add_node("boxed", vec![self.node_id]);
         Relation {
             inner: Box::new(self.inner),
             commit_id: self.commit_id,
+            graph: self.graph,
+            node_id,
+            counter,
         }
     }
 }
@@ -62,6 +100,10 @@ pub(crate) fn assert_same_commit_id(left: &Rc<Cell<CommitId>>, right: &Rc<Cell<C
 
 impl<T, R: Op<T>> Op<T> for Relation<R> {
     fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
-        self.inner.foreach(f);
+        let counter = self.counter.clone();
+        self.inner.foreach(&mut |t, diff| {
+            counter.fetch_add(1, Ordering::Relaxed);
+            f(t, diff);
+        });
     }
 }

@@ -34,13 +34,18 @@ impl<L> Relation<L> {
         R: Op<T>,
     {
         assert_same_commit_id(&self.commit_id, &right.commit_id);
-        Relation {
-            inner: UnionOp {
+        let left_node = self.node_id;
+        let right_node = right.node_id;
+        Relation::new(
+            UnionOp {
                 left: self.inner,
                 right: right.inner,
                 _phantom: std::marker::PhantomData,
             },
-            commit_id: self.commit_id,
-        }
+            self.commit_id,
+            self.graph,
+            "union",
+            vec![left_node, right_node],
+        )
     }
 }

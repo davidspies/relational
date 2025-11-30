@@ -106,8 +106,10 @@ impl<RL> Relation<RL> {
         RR: Op<R>,
     {
         assert_same_commit_id(&self.commit_id, &right.commit_id);
-        Relation {
-            inner: JoinOp {
+        let left_node = self.node_id;
+        let right_node = right.node_id;
+        Relation::new(
+            JoinOp {
                 left: self.inner,
                 right: right.inner,
                 key_left,
@@ -115,7 +117,10 @@ impl<RL> Relation<RL> {
                 left_index: HashMap::new(),
                 right_index: HashMap::new(),
             },
-            commit_id: self.commit_id,
-        }
+            self.commit_id,
+            self.graph,
+            "join",
+            vec![left_node, right_node],
+        )
     }
 }

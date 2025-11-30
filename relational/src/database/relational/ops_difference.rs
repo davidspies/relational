@@ -34,13 +34,17 @@ impl<R> Relation<R> {
     where
         R: Op<T>,
     {
-        Relation {
-            inner: NegateOp {
+        let node_id = self.node_id;
+        Relation::new(
+            NegateOp {
                 inner: self.inner,
                 _phantom: std::marker::PhantomData,
             },
-            commit_id: self.commit_id,
-        }
+            self.commit_id,
+            self.graph,
+            "negate",
+            vec![node_id],
+        )
     }
 }
 
@@ -94,6 +98,9 @@ impl<L> Relation<L> {
     {
         assert_same_commit_id(&self.commit_id, &right.commit_id);
         let commit_id = self.commit_id.clone();
+        let graph = self.graph.clone();
+        let left_node = self.node_id;
+        let right_node = right.node_id;
         let union = DifferenceUnion {
             left: self.inner,
             right: NegateOp {
@@ -102,11 +109,14 @@ impl<L> Relation<L> {
             },
             _phantom: std::marker::PhantomData,
         };
-        Relation {
-            inner: DifferenceOp {
-                inner: Relation::new(union, commit_id.clone()).distinct().inner,
+        Relation::new(
+            DifferenceOp {
+                inner: Relation::new(union, commit_id.clone(), graph.clone(), "diff_union", vec![left_node, right_node]).distinct().inner,
             },
             commit_id,
-        }
+            graph,
+            "difference",
+            vec![left_node, right_node],
+        )
     }
 }

@@ -3,5 +3,10 @@ name = "cdcl"
 edition.workspace = true
 version.workspace = true
 
+[features]
+default = []
+ctrlc = ["dep:ctrlc"]
+
 [dependencies]
 relational = { path = "../relational" }
+ctrlc = { version = "*", optional = true }

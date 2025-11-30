@@ -6,6 +6,7 @@
 //! - Operators are generic over their input relation types
 //! - Use `.boxed()` to break type chains when needed
 
+pub(crate) mod graph;
 pub(crate) mod input;
 mod ops_consolidate;
 mod ops_count;
@@ -34,3 +35,6 @@ pub use variable_relation::{Variable, VariableRelation};
 // Output
 pub use output::{Output, output, output_with_sink};
 pub use sink::Sink;
+
+// Graph exports (only public types)
+pub use graph::{Graph, GraphHandle, NodeId};

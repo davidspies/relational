@@ -132,4 +132,26 @@ impl Solver {
     pub fn get_clause(&self, clause_id: ClauseId) -> Option<&[Lit]> {
         self.state.clause_db.get(&clause_id).map(|v| v.as_slice())
     }
+
+    /// Get a handle to the dataflow graph for debugging/visualization.
+    ///
+    /// The returned handle is thread-safe and can be sent to another thread
+    /// (e.g., for a ctrl-C handler to dump the graph).
+    pub fn graph(&self) -> relational::database::GraphHandle {
+        self.db.graph()
+    }
+
+    /// Install a ctrl-C handler that dumps the dataflow graph on interrupt.
+    ///
+    /// This is useful for debugging long-running solver instances.
+    /// Call this after creating the solver but before solving.
+    #[cfg(feature = "ctrlc")]
+    pub fn install_ctrlc_handler(&self) {
+        let graph = self.graph();
+        ctrlc::set_handler(move || {
+            graph.dump();
+            std::process::exit(130); // Standard exit code for Ctrl+C
+        })
+        .expect("Error setting Ctrl-C handler");
+    }
 }

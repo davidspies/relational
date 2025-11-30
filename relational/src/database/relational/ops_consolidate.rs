@@ -44,12 +44,17 @@ impl<R> Relation<R> {
         R: Op<T>,
     {
         let commit_id = self.commit_id.clone();
+        let graph = self.graph.clone();
+        let parent = self.node_id;
         Relation::new(
             ConsolidateOp {
                 upstream: self,
                 pending: Multiset::new(),
             },
             commit_id,
+            graph,
+            "consolidate",
+            vec![parent],
         )
     }
 }

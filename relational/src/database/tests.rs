@@ -979,3 +979,61 @@ fn test_consolidate_incremental() {
     let changes2 = collect_to_map(&mut consolidated);
     assert_eq!(changes2.get(&2), Some(&2)); // 2 appears twice
 }
+
+#[test]
+fn test_graph_tracking() {
+    let mut db = Database::new();
+    let (mut handle, rel) = db.create_input::<i32>();
+
+    // Build a simple dataflow: input -> filter -> map
+    let filtered = rel.filter(|x| *x > 0).named("positive_filter");
+    let mapped = filtered.map(|x| x * 2).named("doubler");
+    let mut boxed = mapped.boxed();
+
+    handle.insert(1);
+    handle.insert(2);
+    handle.insert(-1);
+    db.commit();
+
+    // Process to update counters
+    let _ = collect_to_map(&mut boxed);
+
+    // Check that graph was built
+    let graph = db.graph();
+    let dot = graph.to_dot();
+    assert!(dot.contains("digraph"), "Should produce DOT format");
+    assert!(dot.contains("positive_filter"), "Should contain named node");
+    assert!(dot.contains("doubler"), "Should contain named node");
+    assert!(dot.contains("input"), "Should contain input node");
+    assert!(dot.contains("flat_map"), "filter uses flat_map internally");
+}
+
+#[test]
+fn test_graph_element_counting() {
+    let mut db = Database::new();
+    let (mut handle, rel) = db.create_input::<i32>();
+
+    let mut mapped = rel.map(|x| x * 2).named("doubler");
+
+    handle.insert(1);
+    handle.insert(2);
+    handle.insert(3);
+    db.commit();
+
+    // Before processing, counts should be 0
+    let dot_before = db.graph().to_dot();
+    assert!(
+        dot_before.contains("doubler\\nflat_map\\n0"),
+        "Counter should be 0 before processing"
+    );
+
+    // Process elements
+    let _ = collect_to_map(&mut mapped);
+
+    // After processing, the flat_map node should show count of 3
+    let dot_after = db.graph().to_dot();
+    assert!(
+        dot_after.contains("doubler\\nflat_map\\n3"),
+        "Counter should be 3 after processing 3 elements"
+    );
+}

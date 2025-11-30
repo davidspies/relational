@@ -40,13 +40,16 @@ impl<R> Relation<R> {
         I: IntoIterator<Item = U>,
         F: Fn(T) -> I,
     {
-        Relation {
-            inner: FlatMapOp {
+        Relation::new(
+            FlatMapOp {
                 inner: self.inner,
                 f,
                 _phantom: std::marker::PhantomData,
             },
-            commit_id: self.commit_id,
-        }
+            self.commit_id,
+            self.graph,
+            "flat_map",
+            vec![self.node_id],
+        )
     }
 }

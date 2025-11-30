@@ -8,6 +8,7 @@ use crate::change::{Change, Diff};
 use crate::collection::Multiset;
 use crate::database::commit_id::CommitId;
 
+use super::graph::{GraphBuilder, NodeId};
 use super::relation::{Op, Relation};
 
 /// Shared state for a saved relation.
@@ -17,6 +18,10 @@ struct SavedState<T, R: Op<T>> {
     consumer_queues: Vec<Rc<RefCell<Multiset<T>>>>,
     /// The commit ID when we last pulled from upstream.
     last_update_commit_id: CommitId,
+    /// The node ID of the upstream relation (for graph tracking).
+    upstream_node_id: NodeId,
+    /// Graph builder for creating new nodes.
+    graph: GraphBuilder,
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> SavedState<T, R> {
@@ -53,7 +58,11 @@ impl<T: Eq + Hash, R: Op<T>> SavedRelation<T, R> {
     /// Each call returns a new consumer. All consumers receive the same changes.
     pub fn get(&self) -> Relation<SavedGetter<T, R>> {
         let queue = Rc::new(RefCell::new(Multiset::new()));
-        let commit_id = self.state.borrow().upstream.commit_id.clone();
+        let state = self.state.borrow();
+        let commit_id = state.upstream.commit_id.clone();
+        let parent_node = state.upstream_node_id;
+        let graph = state.graph.clone();
+        drop(state);
         self.state.borrow_mut().consumer_queues.push(queue.clone());
         Relation::new(
             SavedGetter {
@@ -61,6 +70,9 @@ impl<T: Eq + Hash, R: Op<T>> SavedRelation<T, R> {
                 queue,
             },
             commit_id,
+            graph,
+            "saved_get",
+            vec![parent_node],
         )
     }
 }
@@ -91,11 +103,15 @@ impl<R> Relation<R> {
         T: Eq + Hash,
         R: Op<T>,
     {
+        let upstream_node_id = self.node_id;
+        let graph = self.graph.clone();
         SavedRelation {
             state: Rc::new(RefCell::new(SavedState {
                 upstream: self,
                 consumer_queues: Vec::new(),
                 last_update_commit_id: CommitId::default(),
+                upstream_node_id,
+                graph,
             })),
         }
     }
