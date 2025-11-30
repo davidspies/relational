@@ -7,8 +7,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use relational::database2::{
-    difference, filter, join, map, max, output, save, union, Database2, Output, Relation, Variable,
-    VariableRelation,
+    Database2, Output, Relation, Variable, VariableRelation, difference, filter, join, map, max,
+    output, save, union,
 };
 
 /// Helper to collect output after update.
@@ -998,18 +998,17 @@ fn test_push_insert_pop_minimal() {
     let mut path_rel = save(VariableRelation::new(path_var.clone()));
 
     let mut edges_saved = save(edges_rel);
-    let extended = join(
-        path_rel.get(),
-        edges_saved.get(),
-        |(_, b)| *b,
-        |(b, _)| *b,
-    );
+    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var.clone(), all_paths);
 
     // At this point, path_var should be empty
-    assert_eq!(path_var.borrow().collect().len(), 0, "Should be empty before any inserts");
+    assert_eq!(
+        path_var.borrow().collect().len(),
+        0,
+        "Should be empty before any inserts"
+    );
 
     db.push();
 
@@ -1038,12 +1037,7 @@ fn test_push_insert_pop() {
     let mut path_rel = save(VariableRelation::new(path_var.clone()));
 
     let mut edges_saved = save(edges_rel);
-    let extended = join(
-        path_rel.get(),
-        edges_saved.get(),
-        |(_, b)| *b,
-        |(b, _)| *b,
-    );
+    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var.clone(), all_paths);
@@ -1077,18 +1071,17 @@ fn test_push_no_changes_pop() {
     let mut path_rel = save(VariableRelation::new(path_var.clone()));
 
     let mut edges_saved = save(edges_rel);
-    let extended = join(
-        path_rel.get(),
-        edges_saved.get(),
-        |(_, b)| *b,
-        |(b, _)| *b,
-    );
+    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var.clone(), all_paths);
 
     // At this point, path_var should be empty
-    assert_eq!(path_var.borrow().collect().len(), 0, "Should be empty before any changes");
+    assert_eq!(
+        path_var.borrow().collect().len(),
+        0,
+        "Should be empty before any changes"
+    );
 
     db.push();
 

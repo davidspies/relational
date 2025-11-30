@@ -1,7 +1,7 @@
 //! Main solve loop for the CDCL solver.
 
-use super::types::{neg, Level, Lit};
 use super::Solver;
+use super::types::{Level, Lit, neg};
 
 impl Solver {
     /// Main solve loop.

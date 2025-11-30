@@ -3,8 +3,8 @@
 //! Relations are move-only (not Clone). To use a relation in multiple places,
 //! you must first save it to get a `SavedRelation`, then call `.get()`.
 
-use crate::change::Diff;
 use crate::Tuple;
+use crate::change::Diff;
 
 /// The core trait for relations.
 /// A relation is a stream of changes - call foreach to iterate over pending changes.

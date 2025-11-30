@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use proptest::prelude::*;
 use relational::database2::{
-    join, map, output, save, union, Database2, Output, Relation, Variable, VariableRelation,
+    Database2, Relation, Variable, VariableRelation, join, map, output, save, union,
 };
 
 /// An operation that can be performed on the database.
@@ -43,12 +43,7 @@ fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
     let mut path_rel = save(VariableRelation::new(path_var.clone()));
 
     let mut edges_saved = save(edges_rel);
-    let extended = join(
-        path_rel.get(),
-        edges_saved.get(),
-        |(_, b)| *b,
-        |(b, _)| *b,
-    );
+    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var.clone(), all_paths);
@@ -112,12 +107,7 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
     let mut path_rel = save(VariableRelation::new(path_var.clone()));
 
     let mut edges_saved = save(edges_rel);
-    let extended = join(
-        path_rel.get(),
-        edges_saved.get(),
-        |(_, b)| *b,
-        |(b, _)| *b,
-    );
+    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var.clone(), all_paths);
@@ -302,12 +292,7 @@ fn test_multiple_feedbacks_with_pop() {
     let mut reach_rel = save(VariableRelation::new(reach_var.clone()));
 
     let mut edges_saved = save(edges_rel);
-    let extended_reach = join(
-        reach_rel.get(),
-        edges_saved.get(),
-        |(_, b)| *b,
-        |(b, _)| *b,
-    );
+    let extended_reach = join(reach_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_reach = map(extended_reach, |((a, _), (_, c))| (a, c));
     let all_reach = union(edges_saved.get(), new_reach);
 

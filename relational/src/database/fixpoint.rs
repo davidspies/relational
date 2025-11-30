@@ -1,8 +1,8 @@
 //! Fixed-point computation for Database.
 
+use super::Database;
 use super::commit_id::CommitId;
 use super::feedback::StratifiedOp;
-use super::Database;
 
 impl Database {
     /// Run stratified fixpoint computation for all feedback loops and interrupts.

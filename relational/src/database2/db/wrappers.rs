@@ -4,12 +4,12 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use crate::Tuple;
 use crate::change::Diff;
 use crate::database2::commit_id::CommitId;
 use crate::database2::feedback::Variable;
-use crate::database2::relational::input::InputState;
 use crate::database2::relational::Relation;
-use crate::Tuple;
+use crate::database2::relational::input::InputState;
 
 /// Type-erased input handle operations.
 pub(super) trait AnyInput {
@@ -130,9 +130,11 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWrapp
     fn pull_and_forward_non_checkpoint(&self) {
         // Collect changes from input relation
         let mut changes = Vec::new();
-        self.input.borrow_mut().foreach(&mut |tuple: T, diff: Diff| {
-            changes.push((tuple, diff));
-        });
+        self.input
+            .borrow_mut()
+            .foreach(&mut |tuple: T, diff: Diff| {
+                changes.push((tuple, diff));
+            });
 
         // Update input_totals and forward non-checkpoint items
         let mut var = self.variable.borrow_mut();
@@ -149,9 +151,11 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWrapp
     fn step(&self, _recording: bool) -> bool {
         // Collect first to avoid borrow conflicts
         let mut changes = Vec::new();
-        self.input.borrow_mut().foreach(&mut |tuple: T, diff: Diff| {
-            changes.push((tuple, diff));
-        });
+        self.input
+            .borrow_mut()
+            .foreach(&mut |tuple: T, diff: Diff| {
+                changes.push((tuple, diff));
+            });
 
         if changes.is_empty() {
             return false;
@@ -254,9 +258,11 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWithI
     fn pull_and_forward_non_checkpoint(&self) {
         // Collect changes from input relation
         let mut changes = Vec::new();
-        self.input.borrow_mut().foreach(&mut |tuple: T, diff: Diff| {
-            changes.push((tuple, diff));
-        });
+        self.input
+            .borrow_mut()
+            .foreach(&mut |tuple: T, diff: Diff| {
+                changes.push((tuple, diff));
+            });
 
         // For feedback_with_id, input is T but variable stores (T, CommitId)
         // We need to handle this specially - input_totals are keyed by T
@@ -275,9 +281,11 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWithI
     fn step(&self, _recording: bool) -> bool {
         // Collect first to avoid borrow conflicts
         let mut changes = Vec::new();
-        self.input.borrow_mut().foreach(&mut |tuple: T, diff: Diff| {
-            changes.push((tuple, diff));
-        });
+        self.input
+            .borrow_mut()
+            .foreach(&mut |tuple: T, diff: Diff| {
+                changes.push((tuple, diff));
+            });
 
         if changes.is_empty() {
             return false;

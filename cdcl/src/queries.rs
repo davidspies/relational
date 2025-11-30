@@ -2,11 +2,11 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use relational::database2::CommitId;
 use relational::Multiset;
+use relational::database2::CommitId;
 
-use super::types::{ClauseId, Conflict, Level, Lit, Var};
 use super::Solver;
+use super::types::{ClauseId, Conflict, Level, Lit, Var};
 
 impl Solver {
     /// Get all currently assigned literals.

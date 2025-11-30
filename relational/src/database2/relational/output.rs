@@ -1,8 +1,8 @@
 //! Output - accumulates relation changes into a queryable Multiset.
 
+use crate::Tuple;
 use crate::change::Change;
 use crate::collection::Multiset;
-use crate::Tuple;
 
 use super::relation::Relation;
 

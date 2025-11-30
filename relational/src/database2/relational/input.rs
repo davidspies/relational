@@ -7,9 +7,9 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use crate::change::Diff;
 use crate::Multiset;
 use crate::Tuple;
+use crate::change::Diff;
 
 use super::relation::Relation;
 

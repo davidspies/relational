@@ -9,7 +9,7 @@
 //!   left_changes × new_right + new_left × right_changes
 //! This double-counts (left_changes × right_changes).
 
-use relational::database2::{join, output, Database2, Output, Relation};
+use relational::database2::{Database2, Output, Relation, join, output};
 
 /// Helper to collect output after update.
 fn collect_output<T: relational::Tuple + Clone>(out: &mut Output<T>) -> Vec<T> {

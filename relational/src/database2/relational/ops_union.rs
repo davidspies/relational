@@ -1,7 +1,7 @@
 //! Union operator - stateless, combines two relations.
 
-use crate::change::Diff;
 use crate::Tuple;
+use crate::change::Diff;
 
 use super::relation::Relation;
 

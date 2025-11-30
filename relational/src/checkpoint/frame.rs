@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
+use crate::Tuple;
 use crate::change::Change;
 use crate::dataflow::NodeId;
-use crate::Tuple;
 
 use super::AnyChanges;
 

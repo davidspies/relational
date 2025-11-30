@@ -1,7 +1,7 @@
 //! FlatMap operator - stateless, transforms each tuple into zero or more tuples.
 
-use crate::change::Diff;
 use crate::Tuple;
+use crate::change::Diff;
 
 use super::relation::Relation;
 

@@ -4,12 +4,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use relational::database2::{
-    count, difference, distinct, filter, join, map, max, min, output, save, union, CommitId,
-    Database2, Output, Relation, Variable, VariableRelation,
+    CommitId, Database2, Output, Relation, Variable, VariableRelation, count, difference, distinct,
+    filter, join, map, max, min, output, save, union,
 };
 
 use super::solver::Solver;
-use super::types::{var, ClauseId, Conflict, Level};
+use super::types::{ClauseId, Conflict, Level, var};
 
 impl Solver {
     /// Create a new solver for the given number of variables.
@@ -48,15 +48,14 @@ impl Solver {
             |((lit, _, _), _)| *lit,
             |((_, level, _), id)| (*level, *id),
         );
-        let mut assignments = save(map(
-            assignments_with_id,
-            |(lit, (level, _id))| (lit, level),
-        ).boxed());
+        let mut assignments =
+            save(map(assignments_with_id, |(lit, (level, _id))| (lit, level)).boxed());
 
         // Causes: tracks all ways each literal was derived
         let causes = map(prep_rel.get(), |((lit, level, cid), commit_id)| {
             ((lit, commit_id), (cid, level))
-        }).boxed();
+        })
+        .boxed();
 
         // Derived: which literals are assigned true
         let mut assigned = save(map(assignments.get(), |(lit, _)| lit).boxed());
@@ -73,11 +72,13 @@ impl Solver {
         let assigned_vars = map(assigned.get(), |lit| var(lit)).boxed();
         let clause_lit_with_var = map(all_clauses.get(), |(cid, lit)| (cid, lit, var(lit))).boxed();
         let clause_assigned_lits = join(clause_lit_with_var, assigned_vars, |(_, _, v)| *v, |v| *v);
-        let clause_assigned_lit_ids = map(clause_assigned_lits, |((cid, lit, _), _)| (cid, lit)).boxed();
+        let clause_assigned_lit_ids =
+            map(clause_assigned_lits, |((cid, lit, _), _)| (cid, lit)).boxed();
 
         let mut clause_unassigned_lits =
             save(difference(all_clauses.get(), clause_assigned_lit_ids).boxed());
-        let mut unassigned_count = save(count(clause_unassigned_lits.get(), |(cid, _)| *cid).boxed());
+        let mut unassigned_count =
+            save(count(clause_unassigned_lits.get(), |(cid, _)| *cid).boxed());
 
         let unit_candidate_clauses = filter(unassigned_count.get(), |(_, cnt)| *cnt == 1);
         let unit_clause_ids = map(unit_candidate_clauses, |(cid, _)| cid).boxed();
@@ -105,7 +106,8 @@ impl Solver {
         let all_clause_ids = map(all_clauses.get(), |(cid, _)| cid).boxed();
         let all_clause_ids_distinct = distinct(all_clause_ids).boxed();
         let clauses_with_unassigned = map(unassigned_count.get(), |(cid, _)| cid).boxed();
-        let fully_assigned_clauses = difference(all_clause_ids_distinct, clauses_with_unassigned).boxed();
+        let fully_assigned_clauses =
+            difference(all_clause_ids_distinct, clauses_with_unassigned).boxed();
         let satisfied_distinct = distinct(satisfied_set.get()).boxed();
         let clause_conflicts = difference(fully_assigned_clauses, satisfied_distinct).boxed();
 
@@ -122,9 +124,12 @@ impl Solver {
 
         let mut clause_conflict_enums =
             save(map(clause_conflicts, |cid| Conflict::EmptyClause(cid)).boxed());
-        let mut direct_conflict_enums = save(map(direct_conflict_vars_distinct, |v| {
-            Conflict::DirectConflict(v)
-        }).boxed());
+        let mut direct_conflict_enums = save(
+            map(direct_conflict_vars_distinct, |v| {
+                Conflict::DirectConflict(v)
+            })
+            .boxed(),
+        );
 
         let conflicts = union(clause_conflict_enums.get(), direct_conflict_enums.get()).boxed();
 
@@ -134,7 +139,8 @@ impl Solver {
 
         // === Set up the feedback loop ===
         let unit_with_level = join(units.get(), current_level_rel, |_| (), |_| ());
-        let unit_lit_level_cid = map(unit_with_level, |((cid, lit), level)| (lit, level, cid)).boxed();
+        let unit_lit_level_cid =
+            map(unit_with_level, |((cid, lit), level)| (lit, level, cid)).boxed();
 
         let all_new_assignments = union(decision_assignments_rel, unit_lit_level_cid).boxed();
 

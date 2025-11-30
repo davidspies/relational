@@ -1,9 +1,9 @@
 //! Named checkpoint operations for Database.
 
+use crate::Tuple;
 use crate::checkpoint::{Checkpoint, CheckpointId, RestoreInfo};
 use crate::dataflow::NodeId;
 use crate::relation::Relation;
-use crate::Tuple;
 
 use super::Database;
 

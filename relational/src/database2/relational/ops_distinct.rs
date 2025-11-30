@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::change::Diff;
 use crate::Tuple;
+use crate::change::Diff;
 
 use super::relation::Relation;
 

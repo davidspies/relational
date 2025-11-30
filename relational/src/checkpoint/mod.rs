@@ -7,10 +7,10 @@
 
 mod changes_trait;
 mod frame;
-mod stack;
 mod legacy;
+mod stack;
 
 pub use changes_trait::AnyChanges;
 pub use frame::CheckpointFrame;
-pub use stack::CheckpointStack;
 pub use legacy::{Checkpoint, CheckpointId, CheckpointManager, RestoreInfo};
+pub use stack::CheckpointStack;

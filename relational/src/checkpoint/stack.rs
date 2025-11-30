@@ -1,8 +1,8 @@
 //! Stack-based checkpoint manager for efficient backtracking.
 
+use crate::Tuple;
 use crate::change::Change;
 use crate::dataflow::NodeId;
-use crate::Tuple;
 
 use super::CheckpointFrame;
 

@@ -2,9 +2,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::Tuple;
 use crate::change::{Change, Diff};
 use crate::collection::Multiset;
-use crate::Tuple;
 
 /// State for tracking group_max incrementally.
 /// For each key, maintains a BTreeMap of values to their multiplicities.

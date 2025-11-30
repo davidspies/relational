@@ -2,8 +2,8 @@
 
 use crate::dataflow::{AnyChanges, AnyCollection, DataflowGraph, NodeId};
 
-use super::commit_id::CommitId;
 use super::RecomputeFn;
+use super::commit_id::CommitId;
 
 /// Data needed for feedback rollback during pop().
 pub(super) struct FeedbackRollbackData {

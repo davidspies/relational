@@ -3,9 +3,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::Tuple;
 use crate::change::Diff;
 use crate::database2::feedback::Variable;
-use crate::Tuple;
 
 use super::relation::Relation;
 

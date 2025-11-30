@@ -1,10 +1,10 @@
 //! Difference operator - set difference (left - right).
 //! Implemented as distinct(left + negate(right)).
 
-use crate::change::Diff;
 use crate::Tuple;
+use crate::change::Diff;
 
-use super::ops_distinct::{distinct, DistinctRelation};
+use super::ops_distinct::{DistinctRelation, distinct};
 use super::relation::Relation;
 
 /// A negate relation - negates all diffs.

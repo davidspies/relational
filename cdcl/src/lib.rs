@@ -6,14 +6,14 @@
 //! - Push/pop checkpoints for backtracking
 //! - Persistent inputs for learned clauses
 
-mod types;
-mod solver;
-mod solver_setup;
 mod queries;
 mod solve;
+mod solver;
+mod solver_setup;
+mod types;
 
 #[cfg(test)]
 mod tests;
 
-pub use types::{ClauseId, Conflict, Level, Lit, Var};
 pub use solver::Solver;
+pub use types::{ClauseId, Conflict, Level, Lit, Var};

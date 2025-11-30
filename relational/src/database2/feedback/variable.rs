@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::change::Diff;
 use crate::Tuple;
+use crate::change::Diff;
 
 /// A variable in an iterative computation.
 ///

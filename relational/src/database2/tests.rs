@@ -217,14 +217,8 @@ fn test_join() {
 
     let changes = collect_to_map(&mut joined);
     assert_eq!(changes.len(), 2);
-    assert_eq!(
-        changes.get(&((1, 2), (1, "one".to_string()))),
-        Some(&1)
-    );
-    assert_eq!(
-        changes.get(&((2, 3), (2, "two".to_string()))),
-        Some(&1)
-    );
+    assert_eq!(changes.get(&((1, 2), (1, "one".to_string()))), Some(&1));
+    assert_eq!(changes.get(&((2, 3), (2, "two".to_string()))), Some(&1));
 }
 
 #[test]
@@ -481,7 +475,6 @@ fn test_min_via_max_reverse() {
     assert_eq!(changes.get(&("a".to_string(), Reverse(5))), Some(&1));
 }
 
-
 // =============================================================================
 // Ported tests from database/tests.rs
 // =============================================================================
@@ -491,7 +484,7 @@ mod ported_tests {
     use std::rc::Rc;
 
     use super::super::feedback::Variable;
-    use super::super::{join, map, save, union, Database2};
+    use super::super::{Database2, join, map, save, union};
     use super::collect_to_map;
 
     #[test]

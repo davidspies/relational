@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 
-use crate::change::Diff;
 use crate::Tuple;
+use crate::change::Diff;
 
 use super::relation::Relation;
 

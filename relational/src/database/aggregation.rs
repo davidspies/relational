@@ -2,12 +2,12 @@
 
 use std::cmp::Reverse;
 
+use crate::Tuple;
 use crate::change::Change;
 use crate::collection::Multiset;
 use crate::dataflow::{AnyChanges, AnyCollection, DataflowGraph};
 use crate::operators;
 use crate::relation::Relation;
-use crate::Tuple;
 
 use super::Database;
 

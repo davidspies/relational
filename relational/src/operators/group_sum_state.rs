@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
+use crate::Tuple;
 use crate::change::{Change, Diff};
 use crate::collection::Multiset;
-use crate::Tuple;
 
 /// State for tracking group_sum incrementally.
 /// For each key, maintains the running sum of (value * multiplicity).

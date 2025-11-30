@@ -5,7 +5,7 @@
 //! runs, it must reconstruct OLD state by reversing the changes.
 
 use relational::database2::{
-    difference, distinct, join, map, output, save, Database2, Output, Relation,
+    Database2, Output, Relation, difference, distinct, join, map, output, save,
 };
 
 /// Helper to collect output after update.
@@ -155,7 +155,12 @@ fn test_cdcl_pattern() {
     let mut saved_clauses = save(clauses_rel);
 
     // Clause literals that are true (satisfied)
-    let clause_lit_true = join(saved_clauses.get(), assigned_rel, |(_, lit)| *lit, |lit| *lit);
+    let clause_lit_true = join(
+        saved_clauses.get(),
+        assigned_rel,
+        |(_, lit)| *lit,
+        |lit| *lit,
+    );
     let satisfied_clauses = map(clause_lit_true, |((cid, _), _)| cid);
     let satisfied_distinct = distinct(satisfied_clauses);
 

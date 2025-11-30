@@ -2,9 +2,9 @@
 
 use std::any::Any;
 
+use crate::Tuple;
 use crate::change::{Change, Diff};
 use crate::collection::Multiset;
-use crate::Tuple;
 
 /// Type-erased collection storage.
 pub trait AnyCollection: Any + Send + Sync {

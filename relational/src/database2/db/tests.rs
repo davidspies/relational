@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::database2::{join, map, save, union, Database2, Relation, Variable, VariableRelation};
+use crate::database2::{Database2, Relation, Variable, VariableRelation, join, map, save, union};
 
 /// Test that re-inserting already-present item during push doesn't affect pop.
 #[test]
@@ -52,12 +52,7 @@ fn test_pop_transitive_closure() {
     let mut path_rel = save(VariableRelation::new(path_var.clone()));
 
     let mut edges_saved = save(edges_rel);
-    let extended = join(
-        path_rel.get(),
-        edges_saved.get(),
-        |(_, b)| *b,
-        |(b, _)| *b,
-    );
+    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
     db.feedback(path_var.clone(), all_paths);

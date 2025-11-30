@@ -1,9 +1,9 @@
 //! Timestamped feedback operations for tracking tuple discovery times.
 
+use crate::Tuple;
 use crate::change::Change;
 use crate::collection::Multiset;
 use crate::dataflow::{AnyChanges, AnyCollection};
-use crate::Tuple;
 
 use super::commit_id::CommitId;
 use super::feedback::FeedbackOps;

@@ -1,8 +1,8 @@
 //! Type-erased changes trait for checkpoint operations.
 
+use crate::Tuple;
 use crate::change::Change;
 use crate::collection::Multiset;
-use crate::Tuple;
 
 /// Type-erased changes that can be manipulated.
 pub trait AnyChanges: Send + Sync {

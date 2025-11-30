@@ -1,16 +1,16 @@
 //! Feedback variable and loop setup for Database.
 
+use crate::Tuple;
 use crate::collection::Multiset;
 use crate::dataflow::{AnyCollection, DataflowGraph};
 use crate::operators;
 use crate::relation::{Relation, Variable};
-use crate::Tuple;
 
+use super::Database;
 use super::commit_id::CommitId;
 use super::feedback::{FeedbackLoop, StratifiedOp};
 use super::feedback_ops::TypedFeedbackOps;
 use super::feedback_ops_timestamped::TimestampedFeedbackOps;
-use super::Database;
 
 impl Database {
     /// Create a variable for feedback loops.

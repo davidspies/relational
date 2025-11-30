@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
+use crate::Tuple;
 use crate::change::{Change, Diff};
 use crate::collection::Multiset;
-use crate::Tuple;
 
 /// Join operator for two collections with key extraction.
 /// join(A, B, key_a, key_b) produces (a, b) for all (a in A, b in B) where key_a(a) == key_b(b)

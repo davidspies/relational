@@ -1,7 +1,7 @@
 //! Stack-based push/pop checkpoint operations for Database.
 
-use super::feedback::{FeedbackLoop, FeedbackRollbackData, StratifiedOp};
 use super::Database;
+use super::feedback::{FeedbackLoop, FeedbackRollbackData, StratifiedOp};
 
 impl Database {
     /// Push a new checkpoint frame onto the stack.

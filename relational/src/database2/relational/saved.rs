@@ -3,9 +3,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::Tuple;
 use crate::change::{Change, Diff};
 use crate::collection::Multiset;
-use crate::Tuple;
 
 use super::relation::Relation;
 
@@ -21,7 +21,9 @@ impl<T: Tuple + 'static, R: Relation<T>> SavedState<T, R> {
     fn update(&mut self) {
         self.upstream.foreach(&mut |t, diff| {
             for queue in &self.consumer_queues {
-                queue.borrow_mut().apply_change(Change::new(t.clone(), diff));
+                queue
+                    .borrow_mut()
+                    .apply_change(Change::new(t.clone(), diff));
             }
         });
     }

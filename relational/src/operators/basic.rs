@@ -1,8 +1,8 @@
 //! Basic operators: map, filter, flat_map, union, distinct, negate.
 
+use crate::Tuple;
 use crate::change::{Change, Diff};
 use crate::collection::Multiset;
-use crate::Tuple;
 
 /// Map operator: transforms each tuple using a function.
 pub fn map<T: Tuple, U: Tuple, F: Fn(&T) -> U>(input: &Multiset<T>, f: F) -> Multiset<U> {

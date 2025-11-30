@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
+use crate::Tuple;
 use crate::change::Diff;
 use crate::collection::Multiset;
-use crate::Tuple;
 
 /// Group and aggregate operator.
 /// Groups tuples by key and applies an aggregation function.

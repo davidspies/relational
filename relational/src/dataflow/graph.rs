@@ -2,9 +2,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::Tuple;
 use crate::change::Change;
 use crate::collection::Multiset;
-use crate::Tuple;
 
 use super::node::{Node, NodeId, NodeKind};
 
