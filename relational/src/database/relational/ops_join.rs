@@ -90,30 +90,32 @@ where
     }
 }
 
-/// Create a join relation.
-pub fn join<L, R, K, FL, FR, RL, RR>(
-    left: Relation<RL>,
-    right: Relation<RR>,
-    key_left: FL,
-    key_right: FR,
-) -> Relation<JoinOp<L, R, K, FL, FR, RL, RR>>
-where
-    K: Eq + Hash + Clone,
-    FL: Fn(&L) -> K,
-    FR: Fn(&R) -> K,
-    RL: Op<L>,
-    RR: Op<R>,
-{
-    assert_same_commit_id(&left.commit_id, &right.commit_id);
-    Relation {
-        inner: JoinOp {
-            left: left.inner,
-            right: right.inner,
-            key_left,
-            key_right,
-            left_index: HashMap::new(),
-            right_index: HashMap::new(),
-        },
-        commit_id: left.commit_id,
+impl<RL> Relation<RL> {
+    /// Join two relations on matching keys.
+    pub fn join<L, R, K, FL, FR, RR>(
+        self,
+        right: Relation<RR>,
+        key_left: FL,
+        key_right: FR,
+    ) -> Relation<JoinOp<L, R, K, FL, FR, RL, RR>>
+    where
+        RL: Op<L>,
+        K: Eq + Hash + Clone,
+        FL: Fn(&L) -> K,
+        FR: Fn(&R) -> K,
+        RR: Op<R>,
+    {
+        assert_same_commit_id(&self.commit_id, &right.commit_id);
+        Relation {
+            inner: JoinOp {
+                left: self.inner,
+                right: right.inner,
+                key_left,
+                key_right,
+                left_index: HashMap::new(),
+                right_index: HashMap::new(),
+            },
+            commit_id: self.commit_id,
+        }
     }
 }

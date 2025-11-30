@@ -9,7 +9,6 @@ use std::rc::Rc;
 use super::commit_id::CommitId;
 use super::feedback::Variable as InternalVariable;
 use super::relational::input::InputState;
-use super::relational::saved::SavedRelation;
 use super::relational::{
     InputHandle, Op, PersistentInputHandle, Relation, Variable, VariableRelation,
     input::InputRelation,
@@ -198,11 +197,6 @@ impl Database {
             .push(StratifiedStep::Interrupt(Box::new(InterruptWrapper::new(
                 input.inner,
             ))));
-    }
-
-    /// Create a saved relation that can be used in multiple places.
-    pub fn save<T: Eq + Hash, R: Op<T>>(&self, upstream: Relation<R>) -> SavedRelation<T, R> {
-        super::relational::save(upstream)
     }
 
     /// Push a new checkpoint level.

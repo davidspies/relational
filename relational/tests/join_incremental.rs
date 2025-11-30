@@ -9,7 +9,7 @@
 //!   left_changes × new_right + new_left × right_changes
 //! This double-counts (left_changes × right_changes).
 
-use relational::database::{Database, join, output};
+use relational::database::{Database, output};
 
 /// Test: Insert into both sides of a join in a single commit.
 /// This exercises the case where left_changes and right_changes are both non-empty.
@@ -21,7 +21,7 @@ fn test_join_simultaneous_inserts() {
     let (mut right, right_rel) = db.create_input::<(i32, i32)>(); // (key, right_val)
 
     // Join on the first element (key)
-    let joined = join(left_rel, right_rel, |(k, _)| *k, |(k, _)| *k);
+    let joined = left_rel.join(right_rel, |(k, _)| *k, |(k, _)| *k);
     let joined_out = output(joined.boxed());
 
     // Initial state: left has (1, 10), right has (1, 100)
@@ -74,7 +74,7 @@ fn test_join_both_sides_from_empty() {
     let (mut right, right_rel) = db.create_input::<i32>();
 
     // Join where left == right (identity key)
-    let joined = join(left_rel, right_rel, |x| *x, |x| *x);
+    let joined = left_rel.join(right_rel, |x| *x, |x| *x);
     let joined_out = output(joined.boxed());
 
     // Insert 1 into both sides in a single commit
@@ -104,7 +104,7 @@ fn test_join_multiplicity_not_doubled() {
     let (mut right, right_rel) = db.create_input::<i32>();
 
     // Join where left == right (identity key)
-    let joined = join(left_rel, right_rel, |x| *x, |x| *x);
+    let joined = left_rel.join(right_rel, |x| *x, |x| *x);
     let joined_out = output(joined.boxed());
 
     // Insert 1 into both sides in a single commit
@@ -127,7 +127,7 @@ fn test_join_multiple_keys_simultaneous() {
     let (mut left, left_rel) = db.create_input::<(char, i32)>(); // (key, val)
     let (mut right, right_rel) = db.create_input::<(char, i32)>(); // (key, val)
 
-    let joined = join(left_rel, right_rel, |(k, _)| *k, |(k, _)| *k);
+    let joined = left_rel.join(right_rel, |(k, _)| *k, |(k, _)| *k);
     let joined_out = output(joined.boxed());
 
     // Insert matching pairs for keys 'a' and 'b' in one commit

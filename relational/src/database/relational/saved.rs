@@ -84,13 +84,19 @@ impl<T: Clone + Eq + Hash, R: Op<T>> Op<T> for SavedGetter<T, R> {
     }
 }
 
-/// Create a saved relation.
-pub fn save<T: Eq + Hash, R: Op<T>>(upstream: Relation<R>) -> SavedRelation<T, R> {
-    SavedRelation {
-        state: Rc::new(RefCell::new(SavedState {
-            upstream,
-            consumer_queues: Vec::new(),
-            last_update_commit_id: CommitId::default(),
-        })),
+impl<R> Relation<R> {
+    /// Save this relation for use in multiple places.
+    pub fn save<T>(self) -> SavedRelation<T, R>
+    where
+        T: Eq + Hash,
+        R: Op<T>,
+    {
+        SavedRelation {
+            state: Rc::new(RefCell::new(SavedState {
+                upstream: self,
+                consumer_queues: Vec::new(),
+                last_update_commit_id: CommitId::default(),
+            })),
+        }
     }
 }

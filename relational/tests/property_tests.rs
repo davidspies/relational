@@ -4,7 +4,7 @@
 //! excluding any operations that were inside popped frames.
 
 use proptest::prelude::*;
-use relational::database::{Database, join, map, output, save, union};
+use relational::database::{Database, output};
 
 /// An operation that can be performed on the database.
 #[derive(Debug, Clone)]
@@ -35,12 +35,14 @@ fn apply_ops_with_pop(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
 
     // Set up transitive closure
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let path_rel = save(path_var_rel);
+    let path_rel = path_var_rel.save();
 
-    let edges_saved = save(edges_rel);
-    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = map(extended, |((a, _), (_, c))| (a, c));
-    let all_paths = union(edges_saved.get(), new_paths);
+    let edges_saved = edges_rel.save();
+    let extended = path_rel
+        .get()
+        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
+    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
     let path_out = output(path_rel.get().boxed());
@@ -101,12 +103,14 @@ fn apply_ops_replay_model(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
 
     // Set up transitive closure
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let path_rel = save(path_var_rel);
+    let path_rel = path_var_rel.save();
 
-    let edges_saved = save(edges_rel);
-    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = map(extended, |((a, _), (_, c))| (a, c));
-    let all_paths = union(edges_saved.get(), new_paths);
+    let edges_saved = edges_rel.save();
+    let extended = path_rel
+        .get()
+        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
+    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
     let path_out = output(path_rel.get().boxed());
@@ -284,17 +288,21 @@ fn test_multiple_feedbacks_with_pop() {
 
     // First feedback: transitive closure
     let (reach_var, reach_var_rel) = db.create_variable::<(i32, i32)>();
-    let reach_rel = save(reach_var_rel);
+    let reach_rel = reach_var_rel.save();
 
-    let edges_saved = save(edges_rel);
-    let extended_reach = join(reach_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_reach = map(extended_reach, |((a, _), (_, c))| (a, c));
-    let all_reach = union(edges_saved.get(), new_reach);
+    let edges_saved = edges_rel.save();
+    let extended_reach = reach_rel
+        .get()
+        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
+    let new_reach = extended_reach.map(|((a, _), (_, c))| (a, c));
+    let all_reach = edges_saved.get().union(new_reach);
 
     // Second feedback: count reachable pairs (self-join on reach)
     let (pairs_var, pairs_var_rel) = db.create_variable::<(i32, i32, i32)>();
-    let reach_join = join(reach_rel.get(), reach_rel.get(), |(_, b)| *b, |(b, _)| *b);
-    let triples = map(reach_join, |((a, b), (_, c))| (a, b, c));
+    let reach_join = reach_rel
+        .get()
+        .join(reach_rel.get(), |(_, b)| *b, |(b, _)| *b);
+    let triples = reach_join.map(|((a, b), (_, c))| (a, b, c));
 
     // Set up edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));

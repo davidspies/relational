@@ -65,27 +65,25 @@ where
     }
 }
 
-/// Create a sum relation - sums values by key.
-pub fn sum<T, K, V, FK, FV, R>(
-    input: Relation<R>,
-    key_fn: FK,
-    val_fn: FV,
-) -> Relation<SumOp<T, K, V, FK, FV, R>>
-where
-    K: Eq + Hash,
-    V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
-    FK: Fn(&T) -> K,
-    FV: Fn(&T) -> V,
-    R: Op<T>,
-{
-    Relation {
-        inner: SumOp {
-            inner: input.inner,
-            key_fn,
-            val_fn,
-            sums: HashMap::new(),
-            _phantom: std::marker::PhantomData,
-        },
-        commit_id: input.commit_id,
+impl<R> Relation<R> {
+    /// Sum values by key.
+    pub fn sum<T, K, V, FK, FV>(self, key_fn: FK, val_fn: FV) -> Relation<SumOp<T, K, V, FK, FV, R>>
+    where
+        R: Op<T>,
+        K: Eq + Hash,
+        V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
+        FK: Fn(&T) -> K,
+        FV: Fn(&T) -> V,
+    {
+        Relation {
+            inner: SumOp {
+                inner: self.inner,
+                key_fn,
+                val_fn,
+                sums: HashMap::new(),
+                _phantom: std::marker::PhantomData,
+            },
+            commit_id: self.commit_id,
+        }
     }
 }

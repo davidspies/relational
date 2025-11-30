@@ -32,19 +32,21 @@ where
     }
 }
 
-/// Create a flat_map relation.
-pub fn flat_map<T, U, I, F, R>(input: Relation<R>, f: F) -> Relation<FlatMapOp<T, U, I, F, R>>
-where
-    I: IntoIterator<Item = U>,
-    F: Fn(T) -> I,
-    R: Op<T>,
-{
-    Relation {
-        inner: FlatMapOp {
-            inner: input.inner,
-            f,
-            _phantom: std::marker::PhantomData,
-        },
-        commit_id: input.commit_id,
+impl<R> Relation<R> {
+    /// Transform each tuple into zero or more tuples.
+    pub fn flat_map<T, U, I, F>(self, f: F) -> Relation<FlatMapOp<T, U, I, F, R>>
+    where
+        R: Op<T>,
+        I: IntoIterator<Item = U>,
+        F: Fn(T) -> I,
+    {
+        Relation {
+            inner: FlatMapOp {
+                inner: self.inner,
+                f,
+                _phantom: std::marker::PhantomData,
+            },
+            commit_id: self.commit_id,
+        }
     }
 }

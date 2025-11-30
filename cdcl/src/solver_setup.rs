@@ -1,9 +1,6 @@
 //! CDCL Solver dataflow setup and constructor.
 
-use relational::database::{
-    CommitId, Database, count, difference, distinct, filter, join, map, max, min, output,
-    output_with_sink, union,
-};
+use relational::database::{CommitId, Database, output, output_with_sink};
 
 use super::solver::{Inputs, Outputs, Solver, State};
 use super::types::{ClauseId, Conflict, Level, var};
@@ -25,115 +22,127 @@ impl Solver {
             db.create_input::<(super::types::Lit, Level, ClauseId)>();
 
         // Current level = max(levels)
-        let current_level_rel = max(levels_rel, |_| (), |l| *l);
-        let current_level_rel = map(current_level_rel, |((), level)| level).boxed();
+        let current_level_rel = levels_rel
+            .max(|_| (), |l| *l)
+            .map(|((), level)| level)
+            .boxed();
 
         // All clauses (original + learned)
-        let all_clauses = db.save(union(clauses_rel, learned_rel).boxed());
+        let all_clauses = clauses_rel.union(learned_rel).boxed().save();
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
         let (prep_var, prep_var_rel) =
             db.create_variable::<((super::types::Lit, Level, ClauseId), CommitId)>();
-        let prep_rel = db.save(prep_var_rel);
+        let prep_rel = prep_var_rel.save();
 
         // Final assignments: for each literal, take the entry with minimum CommitId
-        let assignments_with_id = min(
-            prep_rel.get(),
-            |((lit, _, _), _)| *lit,
-            |((_, level, _), id)| (*level, *id),
-        );
-        let assignments =
-            db.save(map(assignments_with_id, |(lit, (level, _id))| (lit, level)).boxed());
+        let assignments_with_id = prep_rel
+            .get()
+            .min(|((lit, _, _), _)| *lit, |((_, level, _), id)| (*level, *id));
+        let assignments = assignments_with_id
+            .map(|(lit, (level, _id))| (lit, level))
+            .boxed()
+            .save();
 
         // Causes: tracks all ways each literal was derived
-        let causes = map(prep_rel.get(), |((lit, level, cid), commit_id)| {
-            ((lit, commit_id), (cid, level))
-        })
-        .boxed();
+        let causes = prep_rel
+            .get()
+            .map(|((lit, level, cid), commit_id)| ((lit, commit_id), (cid, level)))
+            .boxed();
 
         // Derived: which literals are assigned true
-        let assigned = db.save(map(assignments.get(), |(lit, _)| lit).boxed());
+        let assigned = assignments.get().map(|(lit, _)| lit).boxed().save();
 
         // === Compute Units ===
-        let clause_lit_true = join(
-            all_clauses.get(),
-            assigned.get(),
-            |(_, lit)| *lit,
-            |lit| *lit,
-        );
-        let satisfied_clauses = map(clause_lit_true, |((cid, _), _)| cid).boxed();
+        let clause_lit_true = all_clauses
+            .get()
+            .join(assigned.get(), |(_, lit)| *lit, |lit| *lit);
+        let satisfied_clauses = clause_lit_true.map(|((cid, _), _)| cid).boxed();
 
-        let assigned_vars = map(assigned.get(), var).boxed();
-        let clause_lit_with_var = map(all_clauses.get(), |(cid, lit)| (cid, lit, var(lit))).boxed();
-        let clause_assigned_lits = join(clause_lit_with_var, assigned_vars, |(_, _, v)| *v, |v| *v);
-        let clause_assigned_lit_ids =
-            map(clause_assigned_lits, |((cid, lit, _), _)| (cid, lit)).boxed();
+        let assigned_vars = assigned.get().map(var).boxed();
+        let clause_lit_with_var = all_clauses
+            .get()
+            .map(|(cid, lit)| (cid, lit, var(lit)))
+            .boxed();
+        let clause_assigned_lits = clause_lit_with_var.join(assigned_vars, |(_, _, v)| *v, |v| *v);
+        let clause_assigned_lit_ids = clause_assigned_lits
+            .map(|((cid, lit, _), _)| (cid, lit))
+            .boxed();
 
-        let clause_unassigned_lits =
-            db.save(difference(all_clauses.get(), clause_assigned_lit_ids).boxed());
-        let unassigned_count =
-            db.save(count(clause_unassigned_lits.get(), |(cid, _)| *cid).boxed());
+        let clause_unassigned_lits = all_clauses
+            .get()
+            .difference(clause_assigned_lit_ids)
+            .boxed()
+            .save();
+        let unassigned_count = clause_unassigned_lits
+            .get()
+            .count(|(cid, _)| *cid)
+            .boxed()
+            .save();
 
-        let unit_candidate_clauses = filter(unassigned_count.get(), |(_, cnt)| *cnt == 1);
-        let unit_clause_ids = map(unit_candidate_clauses, |(cid, _)| cid).boxed();
+        let unit_candidate_clauses = unassigned_count.get().filter(|(_, cnt)| *cnt == 1);
+        let unit_clause_ids = unit_candidate_clauses.map(|(cid, _)| cid).boxed();
 
-        let units_with_lit = join(
-            unit_clause_ids,
-            clause_unassigned_lits.get(),
-            |cid| *cid,
-            |(cid, _)| *cid,
-        );
-        let potential_units = db.save(map(units_with_lit, |(cid, (_, lit))| (cid, lit)).boxed());
+        let units_with_lit =
+            unit_clause_ids.join(clause_unassigned_lits.get(), |cid| *cid, |(cid, _)| *cid);
+        let potential_units = units_with_lit
+            .map(|(cid, (_, lit))| (cid, lit))
+            .boxed()
+            .save();
 
-        let satisfied_set = db.save(satisfied_clauses);
-        let unit_clause_sat_check = join(
-            potential_units.get(),
-            satisfied_set.get(),
-            |(cid, _)| *cid,
-            |cid| *cid,
-        );
-        let units_from_sat = map(unit_clause_sat_check, |((cid, lit), _)| (cid, lit)).boxed();
+        let satisfied_set = satisfied_clauses.save();
+        let unit_clause_sat_check =
+            potential_units
+                .get()
+                .join(satisfied_set.get(), |(cid, _)| *cid, |cid| *cid);
+        let units_from_sat = unit_clause_sat_check
+            .map(|((cid, lit), _)| (cid, lit))
+            .boxed();
 
-        let units = difference(potential_units.get(), units_from_sat).boxed();
+        let units = potential_units.get().difference(units_from_sat).boxed();
 
         // === Conflict Detection ===
-        let all_clause_ids = map(all_clauses.get(), |(cid, _)| cid).boxed();
-        let all_clause_ids_distinct = distinct(all_clause_ids).boxed();
-        let clauses_with_unassigned = map(unassigned_count.get(), |(cid, _)| cid).boxed();
-        let fully_assigned_clauses =
-            difference(all_clause_ids_distinct, clauses_with_unassigned).boxed();
-        let satisfied_distinct = distinct(satisfied_set.get()).boxed();
-        let clause_conflicts = difference(fully_assigned_clauses, satisfied_distinct).boxed();
+        let all_clause_ids = all_clauses.get().map(|(cid, _)| cid).boxed();
+        let all_clause_ids_distinct = all_clause_ids.distinct().boxed();
+        let clauses_with_unassigned = unassigned_count.get().map(|(cid, _)| cid).boxed();
+        let fully_assigned_clauses = all_clause_ids_distinct
+            .difference(clauses_with_unassigned)
+            .boxed();
+        let satisfied_distinct = satisfied_set.get().distinct().boxed();
+        let clause_conflicts = fully_assigned_clauses
+            .difference(satisfied_distinct)
+            .boxed();
 
-        let assigned_with_var = db.save(map(assigned.get(), |lit| (lit, var(lit))).boxed());
-        let both_polarities = join(
-            assigned_with_var.get(),
-            assigned_with_var.get(),
-            |(_, v)| *v,
-            |(_, v)| *v,
-        );
-        let conflicting_pairs = filter(both_polarities, |((lit1, _), (lit2, _))| lit1 != lit2);
-        let direct_conflict_vars = map(conflicting_pairs, |((_, v), _)| v).boxed();
-        let direct_conflict_vars_distinct = distinct(direct_conflict_vars).boxed();
+        let assigned_with_var = assigned.get().map(|lit| (lit, var(lit))).boxed().save();
+        let both_polarities =
+            assigned_with_var
+                .get()
+                .join(assigned_with_var.get(), |(_, v)| *v, |(_, v)| *v);
+        let conflicting_pairs = both_polarities.filter(|((lit1, _), (lit2, _))| lit1 != lit2);
+        let direct_conflict_vars = conflicting_pairs.map(|((_, v), _)| v).boxed();
+        let direct_conflict_vars_distinct = direct_conflict_vars.distinct().boxed();
 
-        let clause_conflict_enums = map(clause_conflicts, Conflict::EmptyClause).boxed();
-        let direct_conflict_enums = map(direct_conflict_vars_distinct, |v| {
-            Conflict::DirectConflict(v)
-        })
-        .boxed();
+        let clause_conflict_enums = clause_conflicts.map(Conflict::EmptyClause).boxed();
+        let direct_conflict_enums = direct_conflict_vars_distinct
+            .map(Conflict::DirectConflict)
+            .boxed();
 
-        let conflicts = db.save(union(clause_conflict_enums, direct_conflict_enums).boxed());
+        let conflicts = clause_conflict_enums
+            .union(direct_conflict_enums)
+            .boxed()
+            .save();
 
         // === Set up interrupts for early conflict detection ===
         db.interrupt(conflicts.get());
 
         // === Set up the feedback loop ===
-        let unit_with_level = join(units, current_level_rel, |_| (), |_| ());
-        let unit_lit_level_cid =
-            map(unit_with_level, |((cid, lit), level)| (lit, level, cid)).boxed();
+        let unit_with_level = units.join(current_level_rel, |_| (), |_| ());
+        let unit_lit_level_cid = unit_with_level
+            .map(|((cid, lit), level)| (lit, level, cid))
+            .boxed();
 
-        let all_new_assignments = union(decision_assignments_rel, unit_lit_level_cid).boxed();
+        let all_new_assignments = decision_assignments_rel.union(unit_lit_level_cid).boxed();
 
         db.feedback_with_id(prep_var, all_new_assignments);
 

@@ -5,7 +5,7 @@ use std::hash::Hash;
 
 use crate::change::Diff;
 
-use super::ops_distinct::{DistinctOp, distinct};
+use super::ops_distinct::DistinctOp;
 use super::relation::{Op, Relation, assert_same_commit_id};
 
 /// A negate operator - negates all diffs.
@@ -28,17 +28,19 @@ where
     }
 }
 
-/// Create a negate relation.
-pub fn negate<T, R>(input: Relation<R>) -> Relation<NegateOp<T, R>>
-where
-    R: Op<T>,
-{
-    Relation {
-        inner: NegateOp {
-            inner: input.inner,
-            _phantom: std::marker::PhantomData,
-        },
-        commit_id: input.commit_id,
+impl<R> Relation<R> {
+    /// Negate all diffs.
+    pub fn negate<T>(self) -> Relation<NegateOp<T, R>>
+    where
+        R: Op<T>,
+    {
+        Relation {
+            inner: NegateOp {
+                inner: self.inner,
+                _phantom: std::marker::PhantomData,
+            },
+            commit_id: self.commit_id,
+        }
     }
 }
 
@@ -83,26 +85,28 @@ where
     }
 }
 
-/// Create a difference relation (left - right).
-pub fn difference<T, L, R>(left: Relation<L>, right: Relation<R>) -> Relation<DifferenceOp<T, L, R>>
-where
-    L: Op<T>,
-    R: Op<T>,
-{
-    assert_same_commit_id(&left.commit_id, &right.commit_id);
-    let commit_id = left.commit_id.clone();
-    let union = DifferenceUnion {
-        left: left.inner,
-        right: NegateOp {
-            inner: right.inner,
+impl<L> Relation<L> {
+    /// Set difference (self - right).
+    pub fn difference<T, R>(self, right: Relation<R>) -> Relation<DifferenceOp<T, L, R>>
+    where
+        L: Op<T>,
+        R: Op<T>,
+    {
+        assert_same_commit_id(&self.commit_id, &right.commit_id);
+        let commit_id = self.commit_id.clone();
+        let union = DifferenceUnion {
+            left: self.inner,
+            right: NegateOp {
+                inner: right.inner,
+                _phantom: std::marker::PhantomData,
+            },
             _phantom: std::marker::PhantomData,
-        },
-        _phantom: std::marker::PhantomData,
-    };
-    Relation {
-        inner: DifferenceOp {
-            inner: distinct(Relation::new(union, commit_id.clone())).inner,
-        },
-        commit_id,
+        };
+        Relation {
+            inner: DifferenceOp {
+                inner: Relation::new(union, commit_id.clone()).distinct().inner,
+            },
+            commit_id,
+        }
     }
 }

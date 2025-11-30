@@ -26,19 +26,21 @@ where
     }
 }
 
-/// Create a union relation.
-pub fn union<T, L, R>(left: Relation<L>, right: Relation<R>) -> Relation<UnionOp<T, L, R>>
-where
-    L: Op<T>,
-    R: Op<T>,
-{
-    assert_same_commit_id(&left.commit_id, &right.commit_id);
-    Relation {
-        inner: UnionOp {
-            left: left.inner,
-            right: right.inner,
-            _phantom: std::marker::PhantomData,
-        },
-        commit_id: left.commit_id,
+impl<L> Relation<L> {
+    /// Combine two relations.
+    pub fn union<T, R>(self, right: Relation<R>) -> Relation<UnionOp<T, L, R>>
+    where
+        L: Op<T>,
+        R: Op<T>,
+    {
+        assert_same_commit_id(&self.commit_id, &right.commit_id);
+        Relation {
+            inner: UnionOp {
+                left: self.inner,
+                right: right.inner,
+                _phantom: std::marker::PhantomData,
+            },
+            commit_id: self.commit_id,
+        }
     }
 }

@@ -1,6 +1,6 @@
 //! Tests for Database.
 
-use crate::database::{Database, Op, join, map, output, save, union};
+use crate::database::{Database, Op, output};
 
 /// Test that re-inserting already-present item during push doesn't affect pop.
 #[test]
@@ -42,12 +42,14 @@ fn test_pop_transitive_closure() {
 
     // Set up transitive closure: path = edges ∪ (path ⋈ edges)
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-    let path_rel = save(path_var_rel);
+    let path_rel = path_var_rel.save();
 
-    let edges_saved = save(edges_rel);
-    let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = map(extended, |((a, _), (_, c))| (a, c));
-    let all_paths = union(edges_saved.get(), new_paths);
+    let edges_saved = edges_rel.save();
+    let extended = path_rel
+        .get()
+        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
+    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
     let path_out = output(path_rel.get().boxed());

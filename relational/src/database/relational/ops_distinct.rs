@@ -47,16 +47,18 @@ where
     }
 }
 
-/// Create a distinct relation.
-pub fn distinct<T, R>(input: Relation<R>) -> Relation<DistinctOp<T, R>>
-where
-    R: Op<T>,
-{
-    Relation {
-        inner: DistinctOp {
-            inner: input.inner,
-            counts: HashMap::new(),
-        },
-        commit_id: input.commit_id,
+impl<R> Relation<R> {
+    /// Collapse multiplicities to 0 or 1.
+    pub fn distinct<T>(self) -> Relation<DistinctOp<T, R>>
+    where
+        R: Op<T>,
+    {
+        Relation {
+            inner: DistinctOp {
+                inner: self.inner,
+                counts: HashMap::new(),
+            },
+            commit_id: self.commit_id,
+        }
     }
 }

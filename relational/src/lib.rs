@@ -11,24 +11,24 @@
 //! # Example: Transitive Closure
 //!
 //! ```
-//! use relational::database::{Database, Op, join, map, output, save, union};
+//! use relational::database::{Database, Op, output};
 //!
 //! let mut db = Database::new();
 //!
 //! // Create input relation for edges
 //! let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
-//! let mut edges = save(edges_rel);
+//! let mut edges = edges_rel.save();
 //!
 //! // Create a variable for the recursive computation
 //! let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
-//! let mut path_rel = save(path_var_rel);
+//! let mut path_rel = path_var_rel.save();
 //!
 //! // path(a, c) :- path(a, b), edge(b, c)
-//! let extended = join(path_rel.get(), edges.get(), |(_, b)| *b, |(b, _)| *b);
-//! let new_paths = map(extended, |((a, _), (_, c))| (a, c));
+//! let extended = path_rel.get().join(edges.get(), |(_, b)| *b, |(b, _)| *b);
+//! let new_paths = extended.map(|((a, _), (_, c))| (a, c));
 //!
 //! // path = edges ∪ new_paths
-//! let all_paths = union(edges.get(), new_paths);
+//! let all_paths = edges.get().union(new_paths);
 //!
 //! // Wire up the feedback loop
 //! db.feedback(path_var, all_paths);
@@ -50,12 +50,12 @@
 //! # Example: Using Push/Pop Checkpoints
 //!
 //! ```
-//! use relational::database::{Database, Op, map, output, save};
+//! use relational::database::{Database, Op, output};
 //!
 //! let mut db = Database::new();
 //! let (mut numbers_h, numbers_rel) = db.create_input::<i32>();
-//! let mut numbers = save(numbers_rel);
-//! let doubled = map(numbers.get(), |n| n * 2);
+//! let mut numbers = numbers_rel.save();
+//! let doubled = numbers.get().map(|n| n * 2);
 //! let mut doubled_out = output(doubled.boxed());
 //! let mut numbers_out = output(numbers.get().boxed());
 //!

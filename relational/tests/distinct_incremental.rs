@@ -4,7 +4,7 @@
 //! When input state is already updated (NEW state) before the incremental function
 //! runs, it must reconstruct OLD state by reversing the changes.
 
-use relational::database::{Database, difference, distinct, join, map, output, save};
+use relational::database::{Database, output};
 
 /// Test: distinct after map produces correct results.
 /// This is the pattern used in CDCL: map extracts clause IDs, distinct deduplicates.
@@ -16,8 +16,8 @@ fn test_distinct_after_map() {
     let (mut clauses, clauses_rel) = db.create_input::<(i32, i32)>();
 
     // Extract clause IDs and deduplicate
-    let clause_ids = map(clauses_rel, |(cid, _)| cid);
-    let clause_ids_distinct = distinct(clause_ids);
+    let clause_ids = clauses_rel.map(|(cid, _)| cid);
+    let clause_ids_distinct = clause_ids.distinct();
     let out = output(clause_ids_distinct.boxed());
 
     // Add clauses: clause 1 has literals 1 and 2, clause 2 has literal -1
@@ -43,7 +43,7 @@ fn test_distinct_incremental_insert() {
     let mut db = Database::new();
 
     let (mut input, input_rel) = db.create_input::<i32>();
-    let distinct_rel = distinct(input_rel);
+    let distinct_rel = input_rel.distinct();
     let out = output(distinct_rel.boxed());
 
     // Initial state: one copy of 1
@@ -71,7 +71,7 @@ fn test_distinct_incremental_with_pop() {
     let mut db = Database::new();
 
     let (mut input, input_rel) = db.create_input::<i32>();
-    let distinct_rel = distinct(input_rel);
+    let distinct_rel = input_rel.distinct();
     let out = output(distinct_rel.boxed());
 
     // Initial state: 1
@@ -106,7 +106,7 @@ fn test_distinct_with_push_pop() {
     let mut db = Database::new();
 
     let (mut input, input_rel) = db.create_input::<i32>();
-    let distinct_rel = distinct(input_rel);
+    let distinct_rel = input_rel.distinct();
     let out = output(distinct_rel.boxed());
 
     // Initial state
@@ -146,24 +146,21 @@ fn test_cdcl_pattern() {
     let (mut assigned, assigned_rel) = db.create_input::<i32>();
 
     // Save clauses_rel so we can use it in multiple places
-    let saved_clauses = save(clauses_rel);
+    let saved_clauses = clauses_rel.save();
 
     // Clause literals that are true (satisfied)
-    let clause_lit_true = join(
-        saved_clauses.get(),
-        assigned_rel,
-        |(_, lit)| *lit,
-        |lit| *lit,
-    );
-    let satisfied_clauses = map(clause_lit_true, |((cid, _), _)| cid);
-    let satisfied_distinct = distinct(satisfied_clauses);
+    let clause_lit_true = saved_clauses
+        .get()
+        .join(assigned_rel, |(_, lit)| *lit, |lit| *lit);
+    let satisfied_clauses = clause_lit_true.map(|((cid, _), _)| cid);
+    let satisfied_distinct = satisfied_clauses.distinct();
 
     // All clause IDs
-    let all_clause_ids = map(saved_clauses.get(), |(cid, _)| cid);
-    let all_clause_ids_distinct = distinct(all_clause_ids);
+    let all_clause_ids = saved_clauses.get().map(|(cid, _)| cid);
+    let all_clause_ids_distinct = all_clause_ids.distinct();
 
     // Clauses that are NOT satisfied
-    let unsatisfied = difference(all_clause_ids_distinct, satisfied_distinct);
+    let unsatisfied = all_clause_ids_distinct.difference(satisfied_distinct);
     let unsatisfied_out = output(unsatisfied.boxed());
 
     // Add clauses: (x1) AND (NOT x1) - unsatisfiable
@@ -212,7 +209,7 @@ fn test_distinct_multiplicity() {
     let mut db = Database::new();
 
     let (mut input, input_rel) = db.create_input::<i32>();
-    let distinct_rel = distinct(input_rel);
+    let distinct_rel = input_rel.distinct();
     let out = output(distinct_rel.boxed());
 
     // Add same value multiple times

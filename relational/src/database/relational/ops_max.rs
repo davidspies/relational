@@ -76,27 +76,25 @@ where
     }
 }
 
-/// Create a max relation - maximum value by key.
-pub fn max<T, K, V, FK, FV, R>(
-    input: Relation<R>,
-    key_fn: FK,
-    val_fn: FV,
-) -> Relation<MaxOp<T, K, V, FK, FV, R>>
-where
-    K: Eq + Hash,
-    V: Ord,
-    FK: Fn(&T) -> K,
-    FV: Fn(&T) -> V,
-    R: Op<T>,
-{
-    Relation {
-        inner: MaxOp {
-            inner: input.inner,
-            key_fn,
-            val_fn,
-            values: HashMap::new(),
-            _phantom: std::marker::PhantomData,
-        },
-        commit_id: input.commit_id,
+impl<R> Relation<R> {
+    /// Maximum value by key.
+    pub fn max<T, K, V, FK, FV>(self, key_fn: FK, val_fn: FV) -> Relation<MaxOp<T, K, V, FK, FV, R>>
+    where
+        R: Op<T>,
+        K: Eq + Hash,
+        V: Ord,
+        FK: Fn(&T) -> K,
+        FV: Fn(&T) -> V,
+    {
+        Relation {
+            inner: MaxOp {
+                inner: self.inner,
+                key_fn,
+                val_fn,
+                values: HashMap::new(),
+                _phantom: std::marker::PhantomData,
+            },
+            commit_id: self.commit_id,
+        }
     }
 }
