@@ -101,13 +101,13 @@
 mod change;
 mod checkpoint;
 mod collection;
-mod database;
+pub mod database;
 pub mod database2;
 mod dataflow;
-pub mod operators;
+pub(crate) mod operators;
 mod relation;
 
-pub use change::{Change, Diff};
+pub use change::Diff;
 pub use checkpoint::Checkpoint;
 pub use collection::Multiset;
 pub use database::{CommitId, Database};

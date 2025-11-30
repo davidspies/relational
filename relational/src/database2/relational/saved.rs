@@ -39,7 +39,7 @@ pub struct SavedRelation<T: Tuple, R: Relation<T>> {
 
 impl<T: Tuple + 'static, R: Relation<T>> SavedRelation<T, R> {
     /// Create a new saved relation from an upstream relation.
-    pub fn new(upstream: R) -> Self {
+    pub(crate) fn new(upstream: R) -> Self {
         SavedRelation {
             state: Rc::new(RefCell::new(SavedState {
                 upstream,

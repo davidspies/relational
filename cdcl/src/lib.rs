@@ -15,5 +15,4 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use solver::Solver;
-pub use types::{ClauseId, Conflict, Level, Lit, Var};
+pub(crate) use solver::Solver;

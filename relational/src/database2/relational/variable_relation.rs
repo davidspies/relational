@@ -5,27 +5,37 @@ use std::rc::Rc;
 
 use crate::Tuple;
 use crate::change::Diff;
-use crate::database2::feedback::Variable;
+use crate::database2::feedback::Variable as InternalVariable;
 
 use super::relation::Relation;
 
-/// A relation that reads changes from a Variable.
+/// A handle for a feedback variable.
 ///
-/// Used in feedback loops to connect a Variable's output to downstream operators.
-pub struct VariableRelation<T: Tuple> {
-    variable: Rc<RefCell<Variable<T>>>,
+/// Created by `Database2::create_variable()` and passed to `Database2::feedback()`
+/// to wire up the input relation.
+pub struct Variable<T: Tuple> {
+    pub(crate) inner: Rc<RefCell<InternalVariable<T>>>,
 }
 
-impl<T: Tuple> VariableRelation<T> {
-    /// Create a new VariableRelation wrapping the given Variable.
-    pub fn new(variable: Rc<RefCell<Variable<T>>>) -> Self {
-        VariableRelation { variable }
+impl<T: Tuple> Clone for Variable<T> {
+    fn clone(&self) -> Self {
+        Variable {
+            inner: self.inner.clone(),
+        }
     }
+}
+
+/// A relation that reads changes from a feedback variable.
+///
+/// Created by `Database2::create_variable()`. Use this in your dataflow graph
+/// to read the variable's output.
+pub struct VariableRelation<T: Tuple> {
+    pub(crate) inner: Rc<RefCell<InternalVariable<T>>>,
 }
 
 impl<T: Tuple + 'static> Relation<T> for VariableRelation<T> {
     fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
-        let mut var = self.variable.borrow_mut();
+        let mut var = self.inner.borrow_mut();
         let changes = var.take_changes();
         for (tuple, diff) in changes {
             consumer(tuple, diff);

@@ -24,21 +24,21 @@ mod saved;
 mod variable_relation;
 
 // Core types - InputHandle and InputRelation are created via Database2::create_input()
-pub use input::{InputHandle, InputRelation, PersistentInputHandle};
+pub use input::{InputHandle, PersistentInputHandle};
 pub use relation::Relation;
-pub use saved::{SavedGetter, SavedRelation, save};
-pub use variable_relation::VariableRelation;
+pub use saved::save;
+pub use variable_relation::{Variable, VariableRelation};
 
 // Operators
 pub use ops_count::count;
-pub use ops_difference::{DifferenceRelation, NegateRelation, difference, negate};
-pub use ops_distinct::{DistinctRelation, distinct};
+pub use ops_difference::{difference, negate};
+pub use ops_distinct::distinct;
 pub use ops_filter::filter;
-pub use ops_flat_map::{FlatMapRelation, flat_map};
-pub use ops_join::{JoinRelation, join};
+pub use ops_flat_map::flat_map;
+pub use ops_join::join;
 pub use ops_map::map;
-pub use ops_max::{MaxRelation, max};
+pub use ops_max::max;
 pub use ops_min::min;
-pub use ops_sum::{SumRelation, sum};
-pub use ops_union::{UnionRelation, union};
+pub use ops_sum::sum;
+pub use ops_union::union;
 pub use output::{Output, output};

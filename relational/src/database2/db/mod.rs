@@ -8,9 +8,12 @@ use std::rc::Rc;
 use crate::Tuple;
 
 use super::commit_id::CommitId;
-use super::feedback::Variable;
+use super::feedback::Variable as InternalVariable;
 use super::relational::input::InputState;
-use super::relational::{InputHandle, InputRelation, PersistentInputHandle, Relation};
+use super::relational::{
+    InputHandle, PersistentInputHandle, Relation, Variable, VariableRelation,
+    input::InputRelation,
+};
 
 use wrappers::{
     AnyFeedback, AnyInput, AnyInterrupt, FeedbackWithIdWrapper, FeedbackWrapper, InputWrapper,
@@ -50,7 +53,7 @@ impl Database2 {
     }
 
     /// Get the current commit ID.
-    pub fn commit_id(&self) -> CommitId {
+    pub(crate) fn commit_id(&self) -> CommitId {
         self.commit_id.get()
     }
 
@@ -95,6 +98,26 @@ impl Database2 {
         };
 
         (handle, relation)
+    }
+
+    /// Create a feedback variable.
+    ///
+    /// Returns a `Variable` handle (to pass to `feedback()`) and a `VariableRelation`
+    /// (to use in your dataflow graph).
+    ///
+    /// # Example
+    /// ```ignore
+    /// let (var, var_rel) = db.create_variable::<i32>();
+    /// let derived = map(var_rel, |x| x * 2);
+    /// db.feedback(var, some_input_relation);
+    /// ```
+    pub fn create_variable<T: Tuple + 'static>(&self) -> (Variable<T>, VariableRelation<T>) {
+        let inner = Rc::new(RefCell::new(InternalVariable::new()));
+        let var = Variable {
+            inner: inner.clone(),
+        };
+        let rel = VariableRelation { inner };
+        (var, rel)
     }
 
     /// Commit staged changes and run stratified fixpoint.
@@ -150,10 +173,10 @@ impl Database2 {
     /// This immediately runs stratified fixpoint to compute initial values.
     pub fn feedback<T: Tuple + 'static, R: Relation<T> + 'static>(
         &mut self,
-        variable: Rc<RefCell<Variable<T>>>,
+        variable: Variable<T>,
         input: R,
     ) {
-        let wrapper = FeedbackWrapper::new(variable, input);
+        let wrapper = FeedbackWrapper::new(variable.inner, input);
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.feedbacks.push(Box::new(wrapper));
 
@@ -171,10 +194,10 @@ impl Database2 {
     /// When a tuple T is first seen, it's added to the variable with the current commit ID.
     pub fn feedback_with_id<T: Tuple + 'static, R: Relation<T> + 'static>(
         &mut self,
-        variable: Rc<RefCell<Variable<(T, CommitId)>>>,
+        variable: Variable<(T, CommitId)>,
         input: R,
     ) {
-        let wrapper = FeedbackWithIdWrapper::new(variable, input, self.commit_id.clone());
+        let wrapper = FeedbackWithIdWrapper::new(variable.inner, input, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.feedbacks.push(Box::new(wrapper));
     }
@@ -288,7 +311,7 @@ impl Database2 {
     }
 
     /// Set maximum iterations for fixpoint.
-    pub fn set_max_iterations(&mut self, max: usize) {
+    pub(crate) fn set_max_iterations(&mut self, max: usize) {
         self.max_iterations = max;
     }
 }

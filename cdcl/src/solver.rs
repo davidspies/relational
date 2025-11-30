@@ -5,7 +5,7 @@ use relational::database2::{CommitId, Database2, InputHandle, Output, Persistent
 use super::types::{ClauseId, Conflict, Level, Lit, Var};
 
 /// CDCL SAT Solver.
-pub struct Solver {
+pub(crate) struct Solver {
     pub(super) db: Database2,
 
     // === Input Handles ===
@@ -53,7 +53,7 @@ pub struct Solver {
 
 impl Solver {
     /// Add an original clause to the solver.
-    pub fn add_clause(&mut self, clause_id: ClauseId, literals: &[Lit]) {
+    pub(crate) fn add_clause(&mut self, clause_id: ClauseId, literals: &[Lit]) {
         for &lit in literals {
             self.clauses.insert((clause_id, lit));
         }
@@ -75,13 +75,13 @@ impl Solver {
     }
 
     /// Make a decision: assign a literal at a new decision level.
-    pub fn decide(&mut self, lit: Lit) {
+    pub(crate) fn decide(&mut self, lit: Lit) {
         self.decide_internal(lit, false);
     }
 
     /// Propagate units until fixpoint or conflict.
     /// Returns Ok(()) if no conflict, Err(conflict) if conflict found.
-    pub fn propagate(&mut self) -> Result<(), Conflict> {
+    pub(crate) fn propagate(&mut self) -> Result<(), Conflict> {
         let conflicts: Vec<_> = self.conflicts.collect();
         if let Some(&conflict) = conflicts.first() {
             return Err(conflict);
@@ -90,7 +90,7 @@ impl Solver {
     }
 
     /// Backtrack to the given level, popping decision stack entries.
-    pub fn backtrack_to(&mut self, level: Level) {
+    pub(crate) fn backtrack_to(&mut self, level: Level) {
         while self.current_level > level {
             self.db.pop();
             self.decision_stack.pop();
@@ -99,7 +99,7 @@ impl Solver {
     }
 
     /// Learn a clause (adds to persistent learned relation).
-    pub fn learn_clause(&mut self, literals: &[Lit]) -> ClauseId {
+    pub(crate) fn learn_clause(&mut self, literals: &[Lit]) -> ClauseId {
         let cid = self.next_learned_id;
         self.next_learned_id = ClauseId::new(self.next_learned_id.raw() + 1);
         for &lit in literals {

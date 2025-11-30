@@ -10,7 +10,6 @@ use relational::database2::{
 
 /// Helper to collect output after update.
 fn collect_output<T: relational::Tuple + Clone>(out: &mut Output<T>) -> Vec<T> {
-    out.update();
     out.collect()
 }
 
@@ -34,7 +33,7 @@ fn test_distinct_after_map() {
     clauses.insert((2, -1));
     db.commit();
 
-    let mut result = collect_output(&mut out);
+    let mut result = out.collect();
     result.sort();
 
     assert_eq!(
@@ -58,14 +57,14 @@ fn test_distinct_incremental_insert() {
     input.insert(1);
     db.commit();
 
-    assert_eq!(collect_output(&mut out), vec![1]);
+    assert_eq!(out.collect(), vec![1]);
 
     // Add another copy of 1 (multiplicity 2) and add 2
     input.insert(1);
     input.insert(2);
     db.commit();
 
-    let mut result = collect_output(&mut out);
+    let mut result = out.collect();
     result.sort();
 
     // distinct should still show 1 (now with mult 2 in input) and 2
@@ -86,7 +85,7 @@ fn test_distinct_incremental_with_pop() {
     input.insert(1);
     db.commit();
 
-    let mut result = collect_output(&mut out);
+    let mut result = out.collect();
     result.sort();
     assert_eq!(result, vec![1]);
 
@@ -95,14 +94,14 @@ fn test_distinct_incremental_with_pop() {
     input.insert(2);
     db.commit();
 
-    let mut result = collect_output(&mut out);
+    let mut result = out.collect();
     result.sort();
     assert_eq!(result, vec![1, 2]);
 
     // Pop - 2 should be removed, 1 should remain
     db.pop();
 
-    assert_eq!(collect_output(&mut out), vec![1]);
+    assert_eq!(out.collect(), vec![1]);
 }
 
 /// Test: distinct with push/pop correctly restores state.
@@ -121,7 +120,7 @@ fn test_distinct_with_push_pop() {
     input.insert(2);
     db.commit();
 
-    let initial = collect_output(&mut out);
+    let initial = out.collect();
     assert_eq!(initial.len(), 2);
 
     // Push checkpoint and add more
@@ -129,13 +128,13 @@ fn test_distinct_with_push_pop() {
     input.insert(3);
     db.commit();
 
-    let during = collect_output(&mut out);
+    let during = out.collect();
     assert_eq!(during.len(), 3);
 
     // Pop should restore to initial state
     db.pop();
 
-    let mut after = collect_output(&mut out);
+    let mut after = out.collect();
     after.sort();
     assert_eq!(after, vec![1, 2], "distinct should be restored after pop");
 }
@@ -227,7 +226,6 @@ fn test_distinct_multiplicity() {
     db.commit();
 
     // Check that distinct output has exactly one tuple
-    out.update();
     let result = out.collect();
     assert_eq!(result.len(), 1, "Should have exactly one distinct tuple");
     assert_eq!(result[0], 1);
@@ -238,7 +236,6 @@ fn test_distinct_multiplicity() {
     db.commit();
 
     // Still exactly one tuple
-    out.update();
     let result_after = out.collect();
     assert_eq!(result_after.len(), 1);
     assert_eq!(result_after[0], 1);

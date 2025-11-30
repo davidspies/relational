@@ -1,11 +1,8 @@
 //! CDCL Solver dataflow setup and constructor.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use relational::database2::{
-    CommitId, Database2, Output, Relation, Variable, VariableRelation, count, difference, distinct,
-    filter, join, map, max, min, output, save, union,
+    CommitId, Database2, Output, Relation, count, difference, distinct, filter, join, map, max,
+    min, output, save, union,
 };
 
 use super::solver::Solver;
@@ -13,7 +10,7 @@ use super::types::{ClauseId, Conflict, Level, var};
 
 impl Solver {
     /// Create a new solver for the given number of variables.
-    pub fn new(num_vars: super::types::Var) -> Self {
+    pub(crate) fn new(num_vars: super::types::Var) -> Self {
         let mut db = Database2::new();
 
         // === Input Relations ===
@@ -29,18 +26,18 @@ impl Solver {
 
         // Current level = max(levels)
         let current_level_rel = max(levels_rel, |_| (), |l| *l);
-        let current_level_rel = map(current_level_rel, |((), level)| level).boxed();
+        let current_level_rel = map(current_level_rel, |((), level)| level);
 
         // All clauses (original + learned)
         let mut all_clauses = save(union(clauses_rel, learned_rel).boxed());
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
-        let prep_var = Rc::new(RefCell::new(Variable::<(
+        let (prep_var, prep_var_rel) = db.create_variable::<(
             (super::types::Lit, Level, ClauseId),
             CommitId,
-        )>::new()));
-        let mut prep_rel = save(VariableRelation::new(prep_var.clone()));
+        )>();
+        let mut prep_rel = save(prep_var_rel);
 
         // Final assignments: for each literal, take the entry with minimum CommitId
         let assignments_with_id = min(
@@ -158,13 +155,6 @@ impl Solver {
         let mut assigned_out: Output<super::types::Lit> = output(assigned.get().boxed());
         let mut units_out: Output<(ClauseId, super::types::Lit)> = output(units.get().boxed());
         let mut conflicts_out: Output<Conflict> = output(conflicts.boxed());
-
-        // Pull initial state
-        assignments_out.update();
-        causes_out.update();
-        assigned_out.update();
-        units_out.update();
-        conflicts_out.update();
 
         Solver {
             db,

@@ -16,11 +16,11 @@ use super::relation::Relation;
 /// The internal state of an input relation (seen-set semantics).
 pub(crate) struct InputState<T: Tuple> {
     /// The seen set - tuples that have been inserted.
-    pub seen: HashSet<T>,
+    pub(crate) seen: HashSet<T>,
     /// Pending changes (ready to be pulled) - accumulated diffs per tuple.
-    pub pending: Multiset<T>,
+    pub(crate) pending: Multiset<T>,
     /// Tuples newly inserted in the current batch (since last take_new_inserts).
-    pub new_inserts: HashSet<T>,
+    pub(crate) new_inserts: HashSet<T>,
 }
 
 impl<T: Tuple> InputState<T> {
@@ -93,13 +93,6 @@ impl<T: Tuple + 'static> InputHandle<T> {
     pub fn insert(&mut self, tuple: T) {
         self.state.borrow_mut().insert(tuple);
     }
-
-    /// Get a relation handle for this input.
-    pub fn relation(&self) -> InputRelation<T> {
-        InputRelation {
-            state: self.state.clone(),
-        }
-    }
 }
 
 /// A handle for inserting and deleting tuples in a persistent input relation.
@@ -127,13 +120,6 @@ impl<T: Tuple + 'static> PersistentInputHandle<T> {
             true
         } else {
             false
-        }
-    }
-
-    /// Get a relation handle for this input.
-    pub fn relation(&self) -> InputRelation<T> {
-        InputRelation {
-            state: self.state.clone(),
         }
     }
 }

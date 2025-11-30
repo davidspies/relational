@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use super::relational::*;
 use super::*;
 
 /// Helper to collect changes into a HashMap of tuple -> total diff
@@ -478,101 +479,91 @@ fn test_min_via_max_reverse() {
 // =============================================================================
 // Ported tests from database/tests.rs
 // =============================================================================
+#[test]
+fn test_create_and_insert() {
+    let mut db = Database2::new();
+    let (mut handle, mut rel) = db.create_input::<(i32, i32)>();
 
-mod ported_tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    handle.insert((1, 2));
+    handle.insert((2, 3));
+    db.commit();
 
-    use super::super::feedback::Variable;
-    use super::super::{Database2, join, map, save, union};
-    use super::collect_to_map;
+    let result = collect_to_map(&mut rel);
+    assert_eq!(result.len(), 2);
+    assert_eq!(result.get(&(1, 2)), Some(&1));
+    assert_eq!(result.get(&(2, 3)), Some(&1));
+}
 
-    #[test]
-    fn test_create_and_insert() {
-        let mut db = Database2::new();
-        let (mut handle, mut rel) = db.create_input::<(i32, i32)>();
+#[test]
+fn test_transitive_closure() {
+    let mut db = Database2::new();
+    let (mut handle, edges) = db.create_input::<(i32, i32)>();
 
-        handle.insert((1, 2));
-        handle.insert((2, 3));
-        db.commit();
+    // Create the path variable
+    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut path_rel = save(path_var_rel);
 
-        let result = collect_to_map(&mut rel);
-        assert_eq!(result.len(), 2);
-        assert_eq!(result.get(&(1, 2)), Some(&1));
-        assert_eq!(result.get(&(2, 3)), Some(&1));
-    }
+    // path = edges ∪ (path ⋈ edges).map(|(p, e)| (p.0, e.1))
+    let mut saved_edges = save(edges);
+    let edges_for_union = saved_edges.get();
+    let edges_for_join = saved_edges.get();
 
-    #[test]
-    fn test_transitive_closure() {
-        let mut db = Database2::new();
-        let (mut handle, edges) = db.create_input::<(i32, i32)>();
+    // Recursive case: extend paths by one edge
+    // path(a, c) :- path(a, b), edge(b, c)
+    let extended = join(path_rel.get(), edges_for_join, |p| p.1, |e| e.0);
+    let new_paths = map(extended, |((a, _), (_, c))| (a, c));
 
-        // Create graph: 1->2->3->4
-        handle.insert((1, 2));
-        handle.insert((2, 3));
-        handle.insert((3, 4));
-        db.commit();
+    // Combine base (edges) and recursive (new_paths)
+    let all_paths = union(edges_for_union, new_paths);
 
-        // Create the path variable
-        let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
+    // Wire up the feedback
+    db.feedback(path_var, all_paths);
 
-        // path = edges ∪ (path ⋈ edges).map(|(p, e)| (p.0, e.1))
-        let mut saved_edges = save(edges);
-        let edges_for_union = saved_edges.get();
-        let edges_for_join = saved_edges.get();
+    // Create output before inserting data
+    let mut path_out = output(path_rel.get().boxed());
 
-        // Create a relation that reads from the variable
-        let path_rel = super::super::VariableRelation::new(path_var.clone());
+    // Create graph: 1->2->3->4
+    handle.insert((1, 2));
+    handle.insert((2, 3));
+    handle.insert((3, 4));
+    db.commit();
 
-        // Recursive case: extend paths by one edge
-        // path(a, c) :- path(a, b), edge(b, c)
-        let extended = join(path_rel, edges_for_join, |p| p.1, |e| e.0);
-        let new_paths = map(extended, |((a, _), (_, c))| (a, c));
+    // Collect results
+    let result: Vec<_> = path_out.collect();
 
-        // Combine base (edges) and recursive (new_paths)
-        let all_paths = union(edges_for_union, new_paths);
+    // Should have: (1,2), (2,3), (3,4), (1,3), (2,4), (1,4)
+    assert!(result.contains(&(1, 2)), "missing (1,2)");
+    assert!(result.contains(&(2, 3)), "missing (2,3)");
+    assert!(result.contains(&(3, 4)), "missing (3,4)");
+    assert!(result.contains(&(1, 3)), "missing (1,3)");
+    assert!(result.contains(&(2, 4)), "missing (2,4)");
+    assert!(result.contains(&(1, 4)), "missing (1,4)");
+}
 
-        // Wire up the feedback
-        db.feedback(path_var.clone(), all_paths);
-        db.commit();
+#[test]
+fn test_push_pop_simple() {
+    let mut db = Database2::new();
+    let (mut handle, mut rel) = db.create_input::<i32>();
 
-        // Collect results
-        let result: Vec<_> = path_var.borrow().collect();
+    handle.insert(1);
+    handle.insert(2);
+    db.commit();
 
-        // Should have: (1,2), (2,3), (3,4), (1,3), (2,4), (1,4)
-        assert!(result.contains(&(1, 2)), "missing (1,2)");
-        assert!(result.contains(&(2, 3)), "missing (2,3)");
-        assert!(result.contains(&(3, 4)), "missing (3,4)");
-        assert!(result.contains(&(1, 3)), "missing (1,3)");
-        assert!(result.contains(&(2, 4)), "missing (2,4)");
-        assert!(result.contains(&(1, 4)), "missing (1,4)");
-    }
+    // Drain initial changes
+    let _ = collect_to_map(&mut rel);
 
-    #[test]
-    fn test_push_pop_simple() {
-        let mut db = Database2::new();
-        let (mut handle, mut rel) = db.create_input::<i32>();
+    // Push checkpoint
+    db.push();
 
-        handle.insert(1);
-        handle.insert(2);
-        db.commit();
+    handle.insert(3);
+    db.commit();
 
-        // Drain initial changes
-        let _ = collect_to_map(&mut rel);
+    let after_push = collect_to_map(&mut rel);
+    assert_eq!(after_push.get(&3), Some(&1));
 
-        // Push checkpoint
-        db.push();
+    // Pop should revert
+    db.pop();
 
-        handle.insert(3);
-        db.commit();
-
-        let after_push = collect_to_map(&mut rel);
-        assert_eq!(after_push.get(&3), Some(&1));
-
-        // Pop should revert
-        db.pop();
-
-        let after_pop = collect_to_map(&mut rel);
-        assert_eq!(after_pop.get(&3), Some(&-1)); // deletion
-    }
+    let after_pop = collect_to_map(&mut rel);
+    assert_eq!(after_pop.get(&3), Some(&-1)); // deletion
 }

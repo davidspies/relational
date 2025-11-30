@@ -1,5 +1,6 @@
 //! Tests for CDCL SAT solver.
 
+use super::types::*;
 use super::*;
 
 // Helper to create literals from raw i32

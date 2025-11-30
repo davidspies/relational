@@ -19,7 +19,7 @@ pub struct Output<T: Tuple, R: Relation<T> = Box<dyn Relation<T>>> {
 
 impl<T: Tuple + 'static, R: Relation<T>> Output<T, R> {
     /// Create a new output wrapping the given relation.
-    pub fn new(relation: R) -> Self {
+    pub(crate) fn new(relation: R) -> Self {
         Output {
             relation,
             state: Multiset::new(),
@@ -27,19 +27,19 @@ impl<T: Tuple + 'static, R: Relation<T>> Output<T, R> {
     }
 
     /// Pull all pending changes from the relation into the accumulated state.
-    pub fn update(&mut self) {
+    pub(crate) fn update(&mut self) {
         self.relation.foreach(&mut |t, diff| {
             self.state.apply_change(Change::new(t, diff));
         });
     }
 
     /// Get the accumulated state (call `update()` first to ensure it's current).
-    pub fn state(&self) -> &Multiset<T> {
+    pub(crate) fn state(&self) -> &Multiset<T> {
         &self.state
     }
 
     /// Check if the state is empty.
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.state.is_empty()
     }
 
@@ -51,7 +51,7 @@ impl<T: Tuple + 'static, R: Relation<T>> Output<T, R> {
     }
 
     /// Iterate over tuples with positive multiplicity.
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
         self.state.iter()
     }
 }

@@ -7,17 +7,14 @@
 
 mod commit_id;
 mod db;
-pub mod feedback;
-pub mod relational;
+pub(crate) mod feedback;
+pub(crate) mod relational;
 
 #[cfg(test)]
 mod tests;
 
 // Re-export relational types at top level for convenience
 pub use relational::*;
-
-// Re-export feedback types
-pub use feedback::Variable;
 
 // Re-export database
 pub use commit_id::CommitId;

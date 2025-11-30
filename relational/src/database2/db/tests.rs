@@ -1,15 +1,10 @@
 //! Tests for Database2.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use crate::database2::{Database2, Relation, Variable, VariableRelation, join, map, save, union};
+use crate::database2::{Database2, Relation, join, map, output, save, union};
 
 /// Test that re-inserting already-present item during push doesn't affect pop.
 #[test]
 fn test_pop_duplicate_insert() {
-    use crate::database2::output;
-
     let mut db = Database2::new();
     let (mut handle, rel) = db.create_input::<i32>();
 
@@ -48,14 +43,16 @@ fn test_pop_transitive_closure() {
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure: path = edges ∪ (path ⋈ edges)
-    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
-    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut path_rel = save(path_var_rel);
 
     let mut edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
-    db.feedback(path_var.clone(), all_paths);
+    db.feedback(path_var, all_paths);
+
+    let mut path_out = output(path_rel.get().boxed());
 
     // Push
     db.push();
@@ -69,14 +66,14 @@ fn test_pop_transitive_closure() {
     db.commit();
 
     // Should have paths: (1,3), (3,1), (1,1), (3,3)
-    let mut paths: Vec<_> = path_var.borrow().collect();
+    let mut paths: Vec<_> = path_out.collect();
     paths.sort();
     assert_eq!(paths, vec![(1, 1), (1, 3), (3, 1), (3, 3)]);
 
     // Pop - should undo all edges
     db.pop();
 
-    let result: Vec<_> = path_var.borrow().collect();
+    let result: Vec<_> = path_out.collect();
     // Expected: [] (all edges were added inside pushed frame)
     assert!(result.is_empty(), "Expected empty, got {:?}", result);
 }

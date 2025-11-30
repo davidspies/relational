@@ -3,17 +3,12 @@
 //! These tests verify that feedback loops are processed in declaration order,
 //! with each reaching fixpoint before the next is applied.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use relational::database2::{
-    Database2, Output, Relation, Variable, VariableRelation, difference, filter, join, map, max,
-    output, save, union,
+    Database2, Output, Relation, difference, filter, join, map, max, output, save, union,
 };
 
 /// Helper to collect output after update.
 fn collect_output<T: relational::Tuple + Clone>(out: &mut Output<T>) -> Vec<T> {
-    out.update();
     out.collect()
 }
 
@@ -34,44 +29,47 @@ fn test_stratified_two_feedbacks() {
     // First feedback: transitive closure (reachability)
     // reach(a, b) :- edge(a, b)
     // reach(a, c) :- reach(a, b), edge(b, c)
-    let reach_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
-    let mut reach_rel = save(VariableRelation::new(reach_var.clone()));
+    let (reach_var, reach_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut reach_rel = save(reach_var_rel);
 
     let extended_reach = join(reach_rel.get(), edges.get(), |(_, b)| *b, |(b, _)| *b);
     let new_reach = map(extended_reach, |((a, _), (_, c))| (a, c));
     let all_reach = union(edges.get(), new_reach);
 
     // Second feedback: triples (a, b, c) where reach(a, b) and reach(b, c)
-    let extended_var = Rc::new(RefCell::new(Variable::<(i32, i32, i32)>::new()));
+    let (extended_var, extended_var_rel) = db.create_variable::<(i32, i32, i32)>();
     let reach_join = join(reach_rel.get(), reach_rel.get(), |(_, b)| *b, |(b, _)| *b);
     let triples = map(reach_join, |((a, b), (_, c))| (a, b, c));
+
+    // Set up first feedback (reach)
+    let reach_input = union(edges.get(), all_reach);
+    db.feedback(reach_var, reach_input);
+
+    // Create outputs for reading BEFORE inserting data
+    let mut reach_out = output(reach_rel.get().boxed());
+    let mut extended_out = output(extended_var_rel.boxed());
 
     // Insert edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));
     edges_h.insert((2, 3));
     db.commit();
 
-    // Set up first feedback (reach)
-    let reach_input = union(edges.get(), all_reach);
-    db.feedback(reach_var.clone(), reach_input);
-
     // At this point, reach should be at fixpoint: {(1,2), (2,3), (1,3)}
-    // Read from Variable directly (not through VariableRelation which drains)
-    let reach_result = reach_var.borrow().collect();
+    let reach_result = reach_out.collect();
     assert!(reach_result.contains(&(1, 2)), "reach should contain (1,2)");
     assert!(reach_result.contains(&(2, 3)), "reach should contain (2,3)");
     assert!(reach_result.contains(&(1, 3)), "reach should contain (1,3)");
     assert_eq!(reach_result.len(), 3, "reach should have exactly 3 pairs");
 
     // Set up second feedback (extended)
-    db.feedback(extended_var.clone(), triples);
+    db.feedback(extended_var, triples);
 
     // Extended should contain all (a, b, c) where reach(a,b) and reach(b,c)
     // With reach = {(1,2), (2,3), (1,3)}:
     // - reach(1,2) and reach(2,3) -> (1, 2, 3)
     // - reach(1,3) and reach(3,?) -> nothing (3 doesn't reach anything)
     // - reach(2,3) and reach(3,?) -> nothing
-    let extended_result = extended_var.borrow().collect();
+    let extended_result = extended_out.collect();
     assert!(
         extended_result.contains(&(1, 2, 3)),
         "extended should contain (1,2,3)"
@@ -92,23 +90,25 @@ fn test_incremental_after_feedback() {
     let mut edges = save(edges_rel);
 
     // Set up transitive closure
-    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
-    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut path_rel = save(path_var_rel);
 
     let extended = join(path_rel.get(), edges.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges.get(), new_paths);
+
+    let path_input = union(edges.get(), all_paths);
+    db.feedback(path_var, path_input);
+
+    let mut path_out = output(path_rel.get().boxed());
 
     // Initial edges
     edges_h.insert((1, 2));
     edges_h.insert((2, 3));
     db.commit();
 
-    let path_input = union(edges.get(), all_paths);
-    db.feedback(path_var.clone(), path_input);
-
-    // Check initial state - read from Variable directly
-    let paths = path_var.borrow().collect();
+    // Check initial state
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 3); // (1,2), (2,3), (1,3)
     assert!(paths.contains(&(1, 3)));
 
@@ -117,7 +117,7 @@ fn test_incremental_after_feedback() {
     db.commit();
 
     // The transitive closure should update
-    let paths = path_var.borrow().collect();
+    let paths = path_out.collect();
     assert!(paths.contains(&(3, 4)), "should have new direct edge");
     assert!(paths.contains(&(2, 4)), "should have (2,4) via (2,3,4)");
     assert!(paths.contains(&(1, 4)), "should have (1,4) via (1,2,3,4)");
@@ -136,21 +136,23 @@ fn test_feedback_order_independence() {
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let mut edges = save(edges_rel);
 
-    edges_h.insert((1, 2));
-    edges_h.insert((2, 3));
-    db.commit();
-
     // Transitive closure
-    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
-    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut path_rel = save(path_var_rel);
 
     let extended = join(path_rel.get(), edges.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges.get(), new_paths);
 
-    db.feedback(path_var.clone(), all_paths);
+    db.feedback(path_var, all_paths);
 
-    let paths = path_var.borrow().collect();
+    let mut path_out = output(path_rel.get().boxed());
+
+    edges_h.insert((1, 2));
+    edges_h.insert((2, 3));
+    db.commit();
+
+    let paths = path_out.collect();
 
     assert_eq!(paths.len(), 3);
     assert!(paths.contains(&(1, 2)));
@@ -169,39 +171,48 @@ fn test_three_feedbacks_chain() {
     db.commit();
 
     // Level 1: double the facts
-    let doubled_var = Rc::new(RefCell::new(Variable::<i32>::new()));
+    let (doubled_var, doubled_var_rel) = db.create_variable::<i32>();
+    let mut doubled_saved = save(doubled_var_rel);
     let double_op = map(facts_rel, |x| x * 2);
 
     // Level 2: triple the doubled values
-    let tripled_var = Rc::new(RefCell::new(Variable::<i32>::new()));
-    let doubled_rel = VariableRelation::new(doubled_var.clone());
-    let triple_op = map(doubled_rel, |x| x * 3);
+    let (tripled_var, tripled_var_rel) = db.create_variable::<i32>();
+    let mut tripled_saved = save(tripled_var_rel);
+    let triple_op = map(doubled_saved.get(), |x| x * 3);
 
     // Level 3: add 1 to tripled values
-    let plus_one_var = Rc::new(RefCell::new(Variable::<i32>::new()));
-    let tripled_rel = VariableRelation::new(tripled_var.clone());
-    let plus_one_op = map(tripled_rel, |x| x + 1);
+    let (plus_one_var, plus_one_var_rel) = db.create_variable::<i32>();
+    let plus_one_op = map(tripled_saved.get(), |x| x + 1);
 
     // Set up feedbacks in order
     // doubled = double(facts)
-    db.feedback(doubled_var.clone(), double_op);
+    db.feedback(doubled_var, double_op);
+
+    // Create output for reading
+    let mut doubled_out = output(doubled_saved.get().boxed());
 
     // After first feedback: doubled = {2}
-    let doubled_result = doubled_var.borrow().collect();
+    let doubled_result = doubled_out.collect();
     assert!(doubled_result.contains(&2), "doubled should contain 2");
 
     // tripled = triple(doubled)
-    db.feedback(tripled_var.clone(), triple_op);
+    db.feedback(tripled_var, triple_op);
+
+    // Create output for reading
+    let mut tripled_out = output(tripled_saved.get().boxed());
 
     // After second feedback: tripled = {6}
-    let tripled_result = tripled_var.borrow().collect();
+    let tripled_result = tripled_out.collect();
     assert!(tripled_result.contains(&6), "tripled should contain 6");
 
     // plus_one = plus_one(tripled)
-    db.feedback(plus_one_var.clone(), plus_one_op);
+    db.feedback(plus_one_var, plus_one_op);
+
+    // Create output for reading
+    let mut plus_one_out = output(plus_one_var_rel.boxed());
 
     // After third feedback: plus_one = {7}
-    let plus_one_result = plus_one_var.borrow().collect();
+    let plus_one_result = plus_one_out.collect();
     assert!(plus_one_result.contains(&7), "plus_one should contain 7");
 }
 
@@ -216,11 +227,12 @@ fn test_feedback_immediate_fixpoint() {
     db.commit();
 
     // Feedback that just passes through the input (identity)
-    let var = Rc::new(RefCell::new(Variable::<i32>::new()));
+    let (var, var_rel) = db.create_variable::<i32>();
 
-    db.feedback(var.clone(), items_rel);
+    db.feedback(var, items_rel);
 
-    let result = var.borrow().collect();
+    let mut var_out = output(var_rel.boxed());
+    let result = var_out.collect();
 
     assert_eq!(result.len(), 2);
     assert!(result.contains(&1));
@@ -302,8 +314,8 @@ fn test_a_reaches_fixpoint_between_b_applications() {
     let (mut seeds_h, seeds_rel) = db.create_input::<i32>();
 
     // Variable V - the shared counter
-    let v_var = Rc::new(RefCell::new(Variable::<i32>::new()));
-    let mut v_rel = save(VariableRelation::new(v_var.clone()));
+    let (v_var, v_var_rel) = db.create_variable::<i32>();
+    let mut v_rel = save(v_var_rel);
 
     // v_max = max(v) - use unit key for global max
     let v_max = max(v_rel.get(), |_| (), |x| *x);
@@ -333,14 +345,17 @@ fn test_a_reaches_fixpoint_between_b_applications() {
     db.feedback(v_var.clone(), a_input);
 
     // Second feedback (B): v = v ∪ b_new
-    db.feedback(v_var.clone(), v_with_b);
+    db.feedback(v_var, v_with_b);
+
+    // Create output for reading
+    let mut v_out = output(v_rel.get().boxed());
 
     // Seed with 0
     seeds_h.insert(0);
     db.commit();
 
     println!("After commit:");
-    let v_result: Vec<_> = v_var.borrow().collect();
+    let v_result: Vec<_> = v_out.collect();
     println!("  V = {:?}", v_result);
 
     let v_max_val = v_result.iter().max().copied().unwrap_or(-1);
@@ -386,44 +401,48 @@ fn test_interleaved_mutual_fixpoint() {
     let (mut input_h, input_rel) = db.create_input::<i32>();
 
     // A: tracks numbers, adds +2 to each (stays in same parity class)
-    let a_var = Rc::new(RefCell::new(Variable::<i32>::new()));
-    let mut a_rel = save(VariableRelation::new(a_var.clone()));
+    let (a_var, a_var_rel) = db.create_variable::<i32>();
+    let mut a_rel = save(a_var_rel);
     let a_plus_2 = map(a_rel.get(), |x| x + 2);
     let a_filtered = filter(a_plus_2, |x| *x <= 10); // Cap at 10
 
     // B: takes A's values, adds +1 (switches parity)
-    let b_var = Rc::new(RefCell::new(Variable::<i32>::new()));
+    let (b_var, b_var_rel) = db.create_variable::<i32>();
     let b_from_a = map(a_rel.get(), |x| x + 1);
     let b_filtered = filter(b_from_a, |x| *x <= 10);
 
     // Union B back into A's input (so A grows from B's output too)
-    let mut b_rel = save(VariableRelation::new(b_var.clone()));
+    let mut b_rel = save(b_var_rel);
     let mut input_saved = save(input_rel);
     let a_combined = union(input_saved.get(), b_rel.get());
     let a_recursive = union(a_combined, a_filtered);
 
     // Set up feedbacks first
-    db.feedback(a_var.clone(), a_recursive);
-    db.feedback(b_var.clone(), b_filtered);
+    db.feedback(a_var, a_recursive);
+    db.feedback(b_var, b_filtered);
+
+    // Create outputs for reading
+    let mut a_out = output(a_rel.get().boxed());
+    let mut b_out = output(b_rel.get().boxed());
 
     // Start with just 1
     input_h.insert(1);
     db.commit();
 
     // A should have: 1, 3, 5, 7, 9 (starting from 1, adding 2 each time)
-    let a_result: Vec<_> = a_var.borrow().collect();
+    let a_result: Vec<_> = a_out.collect();
     assert!(a_result.contains(&1), "A should contain 1");
     assert!(a_result.contains(&3), "A should contain 3");
     assert!(a_result.contains(&5), "A should contain 5");
 
     // Now B should have added even numbers to A via the feedback
     // B = A + 1 = {2, 4, 6, 8, 10}
-    let b_result: Vec<_> = b_var.borrow().collect();
+    let b_result: Vec<_> = b_out.collect();
     assert!(b_result.contains(&2), "B should contain 2");
     assert!(b_result.contains(&4), "B should contain 4");
 
     // And A should now also have even numbers (from B feeding back)
-    let a_result_after: Vec<_> = a_var.borrow().collect();
+    let a_result_after: Vec<_> = a_out.collect();
     assert!(
         a_result_after.contains(&2),
         "A should contain 2 after B feedback"
@@ -469,13 +488,14 @@ fn test_diamond_dependency() {
     let d = union(b, c);
 
     // Use a feedback to test that the diamond is computed correctly
-    let d_var = Rc::new(RefCell::new(Variable::<i32>::new()));
-    db.feedback(d_var.clone(), d);
+    let (d_var, d_var_rel) = db.create_variable::<i32>();
+    db.feedback(d_var, d);
 
     input_h.insert(10);
     db.commit();
 
-    let result: Vec<_> = d_var.borrow().collect();
+    let mut d_out = output(d_var_rel.boxed());
+    let result: Vec<_> = d_out.collect();
     assert!(result.contains(&20), "should have 10*2=20 from B");
     assert!(result.contains(&15), "should have 10+5=15 from C");
     assert_eq!(result.len(), 2);
@@ -541,12 +561,12 @@ fn test_push_pop_simple() {
 fn test_push_pop_nested() {
     let mut db = Database2::new();
 
-    let (mut items_h, _items_rel) = db.create_input::<i32>();
+    let (mut items_h, items_rel) = db.create_input::<i32>();
 
     items_h.insert(1);
     db.commit();
 
-    let mut items_out = output(items_h.relation().boxed());
+    let mut items_out = output(items_rel.boxed());
 
     // First push
     db.push();
@@ -587,22 +607,24 @@ fn test_push_pop_with_feedback() {
     let mut edges = save(edges_rel);
 
     // Set up transitive closure
-    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
-    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut path_rel = save(path_var_rel);
 
     let extended = join(path_rel.get(), edges.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges.get(), new_paths);
+
+    db.feedback(path_var, all_paths);
+
+    let mut path_out = output(path_rel.get().boxed());
 
     // Initial edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));
     edges_h.insert((2, 3));
     db.commit();
 
-    db.feedback(path_var.clone(), all_paths);
-
     // Initial paths: (1,2), (2,3), (1,3)
-    let paths = path_var.borrow().collect();
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 3);
     assert!(paths.contains(&(1, 3)));
 
@@ -613,14 +635,14 @@ fn test_push_pop_with_feedback() {
     db.commit();
 
     // Now paths should include (3,4), (2,4), (1,4)
-    let paths = path_var.borrow().collect();
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 6);
     assert!(paths.contains(&(1, 4)));
 
     // Pop - should restore to 3 paths
     db.pop();
 
-    let paths = path_var.borrow().collect();
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 3, "Should have 3 paths after pop: {:?}", paths);
     assert!(paths.contains(&(1, 2)));
     assert!(paths.contains(&(2, 3)));
@@ -642,12 +664,12 @@ fn test_pop_empty_stack() {
 fn test_push_pop_no_changes() {
     let mut db = Database2::new();
 
-    let (mut items_h, _items_rel) = db.create_input::<i32>();
+    let (mut items_h, items_rel) = db.create_input::<i32>();
     items_h.insert(1);
     items_h.insert(2);
     db.commit();
 
-    let mut items_out = output(items_h.relation().boxed());
+    let mut items_out = output(items_rel.boxed());
 
     db.push();
     // No changes made
@@ -675,18 +697,18 @@ fn test_persistent_vs_regular_inputs() {
     let mut db = Database2::new();
 
     // Regular input: decision variables (should be undone on pop)
-    let (mut decisions_h, _decisions_rel) = db.create_input::<i32>();
+    let (mut decisions_h, decisions_rel) = db.create_input::<i32>();
 
     // Persistent input: learned clauses (should survive pop)
-    let (mut learned_h, _learned_rel) = db.create_persistent_input::<i32>();
+    let (mut learned_h, learned_rel) = db.create_persistent_input::<i32>();
 
     // Insert initial data before any checkpoint
     decisions_h.insert(1);
     learned_h.insert(100);
     db.commit();
 
-    let mut decisions_out = output(decisions_h.relation().boxed());
-    let mut learned_out = output(learned_h.relation().boxed());
+    let mut decisions_out = output(decisions_rel.boxed());
+    let mut learned_out = output(learned_rel.boxed());
 
     // Push checkpoint
     db.push();
@@ -732,15 +754,15 @@ fn test_persistent_vs_regular_inputs() {
 fn test_persistent_nested_checkpoints() {
     let mut db = Database2::new();
 
-    let (mut regular_h, _regular_rel) = db.create_input::<i32>();
-    let (mut persistent_h, _persistent_rel) = db.create_persistent_input::<i32>();
+    let (mut regular_h, regular_rel) = db.create_input::<i32>();
+    let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     regular_h.insert(1);
     persistent_h.insert(100);
     db.commit();
 
-    let mut regular_out = output(regular_h.relation().boxed());
-    let mut persistent_out = output(persistent_h.relation().boxed());
+    let mut regular_out = output(regular_rel.boxed());
+    let mut persistent_out = output(persistent_rel.boxed());
 
     // Level 1
     db.push();
@@ -828,13 +850,13 @@ fn test_persistent_with_derived() {
 fn test_persistent_delete() {
     let mut db = Database2::new();
 
-    let (mut persistent_h, _persistent_rel) = db.create_persistent_input::<i32>();
+    let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     persistent_h.insert(100);
     persistent_h.insert(200);
     db.commit();
 
-    let mut persistent_out = output(persistent_h.relation().boxed());
+    let mut persistent_out = output(persistent_rel.boxed());
 
     db.push();
 
@@ -878,8 +900,8 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     let (mut edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();
 
     // Create timestamped path variable
-    let path_var = Rc::new(RefCell::new(Variable::<((i32, i32), CommitId)>::new()));
-    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+    let (path_var, path_var_rel) = db.create_variable::<((i32, i32), CommitId)>();
+    let mut path_rel = save(path_var_rel);
 
     // Strip CommitId for recursive computation
     let path_tuples = map(path_rel.get(), |((a, b), _)| (a, b));
@@ -891,14 +913,16 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     let all_paths = union(edges_saved.get(), new_paths);
 
     // Wire up timestamped feedback
-    db.feedback_with_id(path_var.clone(), all_paths);
+    db.feedback_with_id(path_var, all_paths);
+
+    let mut path_out = output(path_rel.get().boxed());
 
     // Initial edge
     edges_h.insert((1, 2));
     db.commit();
 
     // Initial state: path (1,2) discovered at some commit ID
-    let paths_before: Vec<_> = path_var.borrow().collect();
+    let paths_before: Vec<_> = path_out.collect();
     assert_eq!(paths_before.len(), 1);
     let (_, initial_commit_id) = paths_before
         .iter()
@@ -917,7 +941,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     // - (1,2) with original commit ID
     // - (2,3) with new commit ID
     // - (1,3) with even newer commit ID (derived from 1->2->3)
-    let paths_during: Vec<_> = path_var.borrow().collect();
+    let paths_during: Vec<_> = path_out.collect();
     assert_eq!(paths_during.len(), 3);
 
     let get_commit_id = |paths: &[((i32, i32), CommitId)], from: i32, to: i32| -> CommitId {
@@ -954,7 +978,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     db.pop();
 
     // All three paths should still exist (because the persistent edge survived)
-    let paths_after: Vec<_> = path_var.borrow().collect();
+    let paths_after: Vec<_> = path_out.collect();
     assert_eq!(
         paths_after.len(),
         3,
@@ -994,18 +1018,20 @@ fn test_push_insert_pop_minimal() {
     let mut db = Database2::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
-    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
-    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut path_rel = save(path_var_rel);
 
     let mut edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
-    db.feedback(path_var.clone(), all_paths);
+    db.feedback(path_var, all_paths);
 
-    // At this point, path_var should be empty
+    let mut path_out = output(path_rel.get().boxed());
+
+    // At this point, path should be empty
     assert_eq!(
-        path_var.borrow().collect().len(),
+        path_out.collect().len(),
         0,
         "Should be empty before any inserts"
     );
@@ -1015,15 +1041,15 @@ fn test_push_insert_pop_minimal() {
     edges_h.insert((0, 0));
     db.commit();
 
-    // Now path_var should have (0, 0)
-    let paths = path_var.borrow().collect();
+    // Now path should have (0, 0)
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 1, "Should have 1 path after insert");
     assert!(paths.contains(&(0, 0)));
 
     db.pop();
 
-    // After pop, path_var should be empty again
-    let paths = path_var.borrow().collect();
+    // After pop, path should be empty again
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 0, "Should be empty after pop: {:?}", paths);
 }
 
@@ -1033,14 +1059,16 @@ fn test_push_insert_pop() {
     let mut db = Database2::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
-    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
-    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut path_rel = save(path_var_rel);
 
     let mut edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
-    db.feedback(path_var.clone(), all_paths);
+    db.feedback(path_var, all_paths);
+
+    let mut path_out = output(path_rel.get().boxed());
 
     db.push();
 
@@ -1049,14 +1077,14 @@ fn test_push_insert_pop() {
     db.commit();
 
     // Path should have (0, 4)
-    let paths = path_var.borrow().collect();
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 1, "Should have 1 path: {:?}", paths);
     assert!(paths.contains(&(0, 4)));
 
     db.pop();
 
-    // After pop, path_var should be empty
-    let paths = path_var.borrow().collect();
+    // After pop, path should be empty
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 0, "Should be empty after pop: {:?}", paths);
 }
 
@@ -1067,18 +1095,20 @@ fn test_push_no_changes_pop() {
     let mut db = Database2::new();
     let (_edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
-    let path_var = Rc::new(RefCell::new(Variable::<(i32, i32)>::new()));
-    let mut path_rel = save(VariableRelation::new(path_var.clone()));
+    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let mut path_rel = save(path_var_rel);
 
     let mut edges_saved = save(edges_rel);
     let extended = join(path_rel.get(), edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
     let new_paths = map(extended, |((a, _), (_, c))| (a, c));
     let all_paths = union(edges_saved.get(), new_paths);
-    db.feedback(path_var.clone(), all_paths);
+    db.feedback(path_var, all_paths);
 
-    // At this point, path_var should be empty
+    let mut path_out = output(path_rel.get().boxed());
+
+    // At this point, path should be empty
     assert_eq!(
-        path_var.borrow().collect().len(),
+        path_out.collect().len(),
         0,
         "Should be empty before any changes"
     );
@@ -1089,12 +1119,12 @@ fn test_push_no_changes_pop() {
     db.commit();
 
     // Still empty
-    let paths = path_var.borrow().collect();
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 0, "Should still be empty with no inserts");
 
     db.pop();
 
-    // After pop, path_var should still be empty
-    let paths = path_var.borrow().collect();
+    // After pop, path should still be empty
+    let paths = path_out.collect();
     assert_eq!(paths.len(), 0, "Should be empty after pop: {:?}", paths);
 }

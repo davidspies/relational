@@ -5,7 +5,7 @@ use super::types::{Level, Lit, neg};
 
 impl Solver {
     /// Main solve loop.
-    pub fn solve(&mut self) -> bool {
+    pub(crate) fn solve(&mut self) -> bool {
         loop {
             // Propagate
             match self.propagate() {

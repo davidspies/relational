@@ -9,13 +9,7 @@
 //!   left_changes × new_right + new_left × right_changes
 //! This double-counts (left_changes × right_changes).
 
-use relational::database2::{Database2, Output, Relation, join, output};
-
-/// Helper to collect output after update.
-fn collect_output<T: relational::Tuple + Clone>(out: &mut Output<T>) -> Vec<T> {
-    out.update();
-    out.collect()
-}
+use relational::database2::{Database2, Relation, join, output};
 
 /// Test: Insert into both sides of a join in a single commit.
 /// This exercises the case where left_changes and right_changes are both non-empty.
@@ -35,7 +29,7 @@ fn test_join_simultaneous_inserts() {
     right.insert((1, 100));
     db.commit();
 
-    let result = collect_output(&mut joined_out);
+    let result = joined_out.collect();
     assert_eq!(
         result,
         vec![((1, 10), (1, 100))],
@@ -54,7 +48,7 @@ fn test_join_simultaneous_inserts() {
     // - (1, 10) × (1, 200) = old_left × new_right
     // - (1, 20) × (1, 100) = new_left × old_right
     // - (1, 20) × (1, 200) = new_left × new_right  <-- THIS IS THE ONE THAT MIGHT BE MISSING
-    let mut result = collect_output(&mut joined_out);
+    let mut result = joined_out.collect();
     result.sort();
 
     let mut expected = vec![
@@ -88,7 +82,7 @@ fn test_join_both_sides_from_empty() {
     right.insert(1);
     db.commit();
 
-    let result = collect_output(&mut joined_out);
+    let result = joined_out.collect();
 
     // Should have (1, 1) from left=1 joining with right=1
     assert_eq!(
@@ -119,7 +113,6 @@ fn test_join_multiplicity_not_doubled() {
     db.commit();
 
     // The output's state should have multiplicity exactly 1
-    joined_out.update();
     let result = joined_out.collect();
 
     assert_eq!(result.len(), 1, "Should have exactly one result tuple");
@@ -144,7 +137,7 @@ fn test_join_multiple_keys_simultaneous() {
     right.insert(('b', 20));
     db.commit();
 
-    let mut result = collect_output(&mut joined_out);
+    let mut result = joined_out.collect();
     result.sort();
 
     let mut expected = vec![(('a', 1), ('a', 10)), (('b', 2), ('b', 20))];

@@ -7,26 +7,21 @@ use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
 /// A difference/multiplicity value. Positive means insertions, negative means deletions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Diff(pub i64);
+pub struct Diff(pub(crate) i64);
 
 impl Diff {
-    pub const ZERO: Diff = Diff(0);
-    pub const ONE: Diff = Diff(1);
-    pub const NEG_ONE: Diff = Diff(-1);
+    pub(crate) const ZERO: Diff = Diff(0);
+    pub(crate) const ONE: Diff = Diff(1);
+    pub(crate) const NEG_ONE: Diff = Diff(-1);
 
     #[inline]
-    pub fn is_zero(self) -> bool {
+    pub(crate) fn is_zero(self) -> bool {
         self.0 == 0
     }
 
     #[inline]
-    pub fn is_positive(self) -> bool {
+    pub(crate) fn is_positive(self) -> bool {
         self.0 > 0
-    }
-
-    #[inline]
-    pub fn is_negative(self) -> bool {
-        self.0 < 0
     }
 }
 
@@ -90,34 +85,27 @@ impl From<Diff> for i64 {
 
 /// A change to a tuple: the tuple value paired with its diff.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Change<T> {
-    pub tuple: T,
-    pub diff: Diff,
+pub(crate) struct Change<T> {
+    pub(crate) tuple: T,
+    pub(crate) diff: Diff,
 }
 
 impl<T> Change<T> {
-    pub fn new(tuple: T, diff: Diff) -> Self {
+    pub(crate) fn new(tuple: T, diff: Diff) -> Self {
         Change { tuple, diff }
     }
 
-    pub fn insert(tuple: T) -> Self {
+    pub(crate) fn insert(tuple: T) -> Self {
         Change::new(tuple, Diff::ONE)
     }
 
-    pub fn delete(tuple: T) -> Self {
+    pub(crate) fn delete(tuple: T) -> Self {
         Change::new(tuple, Diff::NEG_ONE)
-    }
-
-    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Change<U> {
-        Change {
-            tuple: f(self.tuple),
-            diff: self.diff,
-        }
     }
 }
 
 impl<T: Clone> Change<T> {
-    pub fn negate(&self) -> Self {
+    pub(crate) fn negate(&self) -> Self {
         Change {
             tuple: self.tuple.clone(),
             diff: -self.diff,

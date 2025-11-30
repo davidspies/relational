@@ -61,7 +61,7 @@ impl<T: Eq + Hash> Multiset<T> {
     }
 
     /// Apply a single change to the collection.
-    pub fn apply_change(&mut self, change: Change<T>) {
+    pub(crate) fn apply_change(&mut self, change: Change<T>) {
         if change.diff.is_zero() {
             return;
         }
@@ -75,7 +75,7 @@ impl<T: Eq + Hash> Multiset<T> {
     }
 
     /// Apply a batch of changes to the collection.
-    pub fn apply_changes<I: IntoIterator<Item = Change<T>>>(&mut self, changes: I) {
+    pub(crate) fn apply_changes<I: IntoIterator<Item = Change<T>>>(&mut self, changes: I) {
         for change in changes {
             self.apply_change(change);
         }

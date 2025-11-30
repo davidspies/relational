@@ -43,14 +43,14 @@ impl<T: Tuple> Variable<T> {
     }
 
     /// Insert an initial value.
-    pub fn insert(&mut self, tuple: T) {
+    pub(crate) fn insert(&mut self, tuple: T) {
         self.add_input(tuple, Diff(1));
     }
 
     /// Add input to this variable (used during normal fixpoint).
     /// Only emits +1 if the tuple is not already in output_state AND input_totals is positive.
     /// Once a tuple is seen, it stays in output until explicitly removed via pop().
-    pub fn add_input(&mut self, tuple: T, diff: Diff) {
+    pub(crate) fn add_input(&mut self, tuple: T, diff: Diff) {
         // Update input_totals
         let total = self.input_totals.entry(tuple.clone()).or_insert(0);
         *total += diff.0;
@@ -72,32 +72,32 @@ impl<T: Tuple> Variable<T> {
     }
 
     /// Backwards compatibility alias for add_input.
-    pub fn add_change(&mut self, tuple: T, diff: Diff) {
+    pub(crate) fn add_change(&mut self, tuple: T, diff: Diff) {
         self.add_input(tuple, diff);
     }
 
     /// Take the pending changes (empties the buffer).
-    pub fn take_changes(&mut self) -> Vec<(T, Diff)> {
+    pub(crate) fn take_changes(&mut self) -> Vec<(T, Diff)> {
         std::mem::take(&mut self.pending)
     }
 
     /// Commit staged changes to pending.
-    pub fn commit(&mut self) {
+    pub(crate) fn commit(&mut self) {
         self.pending.append(&mut self.staged);
     }
 
     /// Check if there are pending changes.
-    pub fn has_changes(&self) -> bool {
+    pub(crate) fn has_changes(&self) -> bool {
         !self.pending.is_empty()
     }
 
     /// Check if there are staged changes.
-    pub fn has_staged(&self) -> bool {
+    pub(crate) fn has_staged(&self) -> bool {
         !self.staged.is_empty()
     }
 
     /// Get all positive tuples in output_state.
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
         self.output_state
             .iter()
             .filter(|&(_, &count)| count > 0)
@@ -105,18 +105,18 @@ impl<T: Tuple> Variable<T> {
     }
 
     /// Collect all positive tuples into a Vec.
-    pub fn collect(&self) -> Vec<T> {
+    pub(crate) fn collect(&self) -> Vec<T> {
         self.iter().cloned().collect()
     }
 
     /// Push a new checkpoint level.
-    pub fn push_checkpoint(&mut self) {
+    pub(crate) fn push_checkpoint(&mut self) {
         self.outputs_by_checkpoint.push(Vec::new());
     }
 
     /// Send -1 for all outputs in the current checkpoint.
     /// Removes them from output_state but doesn't pop the checkpoint yet.
-    pub fn send_inverse(&mut self) {
+    pub(crate) fn send_inverse(&mut self) {
         if let Some(outputs) = self.outputs_by_checkpoint.last() {
             for tuple in outputs {
                 // Remove from output_state
@@ -130,12 +130,12 @@ impl<T: Tuple> Variable<T> {
     }
 
     /// Update input_totals with a change (used during pop).
-    pub fn update_input_total(&mut self, tuple: T, diff: Diff) {
+    pub(crate) fn update_input_total(&mut self, tuple: T, diff: Diff) {
         *self.input_totals.entry(tuple).or_insert(0) += diff.0;
     }
 
     /// Forward +1 for a tuple if it's not in the last checkpoint and is positive in input_totals.
-    pub fn forward_if_not_in_checkpoint(&mut self, tuple: &T) {
+    pub(crate) fn forward_if_not_in_checkpoint(&mut self, tuple: &T) {
         let in_checkpoint = self
             .outputs_by_checkpoint
             .last()
@@ -161,7 +161,7 @@ impl<T: Tuple> Variable<T> {
     }
 
     /// Pop the checkpoint and forward +1 for items whose input_total is still positive.
-    pub fn pop_and_forward_reachable(&mut self) {
+    pub(crate) fn pop_and_forward_reachable(&mut self) {
         if let Some(outputs) = self.outputs_by_checkpoint.pop() {
             for tuple in outputs {
                 let input_total = self.input_totals.get(&tuple).copied().unwrap_or(0);
@@ -182,17 +182,17 @@ impl<T: Tuple> Variable<T> {
     }
 
     /// Debug: get input_total for a tuple.
-    pub fn debug_input_total(&self, tuple: &T) -> i64 {
+    pub(crate) fn debug_input_total(&self, tuple: &T) -> i64 {
         self.input_totals.get(tuple).copied().unwrap_or(0)
     }
 
     /// Debug: get output_state for a tuple.
-    pub fn debug_output(&self, tuple: &T) -> i64 {
+    pub(crate) fn debug_output(&self, tuple: &T) -> i64 {
         self.output_state.get(tuple).copied().unwrap_or(0)
     }
 
     /// Debug: get checkpoint depth.
-    pub fn debug_checkpoint_depth(&self) -> usize {
+    pub(crate) fn debug_checkpoint_depth(&self) -> usize {
         self.outputs_by_checkpoint.len()
     }
 }
