@@ -53,5 +53,8 @@ impl Sink<((Lit, CommitId), (ClauseId, Level))> for CauseSink {
         let commits = self.data.entry(lit).or_default();
         let multiset = commits.entry(commit_id).or_default();
         multiset.update((clause_id, level), diff);
+        if multiset.is_empty() {
+            commits.remove(&commit_id);
+        }
     }
 }
