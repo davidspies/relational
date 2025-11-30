@@ -8,7 +8,9 @@
 //!    (exactly one literal at the current decision level in the learned clause)
 //! 3. The backtrack level is the second-highest level among literals in the clause
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
+
+use relational::database::CommitId;
 
 use super::Solver;
 use super::assignments_sink::AssignmentsSink;
@@ -24,12 +26,59 @@ pub struct AnalysisResult {
     pub backtrack_level: Level,
 }
 
-/// Count literals at the given decision level.
-fn count_at_level(working: &HashSet<Lit>, assignments: &AssignmentsSink, level: Level) -> usize {
-    working
-        .iter()
-        .filter(|lit| assignments.get(lit).unwrap_or(Level::TOP) == level)
-        .count()
+/// Working set for conflict analysis, split by level for efficient access.
+struct WorkingSet {
+    /// Literals at the current decision level, ordered by commit ID (most recent last).
+    at_current_level: BTreeMap<CommitId, Lit>,
+    /// Literals at other levels (no ordering needed).
+    at_other_levels: HashSet<Lit>,
+}
+
+impl WorkingSet {
+    fn new() -> Self {
+        Self {
+            at_current_level: BTreeMap::new(),
+            at_other_levels: HashSet::new(),
+        }
+    }
+
+    /// Insert a literal into the appropriate collection based on its level.
+    fn insert(
+        &mut self,
+        lit: Lit,
+        current_level: Level,
+        assignments: &AssignmentsSink,
+        causes: &CauseSink,
+    ) {
+        if assignments.get(&lit) == Some(current_level) {
+            if let Some(commit_id) = causes.get_commit_id(lit) {
+                self.at_current_level.insert(commit_id, lit);
+            } else {
+                // Decision literal at current level - treat as other level for simplicity
+                self.at_other_levels.insert(lit);
+            }
+        } else {
+            self.at_other_levels.insert(lit);
+        }
+    }
+
+    /// Get the most recently assigned literal at current level (highest commit ID).
+    fn pop_most_recent(&mut self) -> Option<(CommitId, Lit)> {
+        self.at_current_level.pop_last()
+    }
+
+    /// Count of literals at current level.
+    fn count_at_current(&self) -> usize {
+        self.at_current_level.len()
+    }
+
+    /// Iterate over all literals in the working set.
+    fn iter(&self) -> impl Iterator<Item = Lit> + '_ {
+        self.at_current_level
+            .values()
+            .copied()
+            .chain(self.at_other_levels.iter().copied())
+    }
 }
 
 impl Solver {
@@ -40,9 +89,7 @@ impl Solver {
     /// - Resolve backward until exactly one literal at current level remains
     /// - That literal is the UIP - it's the "decision" that forced this conflict
     pub fn analyze_conflict(&self, conflict: Conflict) -> Option<AnalysisResult> {
-        let current_level = self.state.current_level;
-
-        if current_level == Level::TOP {
+        if self.state.current_level == Level::TOP {
             // Conflict at level 0 means UNSAT - nothing to learn
             return None;
         }
@@ -52,7 +99,7 @@ impl Solver {
         let assignments = self.outputs.assignments.get();
 
         // Initialize the working set (nogood): the true assignments that caused conflict
-        let mut working: HashSet<Lit> = match conflict {
+        let initial_lits: Vec<Lit> = match conflict {
             Conflict::EmptyClause(cid) => {
                 // All literals in this clause are false - the nogood is their negations
                 self.get_clause(cid)
@@ -63,17 +110,31 @@ impl Solver {
             }
             Conflict::DirectConflict(var) => {
                 // Both lit and !lit are assigned - include both
-                HashSet::from([Lit::pos(var), Lit::neg(var)])
+                vec![Lit::pos(var), Lit::neg(var)]
             }
         };
 
-        // Resolution loop: resolve until we have exactly 1 literal at current level (1-UIP)
-        while count_at_level(&working, &assignments, current_level) > 1 {
-            // Find the most recently assigned literal at current level that has a reason
-            let resolve_lit =
-                find_most_recent_at_level(&working, &causes, &assignments, current_level);
+        // Use the minimum of current level and max level in conflict literals
+        let max_conflict_level = initial_lits
+            .iter()
+            .filter_map(|lit| assignments.get(lit))
+            .max()
+            .unwrap_or(Level::TOP);
+        let current_level = self.state.current_level.min(max_conflict_level);
 
-            let Some(lit) = resolve_lit else {
+        if current_level == Level::TOP {
+            return None;
+        }
+
+        let mut working = WorkingSet::new();
+        for lit in initial_lits {
+            working.insert(lit, current_level, &assignments, &causes);
+        }
+
+        // Resolution loop: resolve until we have exactly 1 literal at current level (1-UIP)
+        while working.count_at_current() > 1 {
+            // Pop the most recently assigned literal at current level
+            let Some((_, lit)) = working.pop_most_recent() else {
                 // No resolvable literal found - shouldn't happen in valid state
                 break;
             };
@@ -84,8 +145,7 @@ impl Solver {
                 break;
             };
 
-            // Resolve: remove lit, add the negations of other clause literals
-            working.remove(&lit);
+            // Resolve: add the negations of other clause literals
             let clause_lits = self
                 .get_clause(reason_cid)
                 .expect("reason clause must exist");
@@ -93,7 +153,7 @@ impl Solver {
                 // Skip the literal we're resolving on
                 if clause_lit != lit {
                     // Add the negated literal (the true assignment that made this false)
-                    working.insert(clause_lit.negated());
+                    working.insert(clause_lit.negated(), current_level, &assignments, &causes);
                 }
             }
         }
@@ -126,23 +186,4 @@ impl Solver {
             backtrack_level,
         })
     }
-}
-
-/// Find the most recently assigned literal at the given level.
-fn find_most_recent_at_level(
-    working: &HashSet<Lit>,
-    causes: &CauseSink,
-    assignments: &AssignmentsSink,
-    current_level: Level,
-) -> Option<Lit> {
-    // Get literals at current level that have reasons (not decisions)
-    let mut candidates: Vec<_> = working
-        .iter()
-        .filter(|lit| assignments.get(lit) == Some(current_level))
-        .filter_map(|&lit| causes.get_commit_id(lit).map(|cid| (lit, cid)))
-        .collect();
-
-    // Sort by commit ID descending (most recent first)
-    candidates.sort_by(|a, b| b.1.cmp(&a.1));
-    candidates.first().map(|(lit, _)| *lit)
 }
