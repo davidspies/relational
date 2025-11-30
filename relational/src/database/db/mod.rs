@@ -245,11 +245,11 @@ impl Database {
     /// 2. Commit changes
     /// 3. In stratified order of feedbacks, for each feedback:
     ///    a) Pull all changes and update tracked inputs; forward along anything
-    ///       which is NOT in the last checkpoint with a +1
+    ///    which is NOT in the last checkpoint with a +1
     ///    b) Pop the last checkpoint; forward along a +1 for anything in that
-    ///       checkpoint whose tracked input value is still non-zero
+    ///    checkpoint whose tracked input value is still non-zero
     ///    c) Propagate normally all feedbacks up to and including this one
-    ///       (using nested loop approach where you restart from beginning if changes)
+    ///    (using nested loop approach where you restart from beginning if changes)
     #[must_use]
     pub fn pop(&mut self) -> bool {
         if self.checkpoint_depth == 0 {

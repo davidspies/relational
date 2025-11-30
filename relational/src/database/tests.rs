@@ -185,9 +185,9 @@ fn test_checkpoint_and_restore() {
 
     // Verify current state
     let after_changes = doubled_out.collect();
-    assert!(after_changes.contains(&2));  // 1 still there
-    assert!(after_changes.contains(&4));  // 2 still there
-    assert!(after_changes.contains(&6));  // 3 * 2
+    assert!(after_changes.contains(&2)); // 1 still there
+    assert!(after_changes.contains(&4)); // 2 still there
+    assert!(after_changes.contains(&6)); // 3 * 2
 
     // Pop to restore checkpoint
     let popped = db.pop();
@@ -257,7 +257,8 @@ fn test_commit_id_advances_with_feedback() {
 
     // Pop doesn't increment commit ID
     assert_eq!(
-        commit_after_pop, commit_before_pop,
+        commit_after_pop,
+        commit_before_pop,
         "Commit ID should not change on pop: {} vs {}",
         commit_after_pop.raw(),
         commit_before_pop.raw()
@@ -878,7 +879,7 @@ fn test_min_via_max_reverse() {
 
     // Min by wrapping values in Reverse and using max
     let reversed = map(rel, |t| (t.0.clone(), Reverse(t.1)));
-    let mut maxed = max(reversed, |t| t.0.clone(), |t| t.1.clone());
+    let mut maxed = max(reversed, |t| t.0.clone(), |t| t.1);
 
     let changes = collect_to_map(&mut maxed);
     // Max of Reverse values is min of original values

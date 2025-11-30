@@ -97,8 +97,16 @@ pub(super) struct FeedbackWrapper<T: Tuple, R: Relation<T>> {
 }
 
 impl<T: Tuple, R: Relation<T>> FeedbackWrapper<T, R> {
-    pub(super) fn new(variable: Rc<RefCell<Variable<T>>>, input: R, commit_id: Rc<Cell<CommitId>>) -> Self {
-        FeedbackWrapper { variable, input, commit_id }
+    pub(super) fn new(
+        variable: Rc<RefCell<Variable<T>>>,
+        input: R,
+        commit_id: Rc<Cell<CommitId>>,
+    ) -> Self {
+        FeedbackWrapper {
+            variable,
+            input,
+            commit_id,
+        }
     }
 
     pub(super) fn push_initial_checkpoints(&mut self, depth: usize) {
@@ -271,7 +279,11 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWithI
             if let Some(&commit_id) = self.t_to_commit_id.get(&tuple) {
                 let full_tuple = (tuple, commit_id);
                 // Update the variable's input_total for the full tuple
-                let input_total = self.input_totals_by_t.get(&full_tuple.0).copied().unwrap_or(0);
+                let input_total = self
+                    .input_totals_by_t
+                    .get(&full_tuple.0)
+                    .copied()
+                    .unwrap_or(0);
                 // We need to sync the variable's view - set it to match our tracking
                 var.set_input_total(full_tuple.clone(), input_total);
                 var.forward_if_not_in_checkpoint(&full_tuple);

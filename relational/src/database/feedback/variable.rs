@@ -108,7 +108,10 @@ impl<T: Tuple> Variable<T> {
 
     /// Get the last checkpoint's contents without removing it.
     pub(crate) fn get_last_checkpoint(&self) -> &[T] {
-        self.outputs_by_checkpoint.last().map(|v| v.as_slice()).unwrap_or(&[])
+        self.outputs_by_checkpoint
+            .last()
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Pop the checkpoint without forwarding (caller handles reachability).
