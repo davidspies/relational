@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::database2::CommitId;
-use crate::Multiset;
+use relational::database2::CommitId;
+use relational::Multiset;
 
 use super::types::{ClauseId, Conflict, Level, Lit, Var};
 use super::Solver;

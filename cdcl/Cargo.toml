@@ -1,0 +1,7 @@
+[package]
+name = "cdcl"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+relational = { path = "../relational" }

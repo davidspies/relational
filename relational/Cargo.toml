@@ -1,0 +1,9 @@
+[package]
+name = "relational"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest = "1.4"

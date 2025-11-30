@@ -98,7 +98,6 @@
 //! // info.manual_input_nodes tells you which inputs weren't restored
 //! ```
 
-pub mod cdcl;
 mod change;
 mod checkpoint;
 mod collection;
@@ -108,7 +107,6 @@ mod dataflow;
 pub mod operators;
 mod relation;
 
-pub use cdcl::Solver;
 pub use change::{Change, Diff};
 pub use checkpoint::Checkpoint;
 pub use collection::Multiset;

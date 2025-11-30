@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::database2::{
+use relational::database2::{
     count, difference, distinct, filter, join, map, max, min, output, save, union, CommitId,
     Database2, Output, Relation, Variable, VariableRelation,
 };

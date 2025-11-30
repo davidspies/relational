@@ -1,6 +1,6 @@
 //! CDCL SAT Solver structure and methods.
 
-use crate::database2::{CommitId, Database2, InputHandle, Output, PersistentInputHandle};
+use relational::database2::{CommitId, Database2, InputHandle, Output, PersistentInputHandle};
 
 use super::types::{ClauseId, Conflict, Level, Lit, Var};
 
