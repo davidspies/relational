@@ -104,15 +104,6 @@ impl<T> Change<T> {
     }
 }
 
-impl<T: Clone> Change<T> {
-    pub(crate) fn negate(&self) -> Self {
-        Change {
-            tuple: self.tuple.clone(),
-            diff: -self.diff,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

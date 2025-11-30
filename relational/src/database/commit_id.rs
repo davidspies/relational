@@ -2,10 +2,7 @@
 
 /// A monotonically increasing commit ID that tracks database mutations.
 ///
-/// This counter is incremented:
-/// - When a feedback loop produces new tuples
-/// - During the global-undo step of a pop operation
-///
+/// This counter is incremented each feedback iteration.
 /// The counter never decreases, even during backtracking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct CommitId(pub(crate) u64);

@@ -1,12 +1,12 @@
 //! CDCL SAT Solver structure and methods.
 
-use relational::database2::{CommitId, Database2, InputHandle, Output, PersistentInputHandle};
+use relational::database::{CommitId, Database, InputHandle, Output, PersistentInputHandle};
 
 use super::types::{ClauseId, Conflict, Level, Lit, Var};
 
 /// CDCL SAT Solver.
 pub struct Solver {
-    pub(super) db: Database2,
+    pub(super) db: Database,
 
     // === Input Handles ===
     /// Original clauses: (clause_id, literal)

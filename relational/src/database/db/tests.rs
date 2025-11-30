@@ -1,11 +1,11 @@
-//! Tests for Database2.
+//! Tests for Database.
 
-use crate::database2::{Database2, Relation, join, map, output, save, union};
+use crate::database::{Database, Relation, join, map, output, save, union};
 
 /// Test that re-inserting already-present item during push doesn't affect pop.
 #[test]
 fn test_pop_duplicate_insert() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut handle, rel) = db.create_input::<i32>();
 
     let mut out = output(rel.boxed());
@@ -40,7 +40,7 @@ fn test_pop_duplicate_insert() {
 /// Test push/pop with transitive closure feedback.
 #[test]
 fn test_pop_transitive_closure() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure: path = edges ∪ (path ⋈ edges)
@@ -82,7 +82,7 @@ fn test_pop_transitive_closure() {
 
 #[test]
 fn test_db_create_input_and_commit() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut handle, mut rel) = db.create_input::<i32>();
 
     handle.insert(1);
@@ -107,7 +107,7 @@ fn test_db_create_input_and_commit() {
 
 #[test]
 fn test_db_push_pop_simple() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut handle, mut rel) = db.create_input::<i32>();
 
     // Initial state

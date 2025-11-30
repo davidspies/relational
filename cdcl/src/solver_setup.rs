@@ -1,8 +1,8 @@
 //! CDCL Solver dataflow setup and constructor.
 
-use relational::database2::{
-    CommitId, Database2, Output, Relation, count, difference, distinct, filter, join, map, max,
-    min, output, save, union,
+use relational::database::{
+    CommitId, Database, Output, Relation, count, difference, distinct, filter, join, map, max, min,
+    output, save, union,
 };
 
 use super::solver::Solver;
@@ -11,7 +11,7 @@ use super::types::{ClauseId, Conflict, Level, var};
 impl Solver {
     /// Create a new solver for the given number of variables.
     pub fn new(num_vars: super::types::Var) -> Self {
-        let mut db = Database2::new();
+        let mut db = Database::new();
 
         // === Input Relations ===
         let (clauses, clauses_rel) = db.create_input::<(ClauseId, super::types::Lit)>();
@@ -64,7 +64,7 @@ impl Solver {
         );
         let satisfied_clauses = map(clause_lit_true, |((cid, _), _)| cid).boxed();
 
-        let assigned_vars = map(assigned.get(), |lit| var(lit)).boxed();
+        let assigned_vars = map(assigned.get(), var).boxed();
         let clause_lit_with_var = map(all_clauses.get(), |(cid, lit)| (cid, lit, var(lit))).boxed();
         let clause_assigned_lits = join(clause_lit_with_var, assigned_vars, |(_, _, v)| *v, |v| *v);
         let clause_assigned_lit_ids =
@@ -117,8 +117,7 @@ impl Solver {
         let direct_conflict_vars = map(conflicting_pairs, |((_, v), _)| v).boxed();
         let direct_conflict_vars_distinct = distinct(direct_conflict_vars).boxed();
 
-        let mut clause_conflict_enums =
-            save(map(clause_conflicts, |cid| Conflict::EmptyClause(cid)).boxed());
+        let mut clause_conflict_enums = save(map(clause_conflicts, Conflict::EmptyClause).boxed());
         let mut direct_conflict_enums = save(
             map(direct_conflict_vars_distinct, |v| {
                 Conflict::DirectConflict(v)

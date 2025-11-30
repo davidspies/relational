@@ -4,8 +4,8 @@
 //! When input state is already updated (NEW state) before the incremental function
 //! runs, it must reconstruct OLD state by reversing the changes.
 
-use relational::database2::{
-    Database2, Output, Relation, difference, distinct, join, map, output, save,
+use relational::database::{
+    Database, Output, Relation, difference, distinct, join, map, output, save,
 };
 
 /// Helper to collect output after update.
@@ -17,7 +17,7 @@ fn collect_output<T: relational::Tuple + Clone>(out: &mut Output<T>) -> Vec<T> {
 /// This is the pattern used in CDCL: map extracts clause IDs, distinct deduplicates.
 #[test]
 fn test_distinct_after_map() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     // Input relation with (clause_id, literal) pairs
     let (mut clauses, clauses_rel) = db.create_input::<(i32, i32)>();
@@ -47,7 +47,7 @@ fn test_distinct_after_map() {
 /// Verifies that multiplicity tracking works when a tuple goes from 0 to positive.
 #[test]
 fn test_distinct_incremental_insert() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = distinct(input_rel);
@@ -75,7 +75,7 @@ fn test_distinct_incremental_insert() {
 /// With seen-set semantics, we use push/pop instead of delete.
 #[test]
 fn test_distinct_incremental_with_pop() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = distinct(input_rel);
@@ -110,7 +110,7 @@ fn test_distinct_incremental_with_pop() {
 /// and need to backtrack.
 #[test]
 fn test_distinct_with_push_pop() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = distinct(input_rel);
@@ -145,7 +145,7 @@ fn test_distinct_with_push_pop() {
 /// This was the pattern that exposed the bug.
 #[test]
 fn test_cdcl_pattern() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     // clauses: (clause_id, literal)
     let (mut clauses, clauses_rel) = db.create_input::<(i32, i32)>();
@@ -216,7 +216,7 @@ fn test_cdcl_pattern() {
 /// Test: Verify distinct multiplicity is exactly 1 for present tuples.
 #[test]
 fn test_distinct_multiplicity() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = distinct(input_rel);

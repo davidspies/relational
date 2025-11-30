@@ -9,13 +9,13 @@
 //!   left_changes × new_right + new_left × right_changes
 //! This double-counts (left_changes × right_changes).
 
-use relational::database2::{Database2, Relation, join, output};
+use relational::database::{Database, Relation, join, output};
 
 /// Test: Insert into both sides of a join in a single commit.
 /// This exercises the case where left_changes and right_changes are both non-empty.
 #[test]
 fn test_join_simultaneous_inserts() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut left, left_rel) = db.create_input::<(i32, i32)>(); // (key, left_val)
     let (mut right, right_rel) = db.create_input::<(i32, i32)>(); // (key, right_val)
@@ -68,7 +68,7 @@ fn test_join_simultaneous_inserts() {
 /// Simpler test: empty initial state, insert into both sides at once.
 #[test]
 fn test_join_both_sides_from_empty() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut left, left_rel) = db.create_input::<i32>();
     let (mut right, right_rel) = db.create_input::<i32>();
@@ -98,7 +98,7 @@ fn test_join_both_sides_from_empty() {
 /// which double-counts left_changes × right_changes.
 #[test]
 fn test_join_multiplicity_not_doubled() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut left, left_rel) = db.create_input::<i32>();
     let (mut right, right_rel) = db.create_input::<i32>();
@@ -122,7 +122,7 @@ fn test_join_multiplicity_not_doubled() {
 /// Test with multiple matching keys inserted simultaneously.
 #[test]
 fn test_join_multiple_keys_simultaneous() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut left, left_rel) = db.create_input::<(char, i32)>(); // (key, val)
     let (mut right, right_rel) = db.create_input::<(char, i32)>(); // (key, val)

@@ -4,7 +4,7 @@
 //! excluding any operations that were inside popped frames.
 
 use proptest::prelude::*;
-use relational::database2::{Database2, Relation, join, map, output, save, union};
+use relational::database::{Database, Relation, join, map, output, save, union};
 
 /// An operation that can be performed on the database.
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ fn arb_op() -> impl Strategy<Value = Op> {
 /// Build a database with transitive closure and apply operations.
 /// Returns the final state of the path relation.
 fn apply_ops_with_pop(ops: &[Op]) -> Vec<(i32, i32)> {
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure
@@ -96,7 +96,7 @@ fn apply_ops_replay_model(ops: &[Op]) -> Vec<(i32, i32)> {
     }
 
     // Now replay only surviving insert/delete operations
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure
@@ -171,7 +171,7 @@ proptest! {
 
 /// Apply operations with both regular and persistent inputs.
 fn apply_ops_with_persistent(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
@@ -225,7 +225,7 @@ fn apply_ops_replay_persistent_model(ops: &[Op]) -> (Vec<i32>, Vec<i32>) {
         }
     }
 
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_input::<i32>(); // Use regular input for replay
 
@@ -278,7 +278,7 @@ fn test_nested_pop_specific_case() {
 /// Test that exercises multiple feedbacks with pop.
 #[test]
 fn test_multiple_feedbacks_with_pop() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 

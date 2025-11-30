@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use relational::Multiset;
-use relational::database2::CommitId;
+use relational::database::CommitId;
 
 use super::Solver;
 use super::types::{ClauseId, Conflict, Level, Lit, Var};

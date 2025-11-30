@@ -6,10 +6,10 @@ use std::rc::Rc;
 
 use crate::Tuple;
 use crate::change::Diff;
-use crate::database2::commit_id::CommitId;
-use crate::database2::feedback::Variable;
-use crate::database2::relational::Relation;
-use crate::database2::relational::input::InputState;
+use crate::database::commit_id::CommitId;
+use crate::database::feedback::Variable;
+use crate::database::relational::Relation;
+use crate::database::relational::input::InputState;
 
 /// Type-erased input handle operations.
 pub(super) trait AnyInput {
@@ -92,11 +92,13 @@ pub(super) struct FeedbackWrapper<T: Tuple, R: Relation<T>> {
     variable: Rc<RefCell<Variable<T>>>,
     /// The input relation that feeds into this variable.
     input: R,
+    /// Shared commit ID counter.
+    commit_id: Rc<Cell<CommitId>>,
 }
 
 impl<T: Tuple, R: Relation<T>> FeedbackWrapper<T, R> {
-    pub(super) fn new(variable: Rc<RefCell<Variable<T>>>, input: R) -> Self {
-        FeedbackWrapper { variable, input }
+    pub(super) fn new(variable: Rc<RefCell<Variable<T>>>, input: R, commit_id: Rc<Cell<CommitId>>) -> Self {
+        FeedbackWrapper { variable, input, commit_id }
     }
 
     pub(super) fn push_initial_checkpoints(&mut self, depth: usize) {
@@ -145,6 +147,11 @@ impl<T: Tuple + 'static, R: Relation<T> + 'static> AnyFeedback for FeedbackWrapp
         if changes.is_empty() {
             return false;
         }
+
+        // Increment commit ID for this feedback step
+        let current_id = self.commit_id.get();
+        let new_id = CommitId::new(current_id.raw() + 1);
+        self.commit_id.set(new_id);
 
         let mut var = self.variable.borrow_mut();
         for (tuple, diff) in changes {

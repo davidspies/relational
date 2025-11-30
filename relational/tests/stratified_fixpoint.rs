@@ -3,8 +3,8 @@
 //! These tests verify that feedback loops are processed in declaration order,
 //! with each reaching fixpoint before the next is applied.
 
-use relational::database2::{
-    Database2, Output, Relation, difference, filter, join, map, max, output, save, union,
+use relational::database::{
+    Database, Output, Relation, difference, filter, join, map, max, output, save, union,
 };
 
 /// Helper to collect output after update.
@@ -20,7 +20,7 @@ fn collect_output<T: relational::Tuple + Clone>(out: &mut Output<T>) -> Vec<T> {
 /// - Second feedback: compute something based on the full transitive closure
 #[test]
 fn test_stratified_two_feedbacks() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     // Input: edges in a graph
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
@@ -84,7 +84,7 @@ fn test_stratified_two_feedbacks() {
 /// Test that adding edges after feedbacks are set up triggers re-computation.
 #[test]
 fn test_incremental_after_feedback() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let mut edges = save(edges_rel);
@@ -131,7 +131,7 @@ fn test_incremental_after_feedback() {
 /// earlier feedbacks when later ones change.
 #[test]
 fn test_feedback_order_independence() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let mut edges = save(edges_rel);
@@ -163,7 +163,7 @@ fn test_feedback_order_independence() {
 /// Test a chain of three feedbacks.
 #[test]
 fn test_three_feedbacks_chain() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     // Level 0: base facts
     let (mut facts_h, facts_rel) = db.create_input::<i32>();
@@ -219,7 +219,7 @@ fn test_three_feedbacks_chain() {
 /// Test that a feedback that doesn't change anything doesn't cause infinite loops.
 #[test]
 fn test_feedback_immediate_fixpoint() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut items_h, items_rel) = db.create_input::<i32>();
     items_h.insert(1);
@@ -309,7 +309,7 @@ fn test_feedback_immediate_fixpoint() {
 /// **Stratified: 250, Round-robin: different**
 #[test]
 fn test_a_reaches_fixpoint_between_b_applications() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut seeds_h, seeds_rel) = db.create_input::<i32>();
 
@@ -395,7 +395,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
 /// And we feed B back into A's input.
 #[test]
 fn test_interleaved_mutual_fixpoint() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     // Input numbers
     let (mut input_h, input_rel) = db.create_input::<i32>();
@@ -473,7 +473,7 @@ fn test_interleaved_mutual_fixpoint() {
 /// D combines B and C.
 #[test]
 fn test_diamond_dependency() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut input_h, input_rel) = db.create_input::<i32>();
 
@@ -508,7 +508,7 @@ fn test_diamond_dependency() {
 /// Test basic push/pop without feedback loops.
 #[test]
 fn test_push_pop_simple() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut items_h, items_rel) = db.create_input::<i32>();
     let mut items_saved = save(items_rel);
@@ -559,7 +559,7 @@ fn test_push_pop_simple() {
 /// Test nested push/pop.
 #[test]
 fn test_push_pop_nested() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut items_h, items_rel) = db.create_input::<i32>();
 
@@ -603,7 +603,7 @@ fn test_push_pop_nested() {
 /// Test push/pop with transitive closure.
 #[test]
 fn test_push_pop_with_feedback() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let mut edges = save(edges_rel);
@@ -656,7 +656,7 @@ fn test_push_pop_with_feedback() {
 /// Test that pop on empty stack returns false.
 #[test]
 fn test_pop_empty_stack() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     assert!(!db.pop());
     assert_eq!(db.depth(), 0);
@@ -665,7 +665,7 @@ fn test_pop_empty_stack() {
 /// Test push without changes followed by pop.
 #[test]
 fn test_push_pop_no_changes() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut items_h, items_rel) = db.create_input::<i32>();
     items_h.insert(1);
@@ -697,7 +697,7 @@ fn test_push_pop_no_changes() {
 /// - Decision variables (regular) should be undone on backtrack
 #[test]
 fn test_persistent_vs_regular_inputs() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     // Regular input: decision variables (should be undone on pop)
     let (mut decisions_h, decisions_rel) = db.create_input::<i32>();
@@ -756,7 +756,7 @@ fn test_persistent_vs_regular_inputs() {
 /// Test persistent inputs with nested checkpoints.
 #[test]
 fn test_persistent_nested_checkpoints() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
@@ -816,7 +816,7 @@ fn test_persistent_nested_checkpoints() {
 /// Test that derived relations correctly reflect persistent input changes.
 #[test]
 fn test_persistent_with_derived() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
@@ -855,7 +855,7 @@ fn test_persistent_with_derived() {
 /// Test delete operations on persistent inputs.
 #[test]
 fn test_persistent_delete() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
@@ -900,9 +900,9 @@ fn test_persistent_delete() {
 /// This is acceptable for now - the important thing is that the tuples themselves survive.
 #[test]
 fn test_feedback_with_id_with_persistent_input_and_pop() {
-    use relational::database2::CommitId;
+    use relational::database::CommitId;
 
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     // Persistent edges - survive pop
     let (mut edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();
@@ -1024,7 +1024,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
 /// After pop, the path variable should be empty.
 #[test]
 fn test_push_insert_pop_minimal() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
@@ -1066,7 +1066,7 @@ fn test_push_insert_pop_minimal() {
 /// Test: Push, insert, Pop
 #[test]
 fn test_push_insert_pop() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
@@ -1103,7 +1103,7 @@ fn test_push_insert_pop() {
 /// After pop, the path variable should still be empty.
 #[test]
 fn test_push_no_changes_pop() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
     let (_edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
@@ -1145,7 +1145,7 @@ fn test_push_no_changes_pop() {
 /// This tests if the issue is specific to feedback_with_id.
 #[test]
 fn test_regular_feedback_with_persistent_input_and_pop() {
-    let mut db = Database2::new();
+    let mut db = Database::new();
 
     // Persistent edges - survive pop
     let (mut edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();

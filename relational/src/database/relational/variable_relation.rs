@@ -5,13 +5,13 @@ use std::rc::Rc;
 
 use crate::Tuple;
 use crate::change::Diff;
-use crate::database2::feedback::Variable as InternalVariable;
+use crate::database::feedback::Variable as InternalVariable;
 
 use super::relation::Relation;
 
 /// A handle for a feedback variable.
 ///
-/// Created by `Database2::create_variable()` and passed to `Database2::feedback()`
+/// Created by `Database::create_variable()` and passed to `Database::feedback()`
 /// to wire up the input relation.
 pub struct Variable<T: Tuple> {
     pub(crate) inner: Rc<RefCell<InternalVariable<T>>>,
@@ -27,7 +27,7 @@ impl<T: Tuple> Clone for Variable<T> {
 
 /// A relation that reads changes from a feedback variable.
 ///
-/// Created by `Database2::create_variable()`. Use this in your dataflow graph
+/// Created by `Database::create_variable()`. Use this in your dataflow graph
 /// to read the variable's output.
 pub struct VariableRelation<T: Tuple> {
     pub(crate) inner: Rc<RefCell<InternalVariable<T>>>,

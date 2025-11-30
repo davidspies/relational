@@ -1,4 +1,4 @@
-//! The central Database2 type that coordinates commit, push/pop, and fixpoint.
+//! The central Database type that coordinates commit, push/pop, and fixpoint.
 
 mod wrappers;
 
@@ -26,7 +26,7 @@ enum StratifiedStep {
 }
 
 /// The main database type for coordinating differential dataflow.
-pub struct Database2 {
+pub struct Database {
     /// All registered inputs (type-erased).
     inputs: Vec<Box<dyn AnyInput>>,
     /// Stratified steps (feedbacks and interrupts) in registration order.
@@ -41,10 +41,10 @@ pub struct Database2 {
     was_interrupted: bool,
 }
 
-impl Database2 {
+impl Database {
     /// Create a new empty database.
     pub fn new() -> Self {
-        Database2 {
+        Database {
             inputs: Vec::new(),
             steps: Vec::new(),
             checkpoint_depth: 0,
@@ -122,6 +122,11 @@ impl Database2 {
         // Reset interrupt flag
         self.was_interrupted = false;
 
+        // Increment commit ID for this commit
+        let current_id = self.commit_id.get();
+        let new_id = CommitId::new(current_id.raw() + 1);
+        self.commit_id.set(new_id);
+
         // Record any pending inserts to the current checkpoint level
         for input in &mut self.inputs {
             input.record_pending_inserts();
@@ -175,7 +180,7 @@ impl Database2 {
         variable: Variable<T>,
         input: R,
     ) {
-        let mut wrapper = FeedbackWrapper::new(variable.inner, input);
+        let mut wrapper = FeedbackWrapper::new(variable.inner, input, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
 
@@ -346,9 +351,17 @@ impl Database2 {
     pub fn depth(&self) -> usize {
         self.checkpoint_depth
     }
+
+    /// Get the current commit ID.
+    ///
+    /// This is a monotonically increasing counter that advances with each
+    /// feedback iteration. It never decreases, even during backtracking.
+    pub fn commit_id(&self) -> CommitId {
+        self.commit_id.get()
+    }
 }
 
-impl Default for Database2 {
+impl Default for Database {
     fn default() -> Self {
         Self::new()
     }
