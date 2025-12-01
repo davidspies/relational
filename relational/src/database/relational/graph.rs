@@ -27,7 +27,7 @@ struct Node {
 }
 
 /// The dataflow graph tracking all relations for a Database.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct Graph {
     nodes: Vec<Node>,
 }
@@ -153,4 +153,12 @@ pub type GraphHandle = Arc<Graph>;
 /// Create a new graph builder for the construction phase.
 pub(crate) fn new_graph_builder() -> GraphBuilder {
     Rc::new(RefCell::new(Graph::new()))
+}
+
+/// Finalize a graph builder into an immutable Arc<Graph>.
+/// Takes the graph out of the builder, leaving an empty graph behind.
+/// After this, no new nodes can be added (the builder is consumed anyway).
+pub(crate) fn finalize_graph(builder: GraphBuilder) -> GraphHandle {
+    let graph = builder.replace(Graph::default());
+    Arc::new(graph)
 }

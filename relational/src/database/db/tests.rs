@@ -1,17 +1,18 @@
 //! Tests for Database.
 
-use crate::database::{Database, Op};
+use crate::database::{DatabaseBuilder, Op};
 
 /// Test that re-inserting already-present item during push doesn't affect pop.
 #[test]
 fn test_pop_duplicate_insert() {
-    let mut db = Database::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let mut builder = DatabaseBuilder::new();
+    let (mut handle, rel) = builder.create_input::<i32>();
 
     let out = rel.boxed().output();
 
     // Insert 0 before push
     handle.insert(0);
+    let mut db = builder.build();
     db.commit();
 
     assert_eq!(out.collect(), vec![0]);
@@ -37,11 +38,11 @@ fn test_pop_duplicate_insert() {
 /// Test push/pop with transitive closure feedback.
 #[test]
 fn test_pop_transitive_closure() {
-    let mut db = Database::new();
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let mut builder = DatabaseBuilder::new();
+    let (mut edges_h, edges_rel) = builder.create_input::<(i32, i32)>();
 
     // Set up transitive closure: path = edges ∪ (path ⋈ edges)
-    let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
+    let (path_var, path_var_rel) = builder.create_variable::<(i32, i32)>();
     let path_rel = path_var_rel.save();
 
     let edges_saved = edges_rel.save();
@@ -49,9 +50,11 @@ fn test_pop_transitive_closure() {
     // Swap path to (b, a), join_values with edges (b, c) -> (a, c)
     let new_paths = path_rel.get().swap().join_values(edges_saved.get());
     let all_paths = edges_saved.get().union(new_paths);
-    db.feedback(path_var, all_paths);
+    builder.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
+
+    let mut db = builder.build();
 
     // Push
     db.push();
@@ -80,8 +83,8 @@ fn test_pop_transitive_closure() {
 
 #[test]
 fn test_db_create_input_and_commit() {
-    let mut db = Database::new();
-    let (mut handle, mut rel) = db.create_input::<i32>();
+    let mut builder = DatabaseBuilder::new();
+    let (mut handle, mut rel) = builder.create_input::<i32>();
 
     handle.insert(1);
     handle.insert(2);
@@ -97,6 +100,7 @@ fn test_db_create_input_and_commit() {
     assert_eq!(count, 2);
 
     // After foreach drains pending, commit has nothing new to process
+    let mut db = builder.build();
     db.commit();
     let mut count2 = 0;
     rel.foreach(|_, _| count2 += 1);
@@ -105,11 +109,12 @@ fn test_db_create_input_and_commit() {
 
 #[test]
 fn test_db_push_pop_simple() {
-    let mut db = Database::new();
-    let (mut handle, mut rel) = db.create_input::<i32>();
+    let mut builder = DatabaseBuilder::new();
+    let (mut handle, mut rel) = builder.create_input::<i32>();
 
     // Initial state
     handle.insert(1);
+    let mut db = builder.build();
     db.commit();
 
     // Drain initial changes

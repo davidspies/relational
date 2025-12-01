@@ -11,9 +11,9 @@
 //! # Example: Transitive Closure
 //!
 //! ```
-//! use relational::database::{Database, Op};
+//! use relational::database::{DatabaseBuilder, Op};
 //!
-//! let mut db = Database::new();
+//! let mut db = DatabaseBuilder::new();
 //!
 //! // Create input relation for edges
 //! let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
@@ -40,6 +40,9 @@
 //! edges_h.insert((1, 2));
 //! edges_h.insert((2, 3));
 //! edges_h.insert((3, 4));
+//!
+//! // Finalize the dataflow and commit
+//! let mut db = db.build();
 //! db.commit();
 //!
 //! // Collect results (already computed via fixpoint)
@@ -50,18 +53,19 @@
 //! # Example: Using Push/Pop Checkpoints
 //!
 //! ```
-//! use relational::database::{Database, Op};
+//! use relational::database::{DatabaseBuilder, Op};
 //!
-//! let mut db = Database::new();
+//! let mut db = DatabaseBuilder::new();
 //! let (mut numbers_h, numbers_rel) = db.create_input::<i32>();
 //! let mut numbers = numbers_rel.save();
 //! let doubled = numbers.get().map(|n| n * 2);
 //! let mut doubled_out = doubled.boxed().output();
 //! let mut numbers_out = numbers.get().boxed().output();
 //!
-//! // Add initial data
+//! // Add initial data and finalize the dataflow
 //! numbers_h.insert(1);
 //! numbers_h.insert(2);
+//! let mut db = db.build();
 //! db.commit();
 //!
 //! assert_eq!(numbers_out.collect().len(), 2);
@@ -89,7 +93,7 @@ pub mod database;
 
 pub use change::Diff;
 pub use collection::Multiset;
-pub use database::{CommitId, Database};
+pub use database::{CommitId, Database, DatabaseBuilder};
 
 /// Assign a relation to a variable with a name derived from the variable.
 ///

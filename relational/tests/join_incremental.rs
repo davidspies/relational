@@ -9,13 +9,13 @@
 //!   left_changes × new_right + new_left × right_changes
 //! This double-counts (left_changes × right_changes).
 
-use relational::database::Database;
+use relational::database::DatabaseBuilder;
 
 /// Test: Insert into both sides of a join in a single commit.
 /// This exercises the case where left_changes and right_changes are both non-empty.
 #[test]
 fn test_join_simultaneous_inserts() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut left, left_rel) = db.create_input::<(i32, i32)>(); // (key, left_val)
     let (mut right, right_rel) = db.create_input::<(i32, i32)>(); // (key, right_val)
@@ -27,6 +27,7 @@ fn test_join_simultaneous_inserts() {
     // Initial state: left has (1, 10), right has (1, 100)
     left.insert((1, 10));
     right.insert((1, 100));
+    let mut db = db.build();
     db.commit();
 
     let result = joined_out.collect();
@@ -68,7 +69,7 @@ fn test_join_simultaneous_inserts() {
 /// Simpler test: empty initial state, insert into both sides at once.
 #[test]
 fn test_join_both_sides_from_empty() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut left, left_rel) = db.create_input::<(i32, ())>();
     let (mut right, right_rel) = db.create_input::<(i32, ())>();
@@ -80,6 +81,7 @@ fn test_join_both_sides_from_empty() {
     // Insert 1 into both sides in a single commit
     left.insert((1, ()));
     right.insert((1, ()));
+    let mut db = db.build();
     db.commit();
 
     let result = joined_out.collect();
@@ -98,7 +100,7 @@ fn test_join_both_sides_from_empty() {
 /// which double-counts left_changes × right_changes.
 #[test]
 fn test_join_multiplicity_not_doubled() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut left, left_rel) = db.create_input::<(i32, ())>();
     let (mut right, right_rel) = db.create_input::<(i32, ())>();
@@ -110,6 +112,7 @@ fn test_join_multiplicity_not_doubled() {
     // Insert 1 into both sides in a single commit
     left.insert((1, ()));
     right.insert((1, ()));
+    let mut db = db.build();
     db.commit();
 
     // The output's state should have multiplicity exactly 1
@@ -122,7 +125,7 @@ fn test_join_multiplicity_not_doubled() {
 /// Test with multiple matching keys inserted simultaneously.
 #[test]
 fn test_join_multiple_keys_simultaneous() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut left, left_rel) = db.create_input::<(char, i32)>(); // (key, val)
     let (mut right, right_rel) = db.create_input::<(char, i32)>(); // (key, val)
@@ -135,6 +138,7 @@ fn test_join_multiple_keys_simultaneous() {
     left.insert(('b', 2));
     right.insert(('a', 10));
     right.insert(('b', 20));
+    let mut db = db.build();
     db.commit();
 
     let mut result = joined_out.collect();

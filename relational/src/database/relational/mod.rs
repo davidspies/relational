@@ -35,4 +35,5 @@ pub use output::{Output, SavedOutput};
 pub use sink::Sink;
 
 // Graph exports (only public types)
+pub(crate) use graph::finalize_graph;
 pub use graph::{Graph, GraphHandle, NodeId};

@@ -3,7 +3,7 @@
 //! These tests verify that feedback loops are processed in declaration order,
 //! with each reaching fixpoint before the next is applied.
 
-use relational::database::Database;
+use relational::database::DatabaseBuilder;
 
 /// Test that multiple feedbacks run in stratified order.
 ///
@@ -13,7 +13,7 @@ use relational::database::Database;
 /// - Second feedback: compute something based on the full transitive closure
 #[test]
 fn test_stratified_two_feedbacks() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     // Input: edges in a graph
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
@@ -37,6 +37,9 @@ fn test_stratified_two_feedbacks() {
     let reach_input = edges.get().union(all_reach);
     db.feedback(reach_var, reach_input);
 
+    // Set up second feedback (extended)
+    db.feedback(extended_var, triples);
+
     // Create outputs for reading BEFORE inserting data
     let reach_out = reach_rel.get().boxed().output();
     let extended_out = extended_var_rel.boxed().output();
@@ -44,6 +47,7 @@ fn test_stratified_two_feedbacks() {
     // Insert edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));
     edges_h.insert((2, 3));
+    let mut db = db.build();
     db.commit();
 
     // At this point, reach should be at fixpoint: {(1,2), (2,3), (1,3)}
@@ -52,9 +56,6 @@ fn test_stratified_two_feedbacks() {
     assert!(reach_result.contains(&(2, 3)), "reach should contain (2,3)");
     assert!(reach_result.contains(&(1, 3)), "reach should contain (1,3)");
     assert_eq!(reach_result.len(), 3, "reach should have exactly 3 pairs");
-
-    // Set up second feedback (extended)
-    db.feedback(extended_var, triples);
 
     // Extended should contain all (a, b, c) where reach(a,b) and reach(b,c)
     // With reach = {(1,2), (2,3), (1,3)}:
@@ -76,7 +77,7 @@ fn test_stratified_two_feedbacks() {
 /// Test that adding edges after feedbacks are set up triggers re-computation.
 #[test]
 fn test_incremental_after_feedback() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let edges = edges_rel.save();
@@ -96,6 +97,7 @@ fn test_incremental_after_feedback() {
     // Initial edges
     edges_h.insert((1, 2));
     edges_h.insert((2, 3));
+    let mut db = db.build();
     db.commit();
 
     // Check initial state
@@ -122,7 +124,7 @@ fn test_incremental_after_feedback() {
 /// earlier feedbacks when later ones change.
 #[test]
 fn test_feedback_order_independence() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let edges = edges_rel.save();
@@ -140,6 +142,7 @@ fn test_feedback_order_independence() {
 
     edges_h.insert((1, 2));
     edges_h.insert((2, 3));
+    let mut db = db.build();
     db.commit();
 
     let paths = path_out.collect();
@@ -153,12 +156,10 @@ fn test_feedback_order_independence() {
 /// Test a chain of three feedbacks.
 #[test]
 fn test_three_feedbacks_chain() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     // Level 0: base facts
     let (mut facts_h, facts_rel) = db.create_input::<i32>();
-    facts_h.insert(1);
-    db.commit();
 
     // Level 1: double the facts
     let (doubled_var, doubled_var_rel) = db.create_variable::<i32>();
@@ -174,34 +175,30 @@ fn test_three_feedbacks_chain() {
     let (plus_one_var, plus_one_var_rel) = db.create_variable::<i32>();
     let plus_one_op = tripled_saved.get().map(|x| x + 1);
 
-    // Set up feedbacks in order
-    // doubled = double(facts)
+    // Set up all feedbacks
     db.feedback(doubled_var, double_op);
+    db.feedback(tripled_var, triple_op);
+    db.feedback(plus_one_var, plus_one_op);
 
-    // Create output for reading
+    // Create outputs for reading
     let doubled_out = doubled_saved.get().boxed().output();
+    let tripled_out = tripled_saved.get().boxed().output();
+    let plus_one_out = plus_one_var_rel.boxed().output();
 
-    // After first feedback: doubled = {2}
+    // Insert input and build
+    facts_h.insert(1);
+    let mut db = db.build();
+    db.commit();
+
+    // After commit: doubled = {2}
     let doubled_result = doubled_out.collect();
     assert!(doubled_result.contains(&2), "doubled should contain 2");
 
-    // tripled = triple(doubled)
-    db.feedback(tripled_var, triple_op);
-
-    // Create output for reading
-    let tripled_out = tripled_saved.get().boxed().output();
-
-    // After second feedback: tripled = {6}
+    // tripled = {6}
     let tripled_result = tripled_out.collect();
     assert!(tripled_result.contains(&6), "tripled should contain 6");
 
-    // plus_one = plus_one(tripled)
-    db.feedback(plus_one_var, plus_one_op);
-
-    // Create output for reading
-    let plus_one_out = plus_one_var_rel.boxed().output();
-
-    // After third feedback: plus_one = {7}
+    // plus_one = {7}
     let plus_one_result = plus_one_out.collect();
     assert!(plus_one_result.contains(&7), "plus_one should contain 7");
 }
@@ -209,17 +206,18 @@ fn test_three_feedbacks_chain() {
 /// Test that a feedback that doesn't change anything doesn't cause infinite loops.
 #[test]
 fn test_feedback_immediate_fixpoint() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut items_h, items_rel) = db.create_input::<i32>();
     items_h.insert(1);
     items_h.insert(2);
-    db.commit();
 
     // Feedback that just passes through the input (identity)
     let (var, var_rel) = db.create_variable::<i32>();
 
     db.feedback(var, items_rel);
+    let mut db = db.build();
+    db.commit();
 
     let var_out = var_rel.boxed().output();
     let result = var_out.collect();
@@ -299,7 +297,7 @@ fn test_feedback_immediate_fixpoint() {
 /// **Stratified: 250, Round-robin: different**
 #[test]
 fn test_a_reaches_fixpoint_between_b_applications() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut seeds_h, seeds_rel) = db.create_input::<i32>();
 
@@ -340,6 +338,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
 
     // Seed with 0
     seeds_h.insert(0);
+    let mut db = db.build();
     db.commit();
 
     println!("After commit:");
@@ -383,7 +382,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
 /// And we feed B back into A's input.
 #[test]
 fn test_interleaved_mutual_fixpoint() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     // Input numbers
     let (mut input_h, input_rel) = db.create_input::<i32>();
@@ -415,6 +414,7 @@ fn test_interleaved_mutual_fixpoint() {
 
     // Start with just 1
     input_h.insert(1);
+    let mut db = db.build();
     db.commit();
 
     // A should have: 1, 3, 5, 7, 9 (starting from 1, adding 2 each time)
@@ -461,7 +461,7 @@ fn test_interleaved_mutual_fixpoint() {
 /// D combines B and C.
 #[test]
 fn test_diamond_dependency() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut input_h, input_rel) = db.create_input::<i32>();
 
@@ -480,6 +480,7 @@ fn test_diamond_dependency() {
     db.feedback(d_var, d);
 
     input_h.insert(10);
+    let mut db = db.build();
     db.commit();
 
     let d_out = d_var_rel.boxed().output();
@@ -496,7 +497,7 @@ fn test_diamond_dependency() {
 /// Test basic push/pop without feedback loops.
 #[test]
 fn test_push_pop_simple() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut items_h, items_rel) = db.create_input::<i32>();
     let items_saved = items_rel.save();
@@ -505,6 +506,7 @@ fn test_push_pop_simple() {
     // Initial state
     items_h.insert(1);
     items_h.insert(2);
+    let mut db = db.build();
     db.commit();
 
     let items_out = items_saved.get().boxed().output();
@@ -547,11 +549,12 @@ fn test_push_pop_simple() {
 /// Test nested push/pop.
 #[test]
 fn test_push_pop_nested() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut items_h, items_rel) = db.create_input::<i32>();
 
     items_h.insert(1);
+    let mut db = db.build();
     db.commit();
 
     let items_out = items_rel.boxed().output();
@@ -591,7 +594,7 @@ fn test_push_pop_nested() {
 /// Test push/pop with transitive closure.
 #[test]
 fn test_push_pop_with_feedback() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let edges = edges_rel.save();
@@ -610,6 +613,7 @@ fn test_push_pop_with_feedback() {
     // Initial edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));
     edges_h.insert((2, 3));
+    let mut db = db.build();
     db.commit();
 
     // Initial paths: (1,2), (2,3), (1,3)
@@ -643,7 +647,8 @@ fn test_push_pop_with_feedback() {
 /// Test that pop on empty stack returns false.
 #[test]
 fn test_pop_empty_stack() {
-    let mut db = Database::new();
+    let db = DatabaseBuilder::new();
+    let mut db = db.build();
 
     assert!(!db.pop());
     assert_eq!(db.depth(), 0);
@@ -652,11 +657,12 @@ fn test_pop_empty_stack() {
 /// Test push without changes followed by pop.
 #[test]
 fn test_push_pop_no_changes() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut items_h, items_rel) = db.create_input::<i32>();
     items_h.insert(1);
     items_h.insert(2);
+    let mut db = db.build();
     db.commit();
 
     let items_out = items_rel.boxed().output();
@@ -684,7 +690,7 @@ fn test_push_pop_no_changes() {
 /// - Decision variables (regular) should be undone on backtrack
 #[test]
 fn test_persistent_vs_regular_inputs() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     // Regular input: decision variables (should be undone on pop)
     let (mut decisions_h, decisions_rel) = db.create_input::<i32>();
@@ -695,6 +701,7 @@ fn test_persistent_vs_regular_inputs() {
     // Insert initial data before any checkpoint
     decisions_h.insert(1);
     learned_h.insert(100);
+    let mut db = db.build();
     db.commit();
 
     let decisions_out = decisions_rel.boxed().output();
@@ -743,13 +750,14 @@ fn test_persistent_vs_regular_inputs() {
 /// Test persistent inputs with nested checkpoints.
 #[test]
 fn test_persistent_nested_checkpoints() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     regular_h.insert(1);
     persistent_h.insert(100);
+    let mut db = db.build();
     db.commit();
 
     let regular_out = regular_rel.boxed().output();
@@ -803,7 +811,7 @@ fn test_persistent_nested_checkpoints() {
 /// Test that derived relations correctly reflect persistent input changes.
 #[test]
 fn test_persistent_with_derived() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
@@ -814,6 +822,7 @@ fn test_persistent_with_derived() {
 
     regular_h.insert(1);
     persistent_h.insert(100);
+    let mut db = db.build();
     db.commit();
 
     db.push();
@@ -842,12 +851,13 @@ fn test_persistent_with_derived() {
 /// Test delete operations on persistent inputs.
 #[test]
 fn test_persistent_delete() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     persistent_h.insert(100);
     persistent_h.insert(200);
+    let mut db = db.build();
     db.commit();
 
     let persistent_out = persistent_rel.boxed().output();
@@ -889,7 +899,7 @@ fn test_persistent_delete() {
 fn test_feedback_with_id_with_persistent_input_and_pop() {
     use relational::database::CommitId;
 
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     // Persistent edges - survive pop
     let (mut edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();
@@ -913,6 +923,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
 
     // Initial edge
     edges_h.insert((1, 2));
+    let mut db = db.build();
     db.commit();
 
     // Initial state: path (1,2) discovered at some commit ID
@@ -1010,7 +1021,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
 /// After pop, the path variable should be empty.
 #[test]
 fn test_push_insert_pop_minimal() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
@@ -1022,6 +1033,8 @@ fn test_push_insert_pop_minimal() {
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
+
+    let mut db = db.build();
 
     // At this point, path should be empty
     assert_eq!(
@@ -1051,7 +1064,7 @@ fn test_push_insert_pop_minimal() {
 /// Test: Push, insert, Pop
 #[test]
 fn test_push_insert_pop() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
@@ -1063,6 +1076,8 @@ fn test_push_insert_pop() {
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
+
+    let mut db = db.build();
 
     db.push();
 
@@ -1087,7 +1102,7 @@ fn test_push_insert_pop() {
 /// After pop, the path variable should still be empty.
 #[test]
 fn test_push_no_changes_pop() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
     let (_edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
@@ -1099,6 +1114,8 @@ fn test_push_no_changes_pop() {
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
+
+    let mut db = db.build();
 
     // At this point, path should be empty
     assert_eq!(
@@ -1128,7 +1145,7 @@ fn test_push_no_changes_pop() {
 /// This tests if the issue is specific to feedback_with_id.
 #[test]
 fn test_regular_feedback_with_persistent_input_and_pop() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     // Persistent edges - survive pop
     let (mut edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();
@@ -1148,6 +1165,7 @@ fn test_regular_feedback_with_persistent_input_and_pop() {
 
     // Initial edge
     edges_h.insert((1, 2));
+    let mut db = db.build();
     db.commit();
 
     let paths_before: Vec<_> = path_out.collect();

@@ -2,7 +2,7 @@
 
 use std::ops::Not;
 
-use relational::database::{CommitId, Database};
+use relational::database::{CommitId, DatabaseBuilder};
 use relational::{assign, assign_saved, create_input, create_persistent_input, create_variable};
 
 use crate::Conflict;
@@ -15,7 +15,7 @@ impl Solver {
     /// Create a new solver.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let mut db = Database::new();
+        let mut db = DatabaseBuilder::new();
 
         // === Input Relations ===
         create_input!(db, clauses, clauses_rel, (ClauseId, Lit));
@@ -174,16 +174,19 @@ impl Solver {
                 .union(empty_clauses.get().map(Conflict::EmptyClause))
         );
 
-        // Initialize with Level::TOP so unit propagation works at level 0
-        levels.insert(Level::TOP);
-        db.commit();
-
         // Create outputs from relations (need to box them to store in struct)
         let assignments_out = assignments.get().output_with_sink();
         let causes_out = causes.output_with_sink();
         let assigned_out = assigned.get().output();
         let conflicts_out = conflicts.output();
         let literal_counts_out = literal_counts.output_with_sink();
+
+        // Initialize with Level::TOP so unit propagation works at level 0
+        levels.insert(Level::TOP);
+
+        // Finalize the dataflow graph and create the runtime Database
+        let mut db = db.build();
+        db.commit();
 
         Solver {
             db,

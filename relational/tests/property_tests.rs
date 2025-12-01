@@ -4,7 +4,7 @@
 //! excluding any operations that were inside popped frames.
 
 use proptest::prelude::*;
-use relational::database::Database;
+use relational::database::DatabaseBuilder;
 
 /// An operation that can be performed on the database.
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ fn arb_op() -> impl Strategy<Value = ReplayOp> {
 /// Build a database with transitive closure and apply operations.
 /// Returns the final state of the path relation.
 fn apply_ops_with_pop(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure
@@ -45,6 +45,8 @@ fn apply_ops_with_pop(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
+
+    let mut db = db.build();
 
     for op in ops {
         match op {
@@ -97,7 +99,7 @@ fn apply_ops_replay_model(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     }
 
     // Now replay only surviving insert/delete operations
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure
@@ -112,6 +114,8 @@ fn apply_ops_replay_model(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
+
+    let mut db = db.build();
 
     for (i, op) in ops.iter().enumerate() {
         if !surviving[i] {
@@ -173,12 +177,14 @@ proptest! {
 
 /// Apply operations with both regular and persistent inputs.
 fn apply_ops_with_persistent(ops: &[ReplayOp]) -> (Vec<i32>, Vec<i32>) {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     let regular_out = regular_rel.boxed().output();
     let persistent_out = persistent_rel.boxed().output();
+
+    let mut db = db.build();
 
     for op in ops {
         match op {
@@ -227,12 +233,14 @@ fn apply_ops_replay_persistent_model(ops: &[ReplayOp]) -> (Vec<i32>, Vec<i32>) {
         }
     }
 
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_input::<i32>(); // Use regular input for replay
 
     let regular_out = regular_rel.boxed().output();
     let persistent_out = persistent_rel.boxed().output();
+
+    let mut db = db.build();
 
     for (i, op) in ops.iter().enumerate() {
         match op {
@@ -280,7 +288,7 @@ fn test_nested_pop_specific_case() {
 /// Test that exercises multiple feedbacks with pop.
 #[test]
 fn test_multiple_feedbacks_with_pop() {
-    let mut db = Database::new();
+    let mut db = DatabaseBuilder::new();
 
     let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
@@ -302,16 +310,18 @@ fn test_multiple_feedbacks_with_pop() {
     let reach_join = reach_rel.get().swap().join(reach_rel.get());
     let triples = reach_join.map(|(b, (a, c))| (a, b, c));
 
-    // Set up edges: 1 -> 2 -> 3
-    edges_h.insert((1, 2));
-    edges_h.insert((2, 3));
-    db.commit();
-
+    // Set up feedbacks before building
     db.feedback(reach_var, all_reach);
     db.feedback(pairs_var, triples);
 
     let reach_out = reach_rel.get().boxed().output();
     let pairs_out = pairs_var_rel.boxed().output();
+
+    // Set up edges: 1 -> 2 -> 3
+    edges_h.insert((1, 2));
+    edges_h.insert((2, 3));
+    let mut db = db.build();
+    db.commit();
 
     // Initial state
     let reach_before = reach_out.collect();

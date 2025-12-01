@@ -1,4 +1,4 @@
-//! Input and variable creation for Database.
+//! Input and variable creation for DatabaseBuilder.
 
 use std::cell::RefCell;
 use std::hash::Hash;
@@ -10,10 +10,10 @@ use crate::database::relational::{
     InputHandle, PersistentInputHandle, Relation, Variable, VariableRelation,
 };
 
-use super::Database;
+use super::DatabaseBuilder;
 use super::wrappers::InputWrapper;
 
-impl Database {
+impl DatabaseBuilder {
     /// Create an input and register it with the database.
     ///
     /// Returns a handle for inserting/deleting tuples and a relation for reading.

@@ -25,7 +25,6 @@ impl Database {
     }
 
     /// Run stratified fixpoint up to and including the given step index.
-    /// Returns Some(step_index) if an interrupt fired, None otherwise.
     pub(super) fn run_stratified_fixpoint_up_to(&mut self, limit: usize) {
         let recording = self.checkpoint_depth > 0;
         let mut iterations = 0;

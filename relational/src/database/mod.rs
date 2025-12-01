@@ -18,4 +18,4 @@ pub use relational::*;
 
 // Re-export database
 pub use commit_id::CommitId;
-pub use db::Database;
+pub use db::{Database, DatabaseBuilder};
