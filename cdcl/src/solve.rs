@@ -52,11 +52,11 @@ impl Solver {
                                 let _ = p.add_clause(&analysis.learned_clause);
                             }
 
-                            // Learn the clause
-                            self.learn_clause(&analysis.learned_clause);
-
-                            // Non-chronological backtrack to the computed level
+                            // Non-chronological backtrack to the computed level FIRST
                             self.backtrack_to(analysis.backtrack_level);
+
+                            // Then learn the clause (it should now be unit/asserting)
+                            self.learn_clause(&analysis.learned_clause);
 
                             // The learned clause is now unit (asserting), so propagation
                             // will assign the UIP literal on the next iteration

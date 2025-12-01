@@ -39,4 +39,9 @@ if echo "$output" | grep -q "^s UNSATISFIABLE"; then
     echo "Verifying proof with drat-trim..."
     make -s bin/drat-trim
     bin/drat-trim "$file" "$proof_file"
+elif echo "$output" | grep -q "^s SATISFIABLE"; then
+    echo "---"
+    echo "Verifying solution..."
+    solution_line=$(echo "$output" | grep "^v ")
+    ./verify_sat.py "$file" "$solution_line"
 fi

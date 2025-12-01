@@ -52,14 +52,9 @@ impl Cnf {
             let line = line.context("read error")?;
             let line = line.trim();
 
-            // Skip empty lines and comments
-            if line.is_empty() || line.starts_with('c') {
+            // Skip empty lines and comments (including SATLIB's % marker)
+            if line.is_empty() || line.starts_with('c') || line.starts_with('%') {
                 continue;
-            }
-
-            // SATLIB end marker - stop parsing
-            if line.starts_with('%') {
-                break;
             }
 
             if line.starts_with('p') {

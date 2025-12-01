@@ -113,6 +113,8 @@ impl Solver {
             self.state.decision_stack.pop();
             self.state.current_level.dec();
         }
+        // Trigger propagation after backtracking to pick up any unit learned clauses
+        self.db.commit();
     }
 
     /// Learn a clause (adds to persistent learned relation).

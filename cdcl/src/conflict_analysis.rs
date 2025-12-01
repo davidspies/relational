@@ -29,7 +29,8 @@ pub struct AnalysisResult {
 /// Working set for conflict analysis, split by level for efficient access.
 struct WorkingSet {
     /// Literals at the current decision level, ordered by commit ID (most recent last).
-    at_current_level: BTreeMap<CommitId, Lit>,
+    /// Multiple literals can share the same commit ID, so we use a set per commit.
+    at_current_level: BTreeMap<CommitId, HashSet<Lit>>,
     /// Literals at other levels (no ordering needed).
     at_other_levels: HashSet<Lit>,
 }
@@ -52,7 +53,7 @@ impl WorkingSet {
     ) {
         if assignments.get(&lit) == Some(current_level) {
             if let Some(commit_id) = causes.get_commit_id(lit) {
-                self.at_current_level.insert(commit_id, lit);
+                self.at_current_level.entry(commit_id).or_default().insert(lit);
             } else {
                 // Decision literal at current level - treat as other level for simplicity
                 self.at_other_levels.insert(lit);
@@ -63,19 +64,29 @@ impl WorkingSet {
     }
 
     /// Get the most recently assigned literal at current level (highest commit ID).
+    /// Returns one literal from the most recent commit.
     fn pop_most_recent(&mut self) -> Option<(CommitId, Lit)> {
-        self.at_current_level.pop_last()
+        let (&commit_id, lits) = self.at_current_level.last_key_value()?;
+        let lit = *lits.iter().next()?;
+        // Remove this literal from the set
+        let lits = self.at_current_level.get_mut(&commit_id).unwrap();
+        lits.remove(&lit);
+        if lits.is_empty() {
+            self.at_current_level.remove(&commit_id);
+        }
+        Some((commit_id, lit))
     }
 
     /// Count of literals at current level.
     fn count_at_current(&self) -> usize {
-        self.at_current_level.len()
+        self.at_current_level.values().map(|s| s.len()).sum()
     }
 
     /// Iterate over all literals in the working set.
     fn iter(&self) -> impl Iterator<Item = Lit> + '_ {
         self.at_current_level
             .values()
+            .flat_map(|s| s.iter())
             .copied()
             .chain(self.at_other_levels.iter().copied())
     }
