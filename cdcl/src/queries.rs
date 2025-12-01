@@ -41,8 +41,7 @@ impl Solver {
     /// This tends to satisfy more clauses and prune the search space faster.
     pub fn pick_branching_literal(&self) -> Option<Lit> {
         let counts = self.outputs.literal_counts.get();
-        counts
-            .max_count()
-            .and_then(|(_, lits)| lits.iter().next().copied())
+        let (_, lits) = counts.max_count()?;
+        Some(lits.iter().next().copied().unwrap())
     }
 }
