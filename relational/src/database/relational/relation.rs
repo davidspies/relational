@@ -96,6 +96,7 @@ pub struct Relation<R> {
 
 impl<R> Relation<R> {
     /// Create a new relation with graph tracking.
+    /// Panics if the graph has already been finalized.
     pub(crate) fn new(
         inner: R,
         commit_id: Rc<Cell<CommitId>>,
@@ -103,7 +104,11 @@ impl<R> Relation<R> {
         op_type: &'static str,
         parents: Vec<NodeId>,
     ) -> Self {
-        let (node_id, counter) = graph.borrow_mut().add_node(op_type, parents);
+        let (node_id, counter) = graph
+            .borrow_mut()
+            .as_mut()
+            .expect("cannot create relation after build()")
+            .add_node(op_type, parents);
         Relation {
             inner,
             commit_id,
@@ -119,8 +124,13 @@ impl<R> Relation<R> {
     }
 
     /// Give this relation a name for debugging/visualization.
+    /// Panics if the graph has already been finalized.
     pub fn named(self, name: impl Into<String>) -> Self {
-        self.graph.borrow_mut().set_name(self.node_id, name.into());
+        self.graph
+            .borrow_mut()
+            .as_mut()
+            .expect("cannot name relation after build()")
+            .set_name(self.node_id, name.into());
         self
     }
 

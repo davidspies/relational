@@ -502,15 +502,14 @@ fn test_push_pop_simple() {
     let (mut items_h, items_rel) = db.create_input::<i32>();
     let items_saved = items_rel.save();
     let doubled = items_saved.get().map(|x| x * 2);
+    let items_out = items_saved.get().boxed().output();
+    let doubled_out = doubled.boxed().output();
 
     // Initial state
     items_h.insert(1);
     items_h.insert(2);
     let mut db = db.build();
     db.commit();
-
-    let items_out = items_saved.get().boxed().output();
-    let doubled_out = doubled.boxed().output();
 
     assert_eq!(items_out.collect().len(), 2);
     assert_eq!(doubled_out.collect().len(), 2);

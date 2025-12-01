@@ -145,20 +145,24 @@ impl Graph {
 }
 
 /// A mutable handle to a Graph during construction (not thread-safe).
-pub(crate) type GraphBuilder = Rc<RefCell<Graph>>;
+/// Contains Some(Graph) during construction, None after finalization.
+pub(crate) type GraphBuilder = Rc<RefCell<Option<Graph>>>;
 
 /// An immutable, thread-safe handle to a Graph after construction.
 pub type GraphHandle = Arc<Graph>;
 
 /// Create a new graph builder for the construction phase.
 pub(crate) fn new_graph_builder() -> GraphBuilder {
-    Rc::new(RefCell::new(Graph::new()))
+    Rc::new(RefCell::new(Some(Graph::new())))
 }
 
 /// Finalize a graph builder into an immutable Arc<Graph>.
-/// Takes the graph out of the builder, leaving an empty graph behind.
-/// After this, no new nodes can be added (the builder is consumed anyway).
+/// Takes the graph out of the builder, leaving None behind.
+/// After this, any attempt to create relations will panic.
 pub(crate) fn finalize_graph(builder: GraphBuilder) -> GraphHandle {
-    let graph = builder.replace(Graph::default());
+    let graph = builder
+        .borrow_mut()
+        .take()
+        .expect("graph already finalized");
     Arc::new(graph)
 }
