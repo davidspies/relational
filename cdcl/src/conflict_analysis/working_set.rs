@@ -34,7 +34,10 @@ impl WorkingSet {
         causes: &CauseSink,
     ) {
         let at_current = assignments.get(&lit) == Some(current_level);
-        let in_current = self.at_current_level.values().any(|lits| lits.contains(&lit));
+        let in_current = self
+            .at_current_level
+            .values()
+            .any(|lits| lits.contains(&lit));
         let in_other = self.at_other_levels.contains(&lit);
 
         // Same literal should never appear at multiple levels
@@ -51,7 +54,10 @@ impl WorkingSet {
 
         if at_current {
             if let Some(commit_id) = causes.get_commit_id(lit) {
-                self.at_current_level.entry(commit_id).or_default().insert(lit);
+                self.at_current_level
+                    .entry(commit_id)
+                    .or_default()
+                    .insert(lit);
             } else {
                 // Decision literal at current level - treat as other level for simplicity
                 self.at_other_levels.insert(lit);

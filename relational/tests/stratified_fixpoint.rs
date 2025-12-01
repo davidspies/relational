@@ -30,10 +30,7 @@ fn test_stratified_two_feedbacks() {
 
     // Second feedback: triples (a, b, c) where reach(a, b) and reach(b, c)
     let (extended_var, extended_var_rel) = db.create_variable::<(i32, i32, i32)>();
-    let reach_join = reach_rel
-        .get()
-        .swap()
-        .join(reach_rel.get());
+    let reach_join = reach_rel.get().swap().join(reach_rel.get());
     let triples = reach_join.map(|(b, (a, c))| (a, b, c));
 
     // Set up first feedback (reach)

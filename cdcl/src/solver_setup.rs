@@ -23,10 +23,7 @@ impl Solver {
         );
 
         // Current level = max(levels)
-        assign!(
-            current_level_rel,
-            levels_rel.global_max().boxed()
-        );
+        assign!(current_level_rel, levels_rel.global_max().boxed());
 
         // All clauses (original + learned)
         assign_saved!(all_clauses, clauses_rel.union(learned_rel).boxed());
@@ -129,10 +126,7 @@ impl Solver {
         // Filter out potential units whose clause is already satisfied
         assign!(
             units_from_sat,
-            potential_units
-                .get()
-                .semijoin(satisfied_set.get())
-                .boxed()
+            potential_units.get().semijoin(satisfied_set.get()).boxed()
         );
 
         assign!(
@@ -143,7 +137,10 @@ impl Solver {
         // === Conflict Detection ===
         assign!(all_clause_ids, all_clauses.get().fst().boxed());
         assign!(all_clause_ids_distinct, all_clause_ids.distinct().boxed());
-        assign!(clauses_with_unassigned, unassigned_count.get().fst().boxed());
+        assign!(
+            clauses_with_unassigned,
+            unassigned_count.get().fst().boxed()
+        );
         assign!(
             fully_assigned_clauses,
             all_clause_ids_distinct
@@ -200,10 +197,7 @@ impl Solver {
         db.interrupt(conflicts.get());
 
         // === Set up the feedback loop ===
-        assign!(
-            unit_with_level,
-            units.cartesian_product(current_level_rel)
-        );
+        assign!(unit_with_level, units.cartesian_product(current_level_rel));
         assign!(
             unit_lit_level_cid,
             unit_with_level

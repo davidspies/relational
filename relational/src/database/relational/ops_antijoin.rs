@@ -89,10 +89,7 @@ where
 impl<RL> Relation<RL> {
     /// Antijoin - filter to tuples whose key is NOT in right.
     /// Left input is (K, V), right input is K. Output is (K, V).
-    pub fn antijoin<K, V, RR>(
-        self,
-        right: Relation<RR>,
-    ) -> Relation<AntijoinOp<K, V, RL, RR>>
+    pub fn antijoin<K, V, RR>(self, right: Relation<RR>) -> Relation<AntijoinOp<K, V, RL, RR>>
     where
         RL: Op<(K, V)>,
         K: Eq + Hash + Clone,

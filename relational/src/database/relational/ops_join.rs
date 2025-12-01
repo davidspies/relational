@@ -84,10 +84,7 @@ where
 impl<RL> Relation<RL> {
     /// Join two relations on matching keys.
     /// Both inputs must be (K, V) tuples. Output is (K, (V1, V2)) tuples.
-    pub fn join<K, V1, V2, RR>(
-        self,
-        right: Relation<RR>,
-    ) -> Relation<JoinOp<K, V1, V2, RL, RR>>
+    pub fn join<K, V1, V2, RR>(self, right: Relation<RR>) -> Relation<JoinOp<K, V1, V2, RL, RR>>
     where
         RL: Op<(K, V1)>,
         K: Eq + Hash + Clone,
