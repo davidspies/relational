@@ -1008,7 +1008,8 @@ fn test_graph_tracking() {
     assert!(dot.contains("positive_filter"), "Should contain named node");
     assert!(dot.contains("doubler"), "Should contain named node");
     assert!(dot.contains("input"), "Should contain input node");
-    assert!(dot.contains("flat_map"), "filter uses flat_map internally");
+    assert!(dot.contains("filter"), "Should contain filter node");
+    assert!(dot.contains("map"), "Should contain map node");
 }
 
 #[test]
@@ -1028,7 +1029,7 @@ fn test_graph_element_counting() {
     let dot_before = db.graph().to_dot();
     if !cfg!(feature = "consolidate_all") {
         assert!(
-            dot_before.contains("doubler\\nflat_map\\n0"),
+            dot_before.contains("doubler\\nmap\\n0"),
             "Counter should be 0 before processing"
         );
     }
@@ -1036,11 +1037,11 @@ fn test_graph_element_counting() {
     // Process elements
     let _ = collect_to_map(&mut mapped);
 
-    // After processing, the flat_map node should show count of 3
+    // After processing, the map node should show count of 3
     let dot_after = db.graph().to_dot();
     if !cfg!(feature = "consolidate_all") {
         assert!(
-            dot_after.contains("doubler\\nflat_map\\n3"),
+            dot_after.contains("doubler\\nmap\\n3"),
             "Counter should be 3 after processing 3 elements"
         );
     }

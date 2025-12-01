@@ -7,6 +7,7 @@ use std::rc::Rc;
 use crate::change::Diff;
 use crate::database::feedback::Variable as InternalVariable;
 
+use super::graph::NodeId;
 use super::relation::Op;
 
 /// A handle for a feedback variable.
@@ -15,12 +16,15 @@ use super::relation::Op;
 /// to wire up the input relation.
 pub struct Variable<T> {
     pub(crate) inner: Rc<RefCell<InternalVariable<T>>>,
+    /// The node ID of the VariableRelation in the dataflow graph.
+    pub(crate) node_id: NodeId,
 }
 
 impl<T> Clone for Variable<T> {
     fn clone(&self) -> Self {
         Variable {
             inner: self.inner.clone(),
+            node_id: self.node_id,
         }
     }
 }

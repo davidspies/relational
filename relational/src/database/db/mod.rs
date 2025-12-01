@@ -76,6 +76,13 @@ impl DatabaseBuilder {
         variable: Variable<T>,
         input: Relation<R>,
     ) {
+        // Add a feedback edge from input to variable (dashed in graph)
+        let input_node = input.node_id;
+        let variable_node = variable.node_id;
+        if let Some(graph) = input.graph.borrow_mut().as_mut() {
+            graph.add_feedback_edge(input_node, variable_node);
+        }
+
         let mut wrapper = FeedbackWrapper::new(variable.inner, input);
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
@@ -90,6 +97,13 @@ impl DatabaseBuilder {
         variable: Variable<(T, CommitId)>,
         input: Relation<R>,
     ) {
+        // Add a feedback edge from input to variable (dashed in graph)
+        let input_node = input.node_id;
+        let variable_node = variable.node_id;
+        if let Some(graph) = input.graph.borrow_mut().as_mut() {
+            graph.add_feedback_edge(input_node, variable_node);
+        }
+
         let mut wrapper = FeedbackWithIdWrapper::new(variable.inner, input, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
@@ -97,6 +111,12 @@ impl DatabaseBuilder {
 
     /// Register an interrupt that stops fixpoint when the relation becomes non-empty.
     pub fn interrupt<T: 'static, R: Op<T> + 'static>(&mut self, input: Relation<R>) {
+        // Add an interrupt node to the graph
+        let parent_id = input.node_id;
+        if let Some(graph) = input.graph.borrow_mut().as_mut() {
+            graph.add_node("interrupt", vec![parent_id]);
+        }
+
         self.steps
             .push(StratifiedStep::Interrupt(Box::new(InterruptWrapper::new(
                 input,

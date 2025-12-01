@@ -76,16 +76,19 @@ impl DatabaseBuilder {
         &self,
     ) -> (Variable<T>, Relation<VariableRelation<T>>) {
         let inner = Rc::new(RefCell::new(InternalVariable::new()));
-        let var = Variable {
-            inner: inner.clone(),
-        };
         let rel = Relation::new(
-            VariableRelation { inner },
+            VariableRelation {
+                inner: inner.clone(),
+            },
             self.commit_id.clone(),
             self.graph.clone(),
             "variable",
             vec![],
         );
+        let var = Variable {
+            inner,
+            node_id: rel.node_id,
+        };
         (var, rel)
     }
 }

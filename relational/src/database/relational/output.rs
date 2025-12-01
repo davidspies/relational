@@ -45,6 +45,12 @@ impl<T: Eq + Hash, S: Sink<T>, R: Op<T>> Output<T, S, R> {
     where
         S: Default,
     {
+        // Add an output node to the graph
+        let parent_id = relation.node_id;
+        if let Some(graph) = relation.graph.borrow_mut().as_mut() {
+            graph.add_node("output", vec![parent_id]);
+        }
+
         Output {
             inner: RefCell::new(OutputInner {
                 relation,

@@ -30,12 +30,17 @@ struct Node {
 #[derive(Debug, Default)]
 pub struct Graph {
     nodes: Vec<Node>,
+    /// Feedback edges (source -> target) rendered as dashed arrows.
+    feedback_edges: Vec<(NodeId, NodeId)>,
 }
 
 impl Graph {
     /// Create a new empty graph.
     fn new() -> Self {
-        Graph { nodes: Vec::new() }
+        Graph {
+            nodes: Vec::new(),
+            feedback_edges: Vec::new(),
+        }
     }
 
     /// Add a node to the graph, returning its ID and counter.
@@ -70,6 +75,11 @@ impl Graph {
         }
     }
 
+    /// Add a feedback edge (rendered as dashed arrow).
+    pub(crate) fn add_feedback_edge(&mut self, source: NodeId, target: NodeId) {
+        self.feedback_edges.push((source, target));
+    }
+
     /// Export the graph to DOT format for Graphviz.
     pub fn to_dot(&self) -> String {
         let mut out = String::from("digraph dataflow {\n");
@@ -90,6 +100,18 @@ impl Graph {
         for node in &self.nodes {
             for parent in &node.parents {
                 out.push_str(&format!("  n{} -> n{};\n", parent.index(), node.id.index()));
+            }
+        }
+
+        // Feedback edges (dashed)
+        if !self.feedback_edges.is_empty() {
+            out.push('\n');
+            for (source, target) in &self.feedback_edges {
+                out.push_str(&format!(
+                    "  n{} -> n{} [style=dashed];\n",
+                    source.index(),
+                    target.index()
+                ));
             }
         }
 
