@@ -76,11 +76,13 @@ impl Cnf {
                 bail!("clause before problem line");
             }
 
+            let mut line_has_zero = false;
             for token in line.split_whitespace() {
                 let lit: i32 = token
                     .parse()
                     .with_context(|| format!("invalid literal: {token}"))?;
                 if lit == 0 {
+                    line_has_zero = true;
                     if !current_clause.is_empty() {
                         clauses.push(current_clause);
                         current_clause = Vec::new();
@@ -88,6 +90,11 @@ impl Cnf {
                 } else {
                     current_clause.push(Lit::from_raw(lit));
                 }
+            }
+            // Some SATLIB files omit the trailing 0 on some lines - treat EOL as clause end
+            if !line_has_zero && !current_clause.is_empty() {
+                clauses.push(current_clause);
+                current_clause = Vec::new();
             }
         }
 

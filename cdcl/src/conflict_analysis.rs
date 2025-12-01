@@ -51,7 +51,23 @@ impl WorkingSet {
         assignments: &AssignmentsSink,
         causes: &CauseSink,
     ) {
-        if assignments.get(&lit) == Some(current_level) {
+        let at_current = assignments.get(&lit) == Some(current_level);
+        let in_current = self.at_current_level.values().any(|lits| lits.contains(&lit));
+        let in_other = self.at_other_levels.contains(&lit);
+
+        // Same literal should never appear at multiple levels
+        if at_current {
+            assert!(!in_other, "Literal {:?} appears at multiple levels", lit);
+        } else {
+            assert!(!in_current, "Literal {:?} appears at multiple levels", lit);
+        }
+
+        // Skip if already in the correct collection
+        if in_current || in_other {
+            return;
+        }
+
+        if at_current {
             if let Some(commit_id) = causes.get_commit_id(lit) {
                 self.at_current_level.entry(commit_id).or_default().insert(lit);
             } else {
