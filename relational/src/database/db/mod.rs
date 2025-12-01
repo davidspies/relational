@@ -24,11 +24,10 @@ enum StratifiedStep {
     Interrupt(Box<dyn AnyInterrupt>),
 }
 
-/// The builder for constructing a Database and its dataflow graph.
+/// The generic database type parameterized by graph storage.
 ///
-/// Use this to create inputs, variables, and set up feedback loops.
-/// Call `build()` to finalize and get a `Database` for runtime operations.
-pub struct DatabaseBuilder {
+/// `G` is either `GraphBuilder` (during construction) or `Arc<Graph>` (at runtime).
+pub struct DatabaseG<G> {
     /// All registered inputs (type-erased).
     inputs: Vec<Box<dyn AnyInput>>,
     /// Stratified steps (feedbacks and interrupts) in registration order.
@@ -39,33 +38,26 @@ pub struct DatabaseBuilder {
     max_iterations: usize,
     /// Shared commit ID counter for feedback_with_id.
     commit_id: Rc<Cell<CommitId>>,
-    /// Shadow graph for tracking dataflow structure and element counts.
-    graph: GraphBuilder,
+    /// Graph storage - either mutable builder or immutable finalized graph.
+    graph: G,
 }
+
+/// The builder for constructing a Database and its dataflow graph.
+///
+/// Use this to create inputs, variables, and set up feedback loops.
+/// Call `build()` to finalize and get a `Database` for runtime operations.
+pub type DatabaseBuilder = DatabaseG<GraphBuilder>;
 
 /// The main database type for coordinating differential dataflow at runtime.
 ///
 /// Created from a `DatabaseBuilder` via `build()`.
 /// Use this for commit, push/pop, and accessing the dataflow graph.
-pub struct Database {
-    /// All registered inputs (type-erased).
-    inputs: Vec<Box<dyn AnyInput>>,
-    /// Stratified steps (feedbacks and interrupts) in registration order.
-    steps: Vec<StratifiedStep>,
-    /// Current checkpoint stack depth.
-    checkpoint_depth: usize,
-    /// Maximum iterations for fixpoint.
-    max_iterations: usize,
-    /// Shared commit ID counter for feedback_with_id.
-    commit_id: Rc<Cell<CommitId>>,
-    /// Immutable shadow graph (finalized from builder).
-    graph: Arc<Graph>,
-}
+pub type Database = DatabaseG<Arc<Graph>>;
 
 impl DatabaseBuilder {
     /// Create a new empty database builder.
     pub fn new() -> Self {
-        DatabaseBuilder {
+        Self {
             inputs: Vec::new(),
             steps: Vec::new(),
             checkpoint_depth: 0,
@@ -111,11 +103,6 @@ impl DatabaseBuilder {
             ))));
     }
 
-    /// Get the current commit ID.
-    pub fn commit_id(&self) -> CommitId {
-        self.commit_id.get()
-    }
-
     /// Finalize the builder and create a Database for runtime operations.
     ///
     /// After calling this, no more inputs, variables, or relations can be created.
@@ -149,7 +136,9 @@ impl Database {
         let current_id = self.commit_id.get();
         self.commit_id.set(CommitId::new(current_id.raw() + 1));
     }
+}
 
+impl<G> DatabaseG<G> {
     /// Get the current commit ID.
     pub fn commit_id(&self) -> CommitId {
         self.commit_id.get()
