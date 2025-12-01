@@ -27,8 +27,8 @@ where
 }
 
 impl<R> Relation<R> {
-    /// Negate all diffs.
-    pub fn negate<T>(self) -> Relation<impl Op<T>>
+    /// Negate all diffs (without consolidation).
+    pub fn negate_<T>(self) -> Relation<impl Op<T>>
     where
         R: Op<T>,
         T: Eq + Hash,
@@ -36,7 +36,7 @@ impl<R> Relation<R> {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        let result = Relation::new(
+        Relation::new(
             NegateOp {
                 inner: self,
                 _phantom: std::marker::PhantomData,
@@ -45,7 +45,16 @@ impl<R> Relation<R> {
             graph,
             "negate",
             vec![node_id],
-        );
+        )
+    }
+
+    /// Negate all diffs.
+    pub fn negate<T>(self) -> Relation<impl Op<T>>
+    where
+        R: Op<T>,
+        T: Eq + Hash,
+    {
+        let result = self.negate_();
         #[cfg(feature = "consolidate_all")]
         let result = result.consolidate_();
         result

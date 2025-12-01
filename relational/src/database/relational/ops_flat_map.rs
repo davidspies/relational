@@ -35,8 +35,8 @@ where
 }
 
 impl<R> Relation<R> {
-    /// Transform each tuple into zero or more tuples.
-    pub fn flat_map<T, U, I, F>(self, f: F) -> Relation<impl Op<U>>
+    /// Transform each tuple into zero or more tuples (without consolidation).
+    pub fn flat_map_<T, U, I, F>(self, f: F) -> Relation<impl Op<U>>
     where
         R: Op<T>,
         I: IntoIterator<Item = U>,
@@ -46,7 +46,7 @@ impl<R> Relation<R> {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        let result = Relation::new(
+        Relation::new(
             FlatMapOp {
                 inner: self,
                 f,
@@ -56,7 +56,18 @@ impl<R> Relation<R> {
             graph,
             "flat_map",
             vec![node_id],
-        );
+        )
+    }
+
+    /// Transform each tuple into zero or more tuples.
+    pub fn flat_map<T, U, I, F>(self, f: F) -> Relation<impl Op<U>>
+    where
+        R: Op<T>,
+        I: IntoIterator<Item = U>,
+        F: Fn(T) -> I,
+        U: Eq + Hash,
+    {
+        let result = self.flat_map_(f);
         #[cfg(feature = "consolidate_all")]
         let result = result.consolidate_();
         result

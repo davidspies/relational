@@ -77,9 +77,9 @@ where
 }
 
 impl<RL> Relation<RL> {
-    /// Join two relations on matching keys.
+    /// Join two relations on matching keys (without consolidation).
     /// Both inputs must be (K, V) tuples. Output is (K, (V1, V2)) tuples.
-    pub fn join<K, V1, V2, RR>(self, right: Relation<RR>) -> Relation<impl Op<(K, (V1, V2))>>
+    pub fn join_<K, V1, V2, RR>(self, right: Relation<RR>) -> Relation<impl Op<(K, (V1, V2))>>
     where
         RL: Op<(K, V1)>,
         K: Clone + Eq + Hash,
@@ -92,7 +92,7 @@ impl<RL> Relation<RL> {
         let right_node = right.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        let result = Relation::new(
+        Relation::new(
             JoinOp {
                 left: self,
                 right,
@@ -103,7 +103,20 @@ impl<RL> Relation<RL> {
             graph,
             "join",
             vec![left_node, right_node],
-        );
+        )
+    }
+
+    /// Join two relations on matching keys.
+    /// Both inputs must be (K, V) tuples. Output is (K, (V1, V2)) tuples.
+    pub fn join<K, V1, V2, RR>(self, right: Relation<RR>) -> Relation<impl Op<(K, (V1, V2))>>
+    where
+        RL: Op<(K, V1)>,
+        K: Clone + Eq + Hash,
+        V1: Clone + Eq + Hash,
+        V2: Clone + Eq + Hash,
+        RR: Op<(K, V2)>,
+    {
+        let result = self.join_(right);
         #[cfg(feature = "consolidate_all")]
         let result = result.consolidate_();
         result

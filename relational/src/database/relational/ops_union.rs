@@ -29,8 +29,8 @@ where
 }
 
 impl<L> Relation<L> {
-    /// Combine two relations.
-    pub fn union<T, R>(self, right: Relation<R>) -> Relation<impl Op<T>>
+    /// Combine two relations (without consolidation).
+    pub fn union_<T, R>(self, right: Relation<R>) -> Relation<impl Op<T>>
     where
         L: Op<T>,
         R: Op<T>,
@@ -41,7 +41,7 @@ impl<L> Relation<L> {
         let right_node = right.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        let result = Relation::new(
+        Relation::new(
             UnionOp {
                 left: self,
                 right,
@@ -51,7 +51,17 @@ impl<L> Relation<L> {
             graph,
             "union",
             vec![left_node, right_node],
-        );
+        )
+    }
+
+    /// Combine two relations.
+    pub fn union<T, R>(self, right: Relation<R>) -> Relation<impl Op<T>>
+    where
+        L: Op<T>,
+        R: Op<T>,
+        T: Eq + Hash,
+    {
+        let result = self.union_(right);
         #[cfg(feature = "consolidate_all")]
         let result = result.consolidate_();
         result
