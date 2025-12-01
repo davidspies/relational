@@ -35,15 +35,14 @@ impl Solver {
         }
     }
 
-    /// Get the next unassigned variable (simple heuristic: lowest numbered).
-    pub fn pick_branching_variable(&self) -> Option<Var> {
-        let assigned = self.outputs.assigned.get();
-        for v in 1..=self.state.num_vars.raw() {
-            let var = Var::new(v);
-            if !assigned.contains(&Lit::pos(var)) && !assigned.contains(&Lit::neg(var)) {
-                return Some(var);
-            }
-        }
-        None
+    /// Pick the next branching literal using the DLIS heuristic.
+    ///
+    /// Returns the unassigned literal that appears in the most remaining clauses.
+    /// This tends to satisfy more clauses and prune the search space faster.
+    pub fn pick_branching_literal(&self) -> Option<Lit> {
+        let counts = self.outputs.literal_counts.get();
+        counts
+            .max_count()
+            .and_then(|(_, lits)| lits.iter().next().copied())
     }
 }

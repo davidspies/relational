@@ -115,7 +115,7 @@ impl Cnf {
 
     /// Solve the CNF formula.
     pub fn solve(&self) -> SolveResult {
-        let mut solver = Solver::new(Var::new(self.num_vars.max(1)));
+        let mut solver = Solver::new();
 
         for (i, clause) in self.clauses.iter().enumerate() {
             solver.add_clause(ClauseId::new((i + 1) as u32), clause);
@@ -134,7 +134,7 @@ impl Cnf {
 
     /// Solve and return the solver (for access to more detailed results).
     pub fn into_solver(self) -> Solver {
-        let mut solver = Solver::new(Var::new(self.num_vars.max(1)));
+        let mut solver = Solver::new();
 
         for (i, clause) in self.clauses.iter().enumerate() {
             solver.add_clause(ClauseId::new((i + 1) as u32), clause);

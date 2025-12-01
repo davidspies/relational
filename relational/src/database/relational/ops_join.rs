@@ -47,8 +47,11 @@ where
             }
 
             // Update left index
-            let entry = self.left_index.entry(k).or_default();
+            let entry = self.left_index.entry(k.clone()).or_default();
             entry.update(v1, l_diff);
+            if entry.is_empty() {
+                self.left_index.remove(&k);
+            }
         });
 
         // Process right changes - join with updated left state (includes new left tuples)
@@ -64,8 +67,11 @@ where
             }
 
             // Update right index
-            let entry = self.right_index.entry(k).or_default();
+            let entry = self.right_index.entry(k.clone()).or_default();
             entry.update(v2, r_diff);
+            if entry.is_empty() {
+                self.right_index.remove(&k);
+            }
         });
     }
 }

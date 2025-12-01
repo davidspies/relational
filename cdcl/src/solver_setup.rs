@@ -12,8 +12,9 @@ use super::solver::{Inputs, Outputs, Solver, State};
 use super::types::{ClauseId, Level, Lit};
 
 impl Solver {
-    /// Create a new solver for the given number of variables.
-    pub fn new(num_vars: super::types::Var) -> Self {
+    /// Create a new solver.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
         let mut db = Database::new();
 
         // === Input Relations ===
@@ -81,19 +82,23 @@ impl Solver {
         // === Compute Units ===
         // Clauses with at least one true literal are satisfied
         assign!(
-            satisfied_clauses,
+            satisfied_clause_ids,
             all_clauses.get().swap().semijoin(assigned.get()).snd()
         );
-        assign!(
-            unsatisfied_clauses,
-            all_clause_ids.difference(satisfied_clauses)
+        assign_saved!(
+            unsatisfied_clause_ids,
+            all_clause_ids.difference(satisfied_clause_ids)
         );
-        // Remaining literals: clause-literal pairs where the literal isn't falsified
-        // (i.e., its negation isn't assigned)
+        // Remaining literals: unassigned literals in unsatisfied clauses.
+        // These are exactly the literals that could still satisfy their clause.
+        // - semijoin with unsatisfied_clauses: only consider clauses not yet satisfied
+        // - antijoin with negated assigned: exclude falsified literals
+        // Since satisfied clauses are excluded, no literal here can be assigned true.
         assign_saved!(
             remaining_clause_literals,
             all_clauses
                 .get()
+                .semijoin(unsatisfied_clause_ids.get())
                 .swap()
                 .antijoin(assigned.get().map(Not::not))
                 .swap()
@@ -101,7 +106,9 @@ impl Solver {
         // Empty clauses: unsatisfied clauses with no remaining literals (all falsified)
         assign_saved!(
             empty_clauses,
-            unsatisfied_clauses.difference(remaining_clause_literals.get().fst())
+            unsatisfied_clause_ids
+                .get()
+                .difference(remaining_clause_literals.get().fst())
         );
 
         // Interrupt early when an empty clause is detected
@@ -111,6 +118,12 @@ impl Solver {
         assign!(
             remaining_clause_sizes,
             remaining_clause_literals.get().fst().counts()
+        );
+
+        // Count how many clauses each literal appears in (for decision heuristics)
+        assign!(
+            literal_counts,
+            remaining_clause_literals.get().snd().counts()
         );
 
         // Unit clauses: exactly one remaining literal (must be assigned true)
@@ -156,6 +169,7 @@ impl Solver {
         let causes_out = output_with_sink(causes);
         let assigned_out = output(assigned.get());
         let conflicts_out = output(conflicts);
+        let literal_counts_out = output_with_sink(literal_counts);
 
         Solver {
             db,
@@ -170,11 +184,11 @@ impl Solver {
                 causes: causes_out,
                 assigned: assigned_out,
                 conflicts: conflicts_out,
+                literal_counts: literal_counts_out,
             },
             state: State {
                 current_level: Level::TOP,
                 next_learned_id: ClauseId::new(1),
-                num_vars,
                 decision_stack: Vec::new(),
                 clause_db: std::collections::HashMap::new(),
             },

@@ -10,6 +10,7 @@ mod assignments_sink;
 mod cause_sink;
 pub mod cnf;
 mod conflict_analysis;
+mod literal_counts_sink;
 pub mod proof;
 mod queries;
 mod solve;

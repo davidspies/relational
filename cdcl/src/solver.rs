@@ -8,11 +8,13 @@ use relational::database::{
 
 use super::assignments_sink::AssignmentsSink;
 use super::cause_sink::CauseSink;
-use super::types::{ClauseId, Conflict, Level, Lit, Var};
+use super::literal_counts_sink::LiteralCountsSink;
+use super::types::{ClauseId, Conflict, Level, Lit};
 
 /// Type alias for the causes output (complex due to nested structure).
 type CausesOutput = Output<((Lit, CommitId), (ClauseId, Level)), CauseSink>;
 type AssignmentsOutput = SavedOutput<(Lit, Level), AssignmentsSink>;
+type LiteralCountsOutput = Output<(Lit, i64), LiteralCountsSink>;
 
 /// Input handles for the solver.
 pub(super) struct Inputs {
@@ -36,6 +38,8 @@ pub(super) struct Outputs {
     pub assigned: SavedOutput<Lit>,
     /// Conflicts detected during propagation
     pub conflicts: Output<Conflict>,
+    /// Count of remaining clauses each literal appears in (for decision heuristics)
+    pub literal_counts: LiteralCountsOutput,
 }
 
 /// Solver state that doesn't involve the dataflow.
@@ -44,8 +48,6 @@ pub(super) struct State {
     pub current_level: Level,
     /// Next clause ID for learned clauses.
     pub next_learned_id: ClauseId,
-    /// Number of variables.
-    pub num_vars: Var,
     /// Stack of decisions: (level, literal, tried_both)
     pub decision_stack: Vec<(Level, Lit, bool)>,
     /// Cache of clause contents: clause_id -> list of literals

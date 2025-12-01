@@ -1,8 +1,8 @@
 //! Distinct operator - stateful, collapses multiplicities to 0 or 1.
 
-use std::{collections::HashMap, hash::Hash};
+use std::hash::Hash;
 
-use crate::change::Diff;
+use crate::{Multiset, change::Diff};
 
 use super::relation::{Op, Relation};
 
@@ -15,7 +15,7 @@ where
 {
     pub(super) inner: Relation<R>,
     /// Track input multiplicities
-    counts: HashMap<T, i64>,
+    counts: Multiset<T>,
 }
 
 impl<T: Clone + Eq + Hash, R> Op<T> for DistinctOp<T, R>
@@ -25,14 +25,10 @@ where
     fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
         let counts = &mut self.counts;
         self.inner.foreach(|t, diff| {
-            let old_count = *counts.get(&t).unwrap_or(&0);
+            let old_count = counts.get(&t);
             let new_count = old_count + diff;
 
-            if new_count == 0 {
-                counts.remove(&t);
-            } else {
-                counts.insert(t.clone(), new_count);
-            }
+            counts.update(t.clone(), diff);
 
             let was_present = old_count > 0;
             let is_present = new_count > 0;
@@ -51,6 +47,7 @@ impl<R> Relation<R> {
     /// Collapse multiplicities to 0 or 1.
     pub fn distinct<T>(self) -> Relation<DistinctOp<T, R>>
     where
+        T: Eq + Hash,
         R: Op<T>,
     {
         let node_id = self.node_id;
@@ -59,7 +56,7 @@ impl<R> Relation<R> {
         Relation::new(
             DistinctOp {
                 inner: self,
-                counts: HashMap::new(),
+                counts: Multiset::new(),
             },
             commit_id,
             graph,

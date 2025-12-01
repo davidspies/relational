@@ -2,7 +2,6 @@
 
 use super::Solver;
 use super::proof::ProofWriter;
-use super::types::Lit;
 
 impl Solver {
     /// Main solve loop with CDCL (Conflict-Driven Clause Learning).
@@ -23,11 +22,10 @@ impl Solver {
             // Propagate
             match self.propagate() {
                 Ok(()) => {
-                    // No conflict - pick next variable or return SAT
-                    match self.pick_branching_variable() {
-                        Some(v) => {
-                            // Decide: try positive literal first
-                            self.decide(Lit::pos(v));
+                    // No conflict - pick next literal or return SAT
+                    match self.pick_branching_literal() {
+                        Some(lit) => {
+                            self.decide(lit);
                         }
                         None => {
                             // All variables assigned, no conflict = SAT

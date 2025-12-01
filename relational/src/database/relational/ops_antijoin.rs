@@ -21,7 +21,7 @@ where
     /// Index of left tuples by key: key -> multiset of values
     left_index: HashMap<K, Multiset<V>>,
     /// Count of right keys (positive = key is present, blocks output)
-    right_counts: HashMap<K, i64>,
+    right_counts: Multiset<K>,
 }
 
 impl<K, V, RL, RR> Op<(K, V)> for AntijoinOp<K, V, RL, RR>
@@ -34,19 +34,22 @@ where
     fn foreach(&mut self, mut consumer: impl FnMut((K, V), Diff)) {
         // Process left changes first
         self.left.foreach(|(k, v), l_diff| {
-            let right_count = *self.right_counts.get(&k).unwrap_or(&0);
+            let right_count = self.right_counts.get(&k);
             // Only emit if key is not blocked by right side
             if right_count <= 0 && l_diff != 0 {
                 consumer((k.clone(), v.clone()), l_diff);
             }
             // Update left index
-            let entry = self.left_index.entry(k).or_default();
+            let entry = self.left_index.entry(k.clone()).or_default();
             entry.update(v, l_diff);
+            if entry.is_empty() {
+                self.left_index.remove(&k);
+            }
         });
 
         // Process right changes - these can block/unblock left tuples
         self.right.foreach(|k, r_diff| {
-            let old_count = *self.right_counts.get(&k).unwrap_or(&0);
+            let old_count = self.right_counts.get(&k);
             let new_count = old_count + r_diff;
 
             let was_blocked = old_count > 0;
@@ -66,11 +69,7 @@ where
             }
 
             // Update right count
-            if new_count == 0 {
-                self.right_counts.remove(&k);
-            } else {
-                self.right_counts.insert(k, new_count);
-            }
+            self.right_counts.update(k, r_diff);
         });
     }
 }
@@ -95,7 +94,7 @@ impl<RL> Relation<RL> {
                 left: self,
                 right,
                 left_index: HashMap::new(),
-                right_counts: HashMap::new(),
+                right_counts: Multiset::new(),
             },
             commit_id,
             graph,
