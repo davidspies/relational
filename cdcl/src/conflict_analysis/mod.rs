@@ -8,14 +8,12 @@
 //!    (exactly one literal at the current decision level in the learned clause)
 //! 3. The backtrack level is the second-highest level among literals in the clause
 
-use std::collections::{BTreeMap, HashSet};
+mod working_set;
 
-use relational::database::CommitId;
+use working_set::WorkingSet;
 
-use super::Solver;
-use super::assignments_sink::AssignmentsSink;
-use super::cause_sink::CauseSink;
-use super::types::{Conflict, Level, Lit};
+use crate::Solver;
+use crate::types::{Conflict, Level, Lit};
 
 /// Result of conflict analysis.
 #[derive(Debug, Clone)]
@@ -24,88 +22,6 @@ pub struct AnalysisResult {
     pub learned_clause: Vec<Lit>,
     /// The level to backtrack to (second-highest level in learned clause).
     pub backtrack_level: Level,
-}
-
-/// Working set for conflict analysis, split by level for efficient access.
-struct WorkingSet {
-    /// Literals at the current decision level, ordered by commit ID (most recent last).
-    /// Multiple literals can share the same commit ID, so we use a set per commit.
-    at_current_level: BTreeMap<CommitId, HashSet<Lit>>,
-    /// Literals at other levels (no ordering needed).
-    at_other_levels: HashSet<Lit>,
-}
-
-impl WorkingSet {
-    fn new() -> Self {
-        Self {
-            at_current_level: BTreeMap::new(),
-            at_other_levels: HashSet::new(),
-        }
-    }
-
-    /// Insert a literal into the appropriate collection based on its level.
-    fn insert(
-        &mut self,
-        lit: Lit,
-        current_level: Level,
-        assignments: &AssignmentsSink,
-        causes: &CauseSink,
-    ) {
-        let at_current = assignments.get(&lit) == Some(current_level);
-        let in_current = self.at_current_level.values().any(|lits| lits.contains(&lit));
-        let in_other = self.at_other_levels.contains(&lit);
-
-        // Same literal should never appear at multiple levels
-        if at_current {
-            assert!(!in_other, "Literal {:?} appears at multiple levels", lit);
-        } else {
-            assert!(!in_current, "Literal {:?} appears at multiple levels", lit);
-        }
-
-        // Skip if already in the correct collection
-        if in_current || in_other {
-            return;
-        }
-
-        if at_current {
-            if let Some(commit_id) = causes.get_commit_id(lit) {
-                self.at_current_level.entry(commit_id).or_default().insert(lit);
-            } else {
-                // Decision literal at current level - treat as other level for simplicity
-                self.at_other_levels.insert(lit);
-            }
-        } else {
-            self.at_other_levels.insert(lit);
-        }
-    }
-
-    /// Get the most recently assigned literal at current level (highest commit ID).
-    /// Returns one literal from the most recent commit.
-    fn pop_most_recent(&mut self) -> Option<(CommitId, Lit)> {
-        let (&commit_id, lits) = self.at_current_level.last_key_value()?;
-        let lit = *lits.iter().next()?;
-        // Remove this literal from the set
-        let lits = self.at_current_level.get_mut(&commit_id).unwrap();
-        lits.remove(&lit);
-        if lits.is_empty() {
-            self.at_current_level.remove(&commit_id);
-        }
-        Some((commit_id, lit))
-    }
-
-    /// Count of literals at current level.
-    fn count_at_current(&self) -> usize {
-        self.at_current_level.values().map(|s| s.len()).sum()
-    }
-
-    /// Iterate over all literals in the working set.
-    fn iter(&self) -> impl Iterator<Item = Lit> + '_ {
-        self.at_current_level
-            .values()
-            .flat_map(|s| s.iter())
-            .copied()
-            .chain(self.at_other_levels.iter().copied())
-    }
 }
 
 impl Solver {
