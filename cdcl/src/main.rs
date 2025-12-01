@@ -1,5 +1,6 @@
 //! CDCL SAT Solver - reads DIMACS CNF files.
 
+use std::path::{Path, PathBuf};
 use std::sync::Once;
 
 use anyhow::{Context, Result};
@@ -11,7 +12,7 @@ use relational::database::{Graph, GraphHandle};
 
 static SVG_DUMP: Once = Once::new();
 
-fn dump_svg_once(graph: &GraphHandle, path: &str) {
+fn dump_svg_once(graph: &GraphHandle, path: &Path) {
     SVG_DUMP.call_once(|| {
         if let Err(e) = dump_svg(graph, path) {
             eprintln!("Error dumping SVG: {e:?}");
@@ -19,9 +20,10 @@ fn dump_svg_once(graph: &GraphHandle, path: &str) {
     });
 }
 
-fn dump_svg(graph: &Graph, path: &str) -> Result<()> {
+fn dump_svg(graph: &Graph, path: &Path) -> Result<()> {
     let svg = graph.to_svg()?;
-    std::fs::write(path, svg).with_context(|| format!("failed to write SVG file {path}"))?;
+    std::fs::write(path, svg)
+        .with_context(|| format!("failed to write SVG file {}", path.display()))?;
     Ok(())
 }
 
@@ -32,11 +34,12 @@ struct Args {
     cnf_file: String,
 
     /// Output SVG file for dataflow graph visualization
-    svg_output: Option<String>,
+    #[arg(long)]
+    svg: Option<PathBuf>,
 
     /// Output DRAT proof file (for UNSAT results)
     #[arg(long)]
-    proof: Option<String>,
+    proof: Option<PathBuf>,
 }
 
 fn main() {
@@ -52,7 +55,7 @@ fn main() {
         .as_ref()
         .map(|path| ProofWriter::new(path).unwrap());
 
-    let _dump_on_finish = args.svg_output.map(|svg_path| {
+    let _dump_on_finish = args.svg.map(|svg_path| {
         let graph = solver.graph();
         let path = svg_path.clone();
 

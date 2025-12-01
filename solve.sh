@@ -31,7 +31,7 @@ echo "  SVG:   $svg_file"
 echo "  Proof: $proof_file"
 echo "---"
 
-output=$(cargo run --release -p cdcl -- "$file" "$svg_file" --proof "$proof_file")
+output=$(cargo run --release -p cdcl -- "$file" --svg "$svg_file" --proof "$proof_file")
 echo "$output"
 
 if echo "$output" | grep -q "^s UNSATISFIABLE"; then

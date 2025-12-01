@@ -34,11 +34,12 @@ trap 'echo ""; echo "Interrupted!"; print_summary; exit 130' INT
 
 for file in $(find cnf_benchmarks -name "*.cnf" | sort); do
     basename=$(basename "$file" .cnf)
-    proof_file="/tmp/${basename}.drat"
+    proof_file="solve_output/${basename}.drat"
+    svg_file="solve_output/${basename}.svg"
 
     # Run solver with timeout
     set +e
-    output=$(timeout ${TIMEOUT_SECS} "$SOLVER" "$file" /dev/null --proof "$proof_file" 2>&1)
+    output=$(timeout --signal=INT ${TIMEOUT_SECS} "$SOLVER" "$file" --proof "$proof_file" --svg "$svg_file" 2>&1)
     exit_code=$?
     set -e
 

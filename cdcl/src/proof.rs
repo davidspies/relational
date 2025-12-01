@@ -5,6 +5,7 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 
@@ -17,9 +18,9 @@ pub struct ProofWriter {
 
 impl ProofWriter {
     /// Create a new proof writer that writes to the given file path.
-    pub fn new(path: &str) -> Result<Self> {
-        let file =
-            File::create(path).with_context(|| format!("cannot create proof file: {path}"))?;
+    pub fn new(path: &Path) -> Result<Self> {
+        let file = File::create(path)
+            .with_context(|| format!("cannot create proof file: {}", path.display()))?;
         Ok(Self {
             writer: BufWriter::new(file),
         })
