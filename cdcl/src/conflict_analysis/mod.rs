@@ -48,7 +48,7 @@ impl Solver {
                 self.get_clause(cid)
                     .expect("conflict clause must exist")
                     .iter()
-                    .map(|lit| lit.negated())
+                    .map(|&lit| !lit)
                     .collect()
             }
             Conflict::DirectConflict(var) => {
@@ -96,7 +96,7 @@ impl Solver {
                 // Skip the literal we're resolving on
                 if clause_lit != lit {
                     // Add the negated literal (the true assignment that made this false)
-                    working.insert(clause_lit.negated(), current_level, &assignments, &causes);
+                    working.insert(!clause_lit, current_level, &assignments, &causes);
                 }
             }
         }
@@ -104,7 +104,7 @@ impl Solver {
         // Build the learned clause: negate each literal in working set
         // (working contains literals that are true and led to conflict,
         // learned clause contains their negations to prevent this)
-        let learned_clause: Vec<Lit> = working.iter().map(|lit| lit.negated()).collect();
+        let learned_clause: Vec<Lit> = working.iter().map(|lit| !lit).collect();
 
         if learned_clause.is_empty() {
             return None;
@@ -113,7 +113,7 @@ impl Solver {
         // Find backtrack level: second-highest level among learned clause literals
         let mut levels: Vec<Level> = learned_clause
             .iter()
-            .filter_map(|lit| assignments.get(&lit.negated()))
+            .filter_map(|&lit| assignments.get(&(!lit)))
             .collect();
         levels.sort();
         levels.dedup();

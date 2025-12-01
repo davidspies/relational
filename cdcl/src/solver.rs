@@ -35,7 +35,7 @@ pub(super) struct Outputs {
     /// The "assigned" relation - just tracks which literals are assigned true
     pub assigned: SavedOutput<Lit>,
     /// Conflicts detected during propagation
-    pub conflicts: SavedOutput<Conflict>,
+    pub conflicts: Output<Conflict>,
 }
 
 /// Solver state that doesn't involve the dataflow.

@@ -1,6 +1,6 @@
 //! Types for CDCL SAT solver: Lit, Var, Level, ClauseId, Conflict.
 
-use std::fmt;
+use std::{fmt, ops::Not};
 
 /// A literal is a variable with a sign (positive or negative).
 /// Positive values represent the variable, negative values represent its negation.
@@ -34,14 +34,17 @@ impl Lit {
         self.0 > 0
     }
 
-    /// Get the negation of this literal.
-    pub fn negated(self) -> Self {
-        Lit(-self.0)
-    }
-
     /// Get the raw i32 value.
     pub fn raw(self) -> i32 {
         self.0
+    }
+}
+
+impl Not for Lit {
+    type Output = Lit;
+
+    fn not(self) -> Self::Output {
+        Lit(-self.0)
     }
 }
 
