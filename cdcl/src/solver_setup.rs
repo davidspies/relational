@@ -65,6 +65,8 @@ impl Solver {
         // Derived: which literals are assigned true
         assign_saved!(assigned, assignments.get().fst());
 
+        // === Conflict Detection ===
+        // Direct conflict: both a literal and its negation are assigned
         assign_saved!(
             conflict_vars,
             assigned
@@ -73,8 +75,11 @@ impl Solver {
                 .map(var)
         );
 
+        // Interrupt early when a direct conflict is detected
         db.interrupt(conflict_vars.get());
 
+        // === Compute Units ===
+        // Clauses with at least one true literal are satisfied
         assign!(
             satisfied_clauses,
             all_clauses.get().swap().semijoin(assigned.get()).snd()
@@ -83,6 +88,8 @@ impl Solver {
             unsatisfied_clauses,
             all_clause_ids.difference(satisfied_clauses)
         );
+        // Remaining literals: clause-literal pairs where the literal isn't falsified
+        // (i.e., its negation isn't assigned)
         assign_saved!(
             remaining_clause_literals,
             all_clauses
@@ -91,18 +98,22 @@ impl Solver {
                 .antijoin(assigned.get().map(Not::not))
                 .swap()
         );
+        // Empty clauses: unsatisfied clauses with no remaining literals (all falsified)
         assign_saved!(
             empty_clauses,
             unsatisfied_clauses.difference(remaining_clause_literals.get().fst())
         );
 
+        // Interrupt early when an empty clause is detected
         db.interrupt(empty_clauses.get());
 
+        // Count remaining literals per clause to find unit clauses
         assign!(
             remaining_clause_sizes,
             remaining_clause_literals.get().fst().counts()
         );
 
+        // Unit clauses: exactly one remaining literal (must be assigned true)
         assign!(
             units,
             remaining_clause_literals.get().semijoin(
@@ -126,6 +137,8 @@ impl Solver {
 
         db.feedback_with_id(prep_var, all_new_assignments);
 
+        // Combine both conflict types: direct conflicts (x and !x assigned)
+        // and empty clauses (all literals in a clause falsified)
         assign!(
             conflicts,
             conflict_vars
