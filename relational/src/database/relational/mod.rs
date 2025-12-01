@@ -8,10 +8,10 @@
 
 pub(crate) mod graph;
 pub(crate) mod input;
+mod ops_antijoin;
 mod ops_consolidate;
 mod ops_convenience;
 mod ops_count;
-mod ops_difference;
 mod ops_distinct;
 mod ops_filter;
 mod ops_flat_map;
@@ -19,6 +19,7 @@ mod ops_join;
 mod ops_map;
 mod ops_max;
 mod ops_min;
+mod ops_negate;
 mod ops_sum;
 mod ops_union;
 mod output;

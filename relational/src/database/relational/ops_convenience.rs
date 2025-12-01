@@ -54,10 +54,7 @@ impl<R> Relation<R> {
 
     /// Join two relations and discard the key.
     /// Both inputs must be `(K, V)` tuples. Output is `(V1, V2)` pairs.
-    pub fn join_values<K, V1, V2, RR>(
-        self,
-        right: Relation<RR>,
-    ) -> Relation<impl Op<(V1, V2)>>
+    pub fn join_values<K, V1, V2, RR>(self, right: Relation<RR>) -> Relation<impl Op<(V1, V2)>>
     where
         R: Op<(K, V1)>,
         K: Clone + Eq + Hash,
@@ -70,10 +67,7 @@ impl<R> Relation<R> {
 
     /// Cartesian product - pairs every tuple from left with every tuple from right.
     /// Output is `(T1, T2)` pairs.
-    pub fn cartesian_product<T1, T2, RR>(
-        self,
-        right: Relation<RR>,
-    ) -> Relation<impl Op<(T1, T2)>>
+    pub fn cartesian_product<T1, T2, RR>(self, right: Relation<RR>) -> Relation<impl Op<(T1, T2)>>
     where
         R: Op<T1>,
         T1: Clone + Eq + Hash,
@@ -98,33 +92,14 @@ impl<R> Relation<R> {
         self.join(right.map(|k| (k, ()))).map(|(k, (v, ()))| (k, v))
     }
 
-    /// Antijoin - filter left relation to only tuples that do NOT have a matching key in right.
-    /// Input: left is `(K, V)`, right is any relation of keys `K`.
-    /// Output: `(K, V)` tuples from left where key does NOT exist in right.
-    pub fn antijoin<K, V, RR>(self, right: Relation<RR>) -> Relation<impl Op<(K, V)>>
+    /// Set difference (self - right).
+    /// Implemented via antijoin: treat tuples as (T, ()) pairs.
+    pub fn difference<T, RR>(self, right: Relation<RR>) -> Relation<impl Op<T>>
     where
-        R: Op<(K, V)>,
-        K: Clone + Eq + Hash,
-        V: Clone + Eq + Hash,
-        RR: Op<K>,
+        T: Clone + Eq + Hash,
+        R: Op<T>,
+        RR: Op<T>,
     {
-        // Get all keys from left
-        let left_saved = self.save();
-        let left_keys = left_saved.get().map(|(k, _v): (K, V)| k).distinct();
-
-        // Keys that are in both
-        let matching_keys = left_keys
-            .map(|k| (k, ()))
-            .join(right.map(|k| (k, ())))
-            .map(|(k, ((), ()))| k);
-
-        // Original left minus those with matching keys
-        left_saved.get().difference(
-            left_saved
-                .get()
-                .map(|(k, v): (K, V)| (k.clone(), (k, v)))
-                .join(matching_keys.map(|k| (k, ())))
-                .map(|(_, ((k, v), ()))| (k, v)),
-        )
+        self.map(|t: T| (t, ())).antijoin(right).map(|(t, ())| t)
     }
 }

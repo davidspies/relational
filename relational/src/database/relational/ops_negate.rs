@@ -1,7 +1,4 @@
-//! Difference operator - set difference (left - right).
-//! Implemented as distinct(left + negate(right)).
-
-use std::hash::Hash;
+//! Negate operator.
 
 use crate::change::Diff;
 
@@ -46,18 +43,5 @@ impl<R> Relation<R> {
             "negate",
             vec![node_id],
         )
-    }
-}
-
-impl<L> Relation<L> {
-    /// Set difference (self - right).
-    /// Implemented as `(self union negate(right)).distinct()`.
-    pub fn difference<T, R>(self, right: Relation<R>) -> Relation<impl Op<T>>
-    where
-        T: Clone + Eq + Hash,
-        L: Op<T>,
-        R: Op<T>,
-    {
-        self.union(right.negate()).distinct()
     }
 }
