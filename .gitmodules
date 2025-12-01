@@ -1,0 +1,3 @@
+[submodule "vendor/drat-trim"]
+	path = vendor/drat-trim
+	url = https://github.com/marijnheule/drat-trim.git

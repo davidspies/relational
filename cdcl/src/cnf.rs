@@ -3,6 +3,8 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 
+use anyhow::{Context, Result, bail};
+
 use crate::{ClauseId, Lit, Solver, Var};
 
 /// A parsed CNF formula.
@@ -26,18 +28,18 @@ pub enum SolveResult {
 
 impl Cnf {
     /// Parse a CNF formula from a DIMACS format string.
-    pub fn parse(input: &str) -> Result<Self, String> {
+    pub fn parse(input: &str) -> Result<Self> {
         Self::parse_reader(input.as_bytes())
     }
 
     /// Parse a CNF formula from a file path.
-    pub fn from_file(path: &str) -> Result<Self, String> {
-        let file = File::open(path).map_err(|e| format!("Cannot open file: {}", e))?;
-        Self::parse_reader(BufReader::new(file))
+    pub fn from_file(path: &str) -> Result<Self> {
+        let file = File::open(path).with_context(|| format!("cannot open file: {path}"))?;
+        Self::parse_reader(BufReader::new(file)).with_context(|| format!("failed to parse: {path}"))
     }
 
     /// Parse a CNF formula from any reader.
-    pub fn parse_reader<R: Read>(reader: R) -> Result<Self, String> {
+    pub fn parse_reader<R: Read>(reader: R) -> Result<Self> {
         let reader = BufReader::new(reader);
 
         let mut num_vars = 0;
@@ -47,7 +49,7 @@ impl Cnf {
         let mut header_seen = false;
 
         for line in reader.lines() {
-            let line = line.map_err(|e| format!("Read error: {}", e))?;
+            let line = line.context("read error")?;
             let line = line.trim();
 
             if line.is_empty() || line.starts_with('c') {
@@ -57,24 +59,26 @@ impl Cnf {
             if line.starts_with('p') {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() < 4 || parts[1] != "cnf" {
-                    return Err("Invalid problem line".to_string());
+                    bail!("invalid problem line: {line}");
                 }
                 num_vars = parts[2]
                     .parse()
-                    .map_err(|_| "Invalid variable count".to_string())?;
+                    .with_context(|| format!("invalid variable count: {}", parts[2]))?;
                 num_clauses = parts[3]
                     .parse()
-                    .map_err(|_| "Invalid clause count".to_string())?;
+                    .with_context(|| format!("invalid clause count: {}", parts[3]))?;
                 header_seen = true;
                 continue;
             }
 
             if !header_seen {
-                return Err("Clause before problem line".to_string());
+                bail!("clause before problem line");
             }
 
             for token in line.split_whitespace() {
-                let lit: i32 = token.parse().map_err(|_| "Invalid literal".to_string())?;
+                let lit: i32 = token
+                    .parse()
+                    .with_context(|| format!("invalid literal: {token}"))?;
                 if lit == 0 {
                     if !current_clause.is_empty() {
                         clauses.push(current_clause);

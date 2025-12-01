@@ -11,3 +11,4 @@ ctrlc = ["dep:ctrlc"]
 relational = { path = "../relational" }
 ctrlc = { version = "*", optional = true }
 anyhow = "*"
+clap = { version = "*", features = ["derive"] }

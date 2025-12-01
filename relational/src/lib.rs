@@ -90,3 +90,72 @@ pub mod database;
 pub use change::Diff;
 pub use collection::Multiset;
 pub use database::{CommitId, Database};
+
+/// Assign a relation to a variable with a name derived from the variable.
+///
+/// `assign!(x, expr)` expands to `let x = expr.named("x");`
+#[macro_export]
+macro_rules! assign {
+    ($var:ident, $expr:expr) => {
+        let $var = $expr.named(stringify!($var));
+    };
+}
+
+/// Assign a saved relation to a variable with a name derived from the variable.
+///
+/// `assign_saved!(x, expr)` expands to `let x = expr.named("x").save();`
+#[macro_export]
+macro_rules! assign_saved {
+    ($var:ident, $expr:expr) => {
+        let $var = $expr.named(stringify!($var)).save();
+    };
+}
+
+/// Create an input relation with named handle and relation variables.
+///
+/// `create_input!(db, handle, rel, Type)` expands to:
+/// ```ignore
+/// let (handle, rel) = db.create_input::<Type>();
+/// let rel = rel.named("rel");
+/// ```
+#[macro_export]
+macro_rules! create_input {
+    ($db:expr, $handle:ident, $rel:ident, $ty:ty) => {
+        let ($handle, $rel) = $db.create_input::<$ty>();
+        let $rel = $rel.named(stringify!($rel));
+    };
+    ($db:expr, mut $handle:ident, $rel:ident, $ty:ty) => {
+        let (mut $handle, $rel) = $db.create_input::<$ty>();
+        let $rel = $rel.named(stringify!($rel));
+    };
+}
+
+/// Create a persistent input relation with named handle and relation variables.
+///
+/// `create_persistent_input!(db, handle, rel, Type)` expands to:
+/// ```ignore
+/// let (handle, rel) = db.create_persistent_input::<Type>();
+/// let rel = rel.named("rel");
+/// ```
+#[macro_export]
+macro_rules! create_persistent_input {
+    ($db:expr, $handle:ident, $rel:ident, $ty:ty) => {
+        let ($handle, $rel) = $db.create_persistent_input::<$ty>();
+        let $rel = $rel.named(stringify!($rel));
+    };
+}
+
+/// Create a variable (for feedback loops) with named handle and relation variables.
+///
+/// `create_variable!(db, var, rel, Type)` expands to:
+/// ```ignore
+/// let (var, rel) = db.create_variable::<Type>();
+/// let rel = rel.named("rel");
+/// ```
+#[macro_export]
+macro_rules! create_variable {
+    ($db:expr, $var:ident, $rel:ident, $ty:ty) => {
+        let ($var, $rel) = $db.create_variable::<$ty>();
+        let $rel = $rel.named(stringify!($rel));
+    };
+}

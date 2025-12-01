@@ -1,9 +1,10 @@
 //! CDCL SAT Solver - reads DIMACS CNF files.
 
-use std::env;
 use std::sync::Once;
 
+use cdcl::proof::ProofWriter;
 use cdcl::{Cnf, Var};
+use clap::Parser;
 use relational::database::GraphHandle;
 
 static SVG_DUMP: Once = Once::new();
@@ -22,25 +23,34 @@ fn dump_svg(graph: &GraphHandle, path: &str) {
     });
 }
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 || args.len() > 3 {
-        eprintln!("Usage: {} <cnf-file> [svg-output]", args[0]);
-        std::process::exit(1);
-    }
+#[derive(Parser)]
+#[command(about = "CDCL SAT Solver")]
+struct Args {
+    /// Input CNF file in DIMACS format
+    cnf_file: String,
 
-    let cnf = match Cnf::from_file(&args[1]) {
-        Ok(cnf) => cnf,
-        Err(e) => {
-            eprintln!("Error parsing CNF file: {}", e);
-            std::process::exit(1);
-        }
-    };
+    /// Output SVG file for dataflow graph visualization
+    svg_output: Option<String>,
+
+    /// Output DRAT proof file (for UNSAT results)
+    #[arg(long)]
+    proof: Option<String>,
+}
+
+fn main() {
+    let args = Args::parse();
+
+    let cnf = Cnf::from_file(&args.cnf_file).unwrap();
 
     let num_vars = cnf.num_vars;
     let mut solver = cnf.into_solver();
 
-    if let Some(svg_path) = args.get(2) {
+    let mut proof_writer = args
+        .proof
+        .as_ref()
+        .map(|path| ProofWriter::new(path).unwrap());
+
+    if let Some(svg_path) = &args.svg_output {
         let graph = solver.graph();
         let path = svg_path.clone();
 
@@ -55,7 +65,7 @@ fn main() {
             .expect("Error setting Ctrl-C handler");
         }
 
-        if solver.solve() {
+        if solver.solve_with_proof(proof_writer.as_mut()) {
             println!("s SATISFIABLE");
             print_assignment(&solver, num_vars);
         } else {
@@ -63,7 +73,7 @@ fn main() {
         }
 
         dump_svg(&graph, &path);
-    } else if solver.solve() {
+    } else if solver.solve_with_proof(proof_writer.as_mut()) {
         println!("s SATISFIABLE");
         print_assignment(&solver, num_vars);
     } else {

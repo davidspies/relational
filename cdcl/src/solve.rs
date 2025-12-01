@@ -1,6 +1,7 @@
 //! Main solve loop for the CDCL solver.
 
 use super::Solver;
+use super::proof::ProofWriter;
 use super::types::Lit;
 
 impl Solver {
@@ -9,6 +10,15 @@ impl Solver {
     /// Uses 1-UIP conflict analysis to learn clauses and perform
     /// non-chronological backtracking.
     pub fn solve(&mut self) -> bool {
+        self.solve_with_proof(None)
+    }
+
+    /// Solve with optional DRAT proof logging.
+    pub fn solve_with_proof(&mut self, proof: Option<&mut ProofWriter>) -> bool {
+        self.solve_internal(proof)
+    }
+
+    fn solve_internal(&mut self, mut proof: Option<&mut ProofWriter>) -> bool {
         loop {
             // Propagate
             match self.propagate() {
@@ -30,9 +40,18 @@ impl Solver {
                     match self.analyze_conflict(conflict) {
                         None => {
                             // Conflict at level 0 = UNSAT
+                            if let Some(ref mut p) = proof {
+                                let _ = p.add_empty_clause();
+                                let _ = p.flush();
+                            }
                             return false;
                         }
                         Some(analysis) => {
+                            // Log the learned clause to proof
+                            if let Some(ref mut p) = proof {
+                                let _ = p.add_clause(&analysis.learned_clause);
+                            }
+
                             // Learn the clause
                             self.learn_clause(&analysis.learned_clause);
 
