@@ -6,6 +6,7 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use crate::collection::Multiset;
+use crate::database::Relation;
 use crate::database::commit_id::CommitId;
 use crate::database::feedback::Variable;
 use crate::database::relational::Op;
@@ -20,7 +21,7 @@ pub(crate) struct FeedbackWithIdWrapper<T, R: Op<T>> {
     /// Shared commit ID counter.
     commit_id: Rc<Cell<CommitId>>,
     /// The input relation produces T.
-    input: R,
+    input: Relation<R>,
     /// Track input totals by T alone (not (T, CommitId)) for pop() handling.
     input_totals_by_t: HashMap<T, i64>,
     /// Maps T -> CommitId for tuples currently in output.
@@ -30,7 +31,7 @@ pub(crate) struct FeedbackWithIdWrapper<T, R: Op<T>> {
 impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
     pub(crate) fn new(
         variable: Rc<RefCell<Variable<(T, CommitId)>>>,
-        input: R,
+        input: Relation<R>,
         commit_id: Rc<Cell<CommitId>>,
     ) -> Self {
         FeedbackWithIdWrapper {

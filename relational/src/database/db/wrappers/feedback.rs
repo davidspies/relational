@@ -5,6 +5,7 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use crate::collection::Multiset;
+use crate::database::Relation;
 use crate::database::feedback::Variable;
 use crate::database::relational::Op;
 
@@ -29,11 +30,11 @@ pub(crate) struct FeedbackWrapper<T, R: Op<T>> {
     /// Shared variable state (also accessed by VariableRelation).
     variable: Rc<RefCell<Variable<T>>>,
     /// The input relation that feeds into this variable.
-    input: R,
+    input: Relation<R>,
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWrapper<T, R> {
-    pub(crate) fn new(variable: Rc<RefCell<Variable<T>>>, input: R) -> Self {
+    pub(crate) fn new(variable: Rc<RefCell<Variable<T>>>, input: Relation<R>) -> Self {
         FeedbackWrapper { variable, input }
     }
 

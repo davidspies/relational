@@ -72,7 +72,7 @@ impl Database {
         variable: Variable<T>,
         input: Relation<R>,
     ) {
-        let mut wrapper = FeedbackWrapper::new(variable.inner, input.inner);
+        let mut wrapper = FeedbackWrapper::new(variable.inner, input);
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
         self.run_stratified_fixpoint();
@@ -87,8 +87,7 @@ impl Database {
         variable: Variable<(T, CommitId)>,
         input: Relation<R>,
     ) {
-        let mut wrapper =
-            FeedbackWithIdWrapper::new(variable.inner, input.inner, self.commit_id.clone());
+        let mut wrapper = FeedbackWithIdWrapper::new(variable.inner, input, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
     }
