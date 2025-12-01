@@ -34,7 +34,7 @@ struct OutputInner<T, S, R> {
 impl<T: Eq + Hash, S: Sink<T>, R: Op<T>> OutputInner<T, S, R> {
     /// Pull all pending changes from the relation into the accumulated state.
     fn update(&mut self) {
-        Op::dump_to_multiset(&mut self.relation, &mut self.scratch);
+        self.relation.dump_to_multiset(&mut self.scratch);
         self.state.dump_all(&mut self.scratch);
     }
 }

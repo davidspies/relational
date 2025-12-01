@@ -21,13 +21,16 @@ pub trait Op<T>: Sized {
     /// Iterate over pending changes, calling f for each (tuple, count) pair.
     fn foreach(&mut self, f: impl FnMut(T, Diff));
 
-    fn dump_to_multiset(&mut self, multiset: &mut Multiset<T>)
+    fn dump_to_multiset(&mut self, multiset: &mut Multiset<T>) -> usize
     where
         T: Eq + Hash,
     {
+        let mut counter = 0;
         self.foreach(|t, diff| {
             multiset.update(t, diff);
+            counter += 1;
         });
+        counter
     }
 
     /// Box this operator to allow type erasure.
@@ -43,7 +46,7 @@ pub trait Op<T>: Sized {
 pub trait DynOp<T> {
     fn foreach_dyn(&mut self, f: &mut dyn FnMut(T, Diff));
 
-    fn dump_to_multiset(&mut self, multiset: &mut Multiset<T>)
+    fn dump_to_multiset_dyn(&mut self, multiset: &mut Multiset<T>) -> usize
     where
         T: Eq + Hash;
 }
@@ -53,30 +56,28 @@ impl<T, R: Op<T>> DynOp<T> for R {
         self.foreach(f);
     }
 
-    fn dump_to_multiset(&mut self, multiset: &mut Multiset<T>)
+    fn dump_to_multiset_dyn(&mut self, multiset: &mut Multiset<T>) -> usize
     where
         T: Eq + Hash,
     {
-        R::dump_to_multiset(self, multiset);
+        self.dump_to_multiset(multiset)
     }
 }
 
-/// Implement Op for Box<dyn Op<T>> to allow type erasure.
-impl<T, R: Op<T>> Op<T> for Box<R> {
-    fn foreach(&mut self, f: impl FnMut(T, Diff)) {
-        (**self).foreach(f);
-    }
-}
-
+/// Implement Op for Box<dyn DynOp<T>> to allow type erasure.
 impl<T> Op<T> for Box<dyn DynOp<T>> {
     fn foreach(&mut self, mut f: impl FnMut(T, Diff)) {
         (**self).foreach_dyn(&mut f);
     }
 
-    fn boxed<'a>(self) -> Box<dyn DynOp<T> + 'a>
+    fn dump_to_multiset(&mut self, multiset: &mut Multiset<T>) -> usize
     where
-        Self: 'a,
+        T: Eq + Hash,
     {
+        (**self).dump_to_multiset_dyn(multiset)
+    }
+
+    fn boxed<'a>(self) -> Box<dyn DynOp<T> + 'a> {
         self
     }
 }
@@ -151,10 +152,20 @@ pub(crate) fn assert_same_commit_id(left: &Rc<Cell<CommitId>>, right: &Rc<Cell<C
 
 impl<T, R: Op<T>> Op<T> for Relation<R> {
     fn foreach(&mut self, mut f: impl FnMut(T, Diff)) {
-        let counter = self.counter.clone();
+        let mut added = 0;
         self.inner.foreach(|t, diff| {
-            counter.fetch_add(1, Ordering::Relaxed);
             f(t, diff);
+            added += 1;
         });
+        self.counter.fetch_add(added, Ordering::Relaxed);
+    }
+
+    fn dump_to_multiset(&mut self, multiset: &mut Multiset<T>) -> usize
+    where
+        T: Eq + Hash,
+    {
+        let added = self.inner.dump_to_multiset(multiset);
+        self.counter.fetch_add(added, Ordering::Relaxed);
+        added
     }
 }

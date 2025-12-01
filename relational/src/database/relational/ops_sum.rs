@@ -61,7 +61,14 @@ impl<R> Relation<R> {
     where
         R: Op<(K, V)>,
         K: Clone + Eq + Hash,
-        V: Clone + Eq + Hash + Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
+        V: Clone
+            + Eq
+            + Hash
+            + Add<Output = V>
+            + Sub<Output = V>
+            + Mul<i64, Output = V>
+            + Default
+            + PartialEq,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
