@@ -45,10 +45,10 @@ impl<T: Eq + Hash, S: Sink<T>, R: Op<T>> Output<T, S, R> {
     where
         S: Default,
     {
-        // Add an output node to the graph
+        // Add an output node to the graph (no counter for terminal nodes)
         let parent_id = relation.node_id;
         if let Some(graph) = relation.graph.borrow_mut().as_mut() {
-            graph.add_node("output", vec![parent_id]);
+            graph.add_terminal_node("output", vec![parent_id]);
         }
 
         Output {

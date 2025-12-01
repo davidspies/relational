@@ -22,7 +22,8 @@ struct Node {
     id: NodeId,
     name: Option<String>,
     op_type: &'static str,
-    count: Arc<AtomicUsize>,
+    /// Element counter - None for terminal nodes (output, interrupt).
+    count: Option<Arc<AtomicUsize>>,
     parents: Vec<NodeId>,
 }
 
@@ -55,10 +56,22 @@ impl Graph {
             id,
             name: None,
             op_type,
-            count: count.clone(),
+            count: Some(count.clone()),
             parents,
         });
         (id, count)
+    }
+
+    /// Add a terminal node (output, interrupt) without a counter.
+    pub(crate) fn add_terminal_node(&mut self, op_type: &'static str, parents: Vec<NodeId>) {
+        let id = NodeId(self.nodes.len());
+        self.nodes.push(Node {
+            id,
+            name: None,
+            op_type,
+            count: None,
+            parents,
+        });
     }
 
     /// Set the name of a node.
@@ -87,10 +100,15 @@ impl Graph {
         out.push_str("  node [shape=box];\n\n");
 
         for node in &self.nodes {
-            let count = node.count.load(Ordering::Relaxed);
-            let label = match &node.name {
-                Some(name) => format!("{}\\n{}\\n{}", name, node.op_type, count),
-                None => format!("{}\\n{}", node.op_type, count),
+            let label = match (&node.name, &node.count) {
+                (Some(name), Some(count)) => {
+                    format!("{}\\n{}\\n{}", name, node.op_type, count.load(Ordering::Relaxed))
+                }
+                (Some(name), None) => format!("{}\\n{}", name, node.op_type),
+                (None, Some(count)) => {
+                    format!("{}\\n{}", node.op_type, count.load(Ordering::Relaxed))
+                }
+                (None, None) => node.op_type.to_string(),
             };
             out.push_str(&format!("  n{} [label=\"{}\"];\n", node.id.index(), label));
         }
@@ -103,12 +121,12 @@ impl Graph {
             }
         }
 
-        // Feedback edges (dashed)
+        // Feedback edges (dashed, don't affect layout)
         if !self.feedback_edges.is_empty() {
             out.push('\n');
             for (source, target) in &self.feedback_edges {
                 out.push_str(&format!(
-                    "  n{} -> n{} [style=dashed];\n",
+                    "  n{} -> n{} [style=dashed, constraint=false];\n",
                     source.index(),
                     target.index()
                 ));
@@ -155,15 +173,23 @@ impl Graph {
     pub fn dump(&self) {
         eprintln!("\n=== Dataflow Graph ===");
         for node in &self.nodes {
-            let count = node.count.load(Ordering::Relaxed);
             let name = node.name.as_deref().unwrap_or("(unnamed)");
-            eprintln!(
-                "  Node {}: {} [{}] - {} elements",
-                node.id.index(),
-                name,
-                node.op_type,
-                count
-            );
+            if let Some(count) = &node.count {
+                eprintln!(
+                    "  Node {}: {} [{}] - {} elements",
+                    node.id.index(),
+                    name,
+                    node.op_type,
+                    count.load(Ordering::Relaxed)
+                );
+            } else {
+                eprintln!(
+                    "  Node {}: {} [{}]",
+                    node.id.index(),
+                    name,
+                    node.op_type
+                );
+            }
             if !node.parents.is_empty() {
                 let parents: Vec<_> = node.parents.iter().map(|p| p.index().to_string()).collect();
                 eprintln!("    parents: {}", parents.join(", "));
