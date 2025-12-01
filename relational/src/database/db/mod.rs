@@ -96,7 +96,7 @@ impl Database {
     pub fn interrupt<T: 'static, R: Op<T> + 'static>(&mut self, input: Relation<R>) {
         self.steps
             .push(StratifiedStep::Interrupt(Box::new(InterruptWrapper::new(
-                input.inner,
+                input,
             ))));
     }
 

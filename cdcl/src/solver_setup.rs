@@ -34,7 +34,7 @@ impl Solver {
         // All clauses (original + learned)
         assign_saved!(all_clauses, clauses_rel.union(learned_rel));
 
-        assign!(all_clause_ids, all_clauses.get().fst().distinct());
+        assign!(all_clause_ids, all_clauses.get().fst().consolidate().distinct());
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
@@ -52,6 +52,7 @@ impl Solver {
             prep_rel
                 .get()
                 .map(|((lit, level, _cid), _id)| (lit, level))
+                .consolidate()
                 .group_min()
         );
 
@@ -74,6 +75,7 @@ impl Solver {
                 .get()
                 .intersection(assigned.get().map(Not::not))
                 .map(var)
+                .consolidate()
         );
 
         // Interrupt early when a direct conflict is detected
@@ -83,7 +85,7 @@ impl Solver {
         // Clauses with at least one true literal are satisfied
         assign!(
             satisfied_clause_ids,
-            all_clauses.get().swap().semijoin(assigned.get()).snd()
+            all_clauses.get().swap().semijoin(assigned.get()).snd().consolidate()
         );
         assign_saved!(
             unsatisfied_clause_ids,
@@ -108,7 +110,7 @@ impl Solver {
             empty_clauses,
             unsatisfied_clause_ids
                 .get()
-                .difference(remaining_clause_literals.get().fst())
+                .difference(remaining_clause_literals.get().fst().consolidate())
         );
 
         // Interrupt early when an empty clause is detected
@@ -117,13 +119,13 @@ impl Solver {
         // Count remaining literals per clause to find unit clauses
         assign!(
             remaining_clause_sizes,
-            remaining_clause_literals.get().fst().counts()
+            remaining_clause_literals.get().fst().consolidate().counts()
         );
 
         // Count how many clauses each literal appears in (for decision heuristics)
         assign!(
             literal_counts,
-            remaining_clause_literals.get().snd().counts()
+            remaining_clause_literals.get().snd().consolidate().counts()
         );
 
         // Unit clauses: exactly one remaining literal (must be assigned true)
@@ -132,8 +134,9 @@ impl Solver {
             remaining_clause_literals.get().semijoin(
                 remaining_clause_sizes
                     .filter(|&(_cid, size)| size == 1)
+                    .consolidate()
                     .map(|(cid, _)| cid)
-            )
+            ).consolidate()
         );
 
         // === Set up the feedback loop ===

@@ -1,6 +1,6 @@
 //! Interrupt wrapper for type-erased interrupt operations.
 
-use crate::database::relational::Op;
+use crate::database::{Relation, relational::Op};
 
 /// Type-erased interrupt operations.
 pub(crate) trait AnyInterrupt {
@@ -12,13 +12,13 @@ pub(crate) trait AnyInterrupt {
 
 /// Wrapper for interrupt - checks if a relation has any positive entries.
 pub(crate) struct InterruptWrapper<T, R: Op<T>> {
-    input: R,
+    input: Relation<R>,
     has_positive: bool,
     _phantom: std::marker::PhantomData<T>,
 }
 
 impl<T, R: Op<T>> InterruptWrapper<T, R> {
-    pub(crate) fn new(input: R) -> Self {
+    pub(crate) fn new(input: Relation<R>) -> Self {
         InterruptWrapper {
             input,
             has_positive: false,
