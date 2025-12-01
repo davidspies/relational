@@ -87,7 +87,7 @@ impl<R> Relation<R> {
             vec![node_id],
         );
         #[cfg(feature = "consolidate_all")]
-        let result = result.consolidate();
+        let result = result.consolidate_();
         result
     }
 }

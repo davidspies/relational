@@ -918,7 +918,7 @@ fn test_consolidate() {
 
     // Union produces: 1 (+1), 2 (+1), 1 (+1), 3 (+1) = 1 with mult 2
     let unioned = rel_a.union(rel_b);
-    let mut consolidated = unioned.consolidate();
+    let mut consolidated = unioned.consolidate_();
 
     let changes = collect_to_map(&mut consolidated);
     // After consolidation, we should see net multiplicities
@@ -942,7 +942,7 @@ fn test_consolidate_cancellation() {
     let combined = rel_a.union(negated_b);
 
     // This would panic if consolidate forwarded any tuples (since they should all cancel)
-    let mut panicking = combined.consolidate().map(|x| {
+    let mut panicking = combined.consolidate_().map(|x| {
         panic!("consolidate should not forward cancelled tuple: {}", x);
     });
 
@@ -962,7 +962,7 @@ fn test_consolidate_incremental() {
     db.commit();
 
     let unioned = rel_a.union(rel_b);
-    let mut consolidated = unioned.consolidate();
+    let mut consolidated = unioned.consolidate_();
 
     let changes1 = collect_to_map(&mut consolidated);
     assert_eq!(changes1.get(&1), Some(&2)); // 1 appears twice

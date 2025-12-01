@@ -53,7 +53,7 @@ impl<L> Relation<L> {
             vec![left_node, right_node],
         );
         #[cfg(feature = "consolidate_all")]
-        let result = result.consolidate();
+        let result = result.consolidate_();
         result
     }
 }

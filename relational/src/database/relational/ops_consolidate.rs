@@ -36,7 +36,22 @@ impl<R> Relation<R> {
     /// # Example
     /// If upstream produces: `(a, +1), (a, +1), (a, -1)`
     /// Consolidate outputs: `(a, +1)` (the net change)
-    pub fn consolidate<T>(self) -> Relation<ConsolidateOp<T, R>>
+    pub fn consolidate<T>(self) -> Relation<impl Op<T>>
+    where
+        T: Eq + Hash,
+        R: Op<T>,
+    {
+        #[cfg(feature = "consolidate_all")]
+        {
+            self
+        }
+        #[cfg(not(feature = "consolidate_all"))]
+        {
+            self.consolidate_()
+        }
+    }
+
+    pub fn consolidate_<T>(self) -> Relation<impl Op<T>>
     where
         T: Eq + Hash,
         R: Op<T>,
