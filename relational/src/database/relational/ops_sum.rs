@@ -57,7 +57,7 @@ where
 impl<R> Relation<R> {
     /// Sum values by key.
     /// Input must be (K, V) tuples where K is the key and V is the value.
-    pub fn sum<K, V>(self) -> Relation<SumOp<K, V, R>>
+    pub fn group_sum<K, V>(self) -> Relation<SumOp<K, V, R>>
     where
         R: Op<(K, V)>,
         K: Eq + Hash,

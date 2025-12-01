@@ -10,14 +10,14 @@ use super::relation::{Op, Relation};
 impl<R> Relation<R> {
     /// Minimum value by key.
     /// Input must be (K, V) tuples where K is the key and V is the value.
-    pub fn min<K, V>(self) -> Relation<impl Op<(K, V)>>
+    pub fn group_min<K, V>(self) -> Relation<impl Op<(K, V)>>
     where
         R: Op<(K, V)>,
         K: Clone + Eq + Hash,
         V: Clone + Ord,
     {
         self.map(|(k, v)| (k, Reverse(v)))
-            .max()
+            .group_max()
             .map(|(k, Reverse(v))| (k, v))
     }
 }

@@ -39,7 +39,7 @@ impl<R> Relation<R> {
         R: Op<V>,
         V: Clone + Ord,
     {
-        self.map(|v| ((), v)).max().map(|((), v)| v)
+        self.map(|v| ((), v)).group_max().map(|((), v)| v)
     }
 
     /// Global minimum - finds the min value across all tuples.
@@ -49,7 +49,7 @@ impl<R> Relation<R> {
         R: Op<V>,
         V: Clone + Ord,
     {
-        self.map(|v| ((), v)).min().map(|((), v)| v)
+        self.map(|v| ((), v)).group_min().map(|((), v)| v)
     }
 
     /// Join two relations and discard the key.

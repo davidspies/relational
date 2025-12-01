@@ -67,7 +67,7 @@ where
 impl<R> Relation<R> {
     /// Maximum value by key.
     /// Input must be (K, V) tuples where K is the key and V is the value.
-    pub fn max<K, V>(self) -> Relation<MaxOp<K, V, R>>
+    pub fn group_max<K, V>(self) -> Relation<MaxOp<K, V, R>>
     where
         R: Op<(K, V)>,
         K: Eq + Hash,

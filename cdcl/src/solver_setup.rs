@@ -4,7 +4,7 @@ use relational::database::{CommitId, Database, output, output_with_sink};
 use relational::{assign, assign_saved, create_input, create_persistent_input, create_variable};
 
 use super::solver::{Inputs, Outputs, Solver, State};
-use super::types::{ClauseId, Conflict, Level, var};
+use super::types::{ClauseId, Conflict, Level, Lit, var};
 
 impl Solver {
     /// Create a new solver for the given number of variables.
@@ -12,21 +12,21 @@ impl Solver {
         let mut db = Database::new();
 
         // === Input Relations ===
-        create_input!(db, clauses, clauses_rel, (ClauseId, super::types::Lit));
-        create_persistent_input!(db, learned, learned_rel, (ClauseId, super::types::Lit));
+        create_input!(db, clauses, clauses_rel, (ClauseId, Lit));
+        create_persistent_input!(db, learned, learned_rel, (ClauseId, Lit));
         create_input!(db, mut levels, levels_rel, Level);
         create_input!(
             db,
             decision_assignments,
             decision_assignments_rel,
-            (super::types::Lit, Level, ClauseId)
+            (Lit, Level, ClauseId)
         );
 
         // Current level = max(levels)
-        assign!(current_level_rel, levels_rel.global_max().boxed());
+        assign!(current_level_rel, levels_rel.global_max());
 
         // All clauses (original + learned)
-        assign_saved!(all_clauses, clauses_rel.union(learned_rel).boxed());
+        assign_saved!(all_clauses, clauses_rel.union(learned_rel));
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
@@ -34,23 +34,17 @@ impl Solver {
             db,
             prep_var,
             prep_var_rel,
-            ((super::types::Lit, Level, ClauseId), CommitId)
+            ((Lit, Level, ClauseId), CommitId)
         );
         assign_saved!(prep_rel, prep_var_rel);
 
         // Final assignments: for each literal, take the entry with minimum CommitId
-        assign!(
-            assignments_with_id,
-            prep_rel
-                .get()
-                .map(|((lit, level, _cid), id)| (lit, (level, id)))
-                .min()
-        );
         assign_saved!(
             assignments,
-            assignments_with_id
-                .map(|(lit, (level, _id))| (lit, level))
-                .boxed()
+            prep_rel
+                .get()
+                .map(|((lit, level, _cid), _id)| (lit, level))
+                .group_min()
         );
 
         // Causes: tracks all ways each literal was derived
@@ -59,31 +53,22 @@ impl Solver {
             prep_rel
                 .get()
                 .map(|((lit, level, cid), commit_id)| ((lit, commit_id), (cid, level)))
-                .boxed()
         );
 
         // Derived: which literals are assigned true
-        assign_saved!(assigned, assignments.get().fst().boxed());
+        assign_saved!(assigned, assignments.get().fst());
 
         // === Compute Units ===
         // Clauses with at least one true literal are satisfied
         assign!(
             satisfied_clauses,
-            all_clauses
-                .get()
-                .swap()
-                .semijoin(assigned.get())
-                .snd()
-                .boxed()
+            all_clauses.get().swap().semijoin(assigned.get()).snd()
         );
 
-        assign!(assigned_vars, assigned.get().map(var).boxed());
+        assign!(assigned_vars, assigned.get().map(var));
         assign!(
             clause_lit_with_var,
-            all_clauses
-                .get()
-                .map(|(cid, lit)| (cid, lit, var(lit)))
-                .boxed()
+            all_clauses.get().map(|(cid, lit)| (cid, lit, var(lit)))
         );
         // Clause-literal pairs where the variable is assigned
         assign!(
@@ -92,73 +77,50 @@ impl Solver {
                 .map(|(cid, lit, v)| (v, (cid, lit)))
                 .semijoin(assigned_vars)
                 .snd()
-                .boxed()
         );
 
         assign_saved!(
             clause_unassigned_lits,
-            all_clauses
-                .get()
-                .difference(clause_assigned_lit_ids)
-                .boxed()
+            all_clauses.get().difference(clause_assigned_lit_ids)
         );
-        assign_saved!(
-            unassigned_count,
-            clause_unassigned_lits.get().count().boxed()
-        );
+        assign_saved!(unassigned_count, clause_unassigned_lits.get().group_count());
 
         assign!(
             unit_candidate_clauses,
             unassigned_count.get().filter(|(_, cnt)| *cnt == 1)
         );
-        assign!(unit_clause_ids, unit_candidate_clauses.fst().boxed());
+        assign!(unit_clause_ids, unit_candidate_clauses.fst());
 
         // Get the unassigned literal for each unit clause
         assign_saved!(
             potential_units,
-            clause_unassigned_lits
-                .get()
-                .semijoin(unit_clause_ids)
-                .boxed()
+            clause_unassigned_lits.get().semijoin(unit_clause_ids)
         );
 
         assign_saved!(satisfied_set, satisfied_clauses);
         // Filter out potential units whose clause is already satisfied
         assign!(
             units_from_sat,
-            potential_units.get().semijoin(satisfied_set.get()).boxed()
+            potential_units.get().semijoin(satisfied_set.get())
         );
 
-        assign!(
-            units,
-            potential_units.get().difference(units_from_sat).boxed()
-        );
+        assign!(units, potential_units.get().difference(units_from_sat));
 
         // === Conflict Detection ===
-        assign!(all_clause_ids, all_clauses.get().fst().boxed());
-        assign!(all_clause_ids_distinct, all_clause_ids.distinct().boxed());
-        assign!(
-            clauses_with_unassigned,
-            unassigned_count.get().fst().boxed()
-        );
+        assign!(all_clause_ids, all_clauses.get().fst());
+        assign!(all_clause_ids_distinct, all_clause_ids.distinct());
+        assign!(clauses_with_unassigned, unassigned_count.get().fst());
         assign!(
             fully_assigned_clauses,
-            all_clause_ids_distinct
-                .difference(clauses_with_unassigned)
-                .boxed()
+            all_clause_ids_distinct.difference(clauses_with_unassigned)
         );
-        assign!(satisfied_distinct, satisfied_set.get().distinct().boxed());
+        assign!(satisfied_distinct, satisfied_set.get().distinct());
         assign!(
             clause_conflicts,
-            fully_assigned_clauses
-                .difference(satisfied_distinct)
-                .boxed()
+            fully_assigned_clauses.difference(satisfied_distinct)
         );
 
-        assign_saved!(
-            assigned_with_var,
-            assigned.get().map(|lit| (var(lit), lit)).boxed()
-        );
+        assign_saved!(assigned_with_var, assigned.get().map(|lit| (var(lit), lit)));
         // Self-join to find pairs of literals with the same variable
         assign!(
             both_polarities,
@@ -170,27 +132,24 @@ impl Solver {
             both_polarities
                 .filter(|(_, (lit1, lit2))| lit1 != lit2)
                 .fst()
-                .boxed()
         );
         assign!(
             direct_conflict_vars_distinct,
-            direct_conflict_vars.distinct().boxed()
+            direct_conflict_vars.distinct()
         );
 
         assign!(
             clause_conflict_enums,
-            clause_conflicts.map(Conflict::EmptyClause).boxed()
+            clause_conflicts.map(Conflict::EmptyClause)
         );
         assign!(
             direct_conflict_enums,
-            direct_conflict_vars_distinct
-                .map(Conflict::DirectConflict)
-                .boxed()
+            direct_conflict_vars_distinct.map(Conflict::DirectConflict)
         );
 
         assign_saved!(
             conflicts,
-            clause_conflict_enums.union(direct_conflict_enums).boxed()
+            clause_conflict_enums.union(direct_conflict_enums)
         );
 
         // === Set up interrupts for early conflict detection ===
@@ -200,14 +159,12 @@ impl Solver {
         assign!(unit_with_level, units.cartesian_product(current_level_rel));
         assign!(
             unit_lit_level_cid,
-            unit_with_level
-                .map(|((cid, lit), level)| (lit, level, cid))
-                .boxed()
+            unit_with_level.map(|((cid, lit), level)| (lit, level, cid))
         );
 
         assign!(
             all_new_assignments,
-            decision_assignments_rel.union(unit_lit_level_cid).boxed()
+            decision_assignments_rel.union(unit_lit_level_cid)
         );
 
         db.feedback_with_id(prep_var, all_new_assignments);
@@ -217,10 +174,10 @@ impl Solver {
         db.commit();
 
         // Create outputs from relations (need to box them to store in struct)
-        let assignments_out = output_with_sink(assignments.get().boxed());
-        let causes_out = output_with_sink(causes.boxed());
-        let assigned_out = output(assigned.get().boxed());
-        let conflicts_out = output(conflicts.get().boxed());
+        let assignments_out = output_with_sink(assignments.get());
+        let causes_out = output_with_sink(causes);
+        let assigned_out = output(assigned.get());
+        let conflicts_out = output(conflicts.get());
 
         Solver {
             db,

@@ -97,7 +97,7 @@ pub use database::{CommitId, Database};
 #[macro_export]
 macro_rules! assign {
     ($var:ident, $expr:expr) => {
-        let $var = $expr.named(stringify!($var));
+        let $var = $expr.named(stringify!($var)).boxed();
     };
 }
 
@@ -107,7 +107,7 @@ macro_rules! assign {
 #[macro_export]
 macro_rules! assign_saved {
     ($var:ident, $expr:expr) => {
-        let $var = $expr.named(stringify!($var)).save();
+        let $var = $expr.named(stringify!($var)).boxed().save();
     };
 }
 

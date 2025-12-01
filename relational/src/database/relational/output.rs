@@ -5,6 +5,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 
 use crate::collection::Multiset;
+use crate::database::saved::SavedGetter;
 
 use super::relation::{Op, Relation};
 use super::sink::Sink;
@@ -20,6 +21,8 @@ use super::sink::Sink;
 pub struct Output<T, S = Multiset<T>, R = Box<dyn Op<T>>> {
     inner: RefCell<OutputInner<T, S, R>>,
 }
+
+pub type SavedOutput<T, S = Multiset<T>> = Output<T, S, SavedGetter<T, Box<dyn Op<T>>>>;
 
 struct OutputInner<T, S, R> {
     relation: R,

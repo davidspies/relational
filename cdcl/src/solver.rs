@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use relational::database::{CommitId, Database, InputHandle, Output, PersistentInputHandle};
+use relational::database::{
+    CommitId, Database, InputHandle, Output, PersistentInputHandle, SavedOutput,
+};
 
 use super::assignments_sink::AssignmentsSink;
 use super::cause_sink::CauseSink;
@@ -10,7 +12,7 @@ use super::types::{ClauseId, Conflict, Level, Lit, Var};
 
 /// Type alias for the causes output (complex due to nested structure).
 type CausesOutput = Output<((Lit, CommitId), (ClauseId, Level)), CauseSink>;
-type AssignmentsOutput = Output<(Lit, Level), AssignmentsSink>;
+type AssignmentsOutput = SavedOutput<(Lit, Level), AssignmentsSink>;
 
 /// Input handles for the solver.
 pub(super) struct Inputs {
@@ -31,9 +33,9 @@ pub(super) struct Outputs {
     /// Causes: ((lit, commit_id), (clause_id, level)) with CauseSink for efficient lookup
     pub causes: CausesOutput,
     /// The "assigned" relation - just tracks which literals are assigned true
-    pub assigned: Output<Lit>,
+    pub assigned: SavedOutput<Lit>,
     /// Conflicts detected during propagation
-    pub conflicts: Output<Conflict>,
+    pub conflicts: SavedOutput<Conflict>,
 }
 
 /// Solver state that doesn't involve the dataflow.

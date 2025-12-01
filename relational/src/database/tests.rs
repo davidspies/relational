@@ -750,7 +750,7 @@ fn test_sum() {
     handle.insert(("b".to_string(), 5));
     db.commit();
 
-    let mut summed = rel.sum();
+    let mut summed = rel.group_sum();
 
     let changes = collect_to_map(&mut summed);
     // Net result: ("a", 30) and ("b", 5)
@@ -766,7 +766,7 @@ fn test_sum_incremental() {
     handle.insert(("a".to_string(), 10));
     db.commit();
 
-    let mut summed = rel.sum();
+    let mut summed = rel.group_sum();
 
     let changes1 = collect_to_map(&mut summed);
     assert_eq!(changes1.get(&("a".to_string(), 10)), Some(&1));
@@ -792,7 +792,7 @@ fn test_max() {
     handle.insert(("b".to_string(), 5));
     db.commit();
 
-    let mut maxed = rel.max();
+    let mut maxed = rel.group_max();
 
     let changes = collect_to_map(&mut maxed);
     // Max of "a" is 20, max of "b" is 5
@@ -808,7 +808,7 @@ fn test_max_incremental_with_pop() {
     handle.insert(("a".to_string(), 10));
     db.commit();
 
-    let mut maxed = rel.max();
+    let mut maxed = rel.group_max();
 
     let changes1 = collect_to_map(&mut maxed);
     assert_eq!(changes1.get(&("a".to_string(), 10)), Some(&1));
@@ -846,7 +846,7 @@ fn test_count_via_sum() {
 
     // Count by mapping each tuple to 1 and summing
     let ones = rel.map(|t| (t.0.clone(), 1i64));
-    let mut counted = ones.sum();
+    let mut counted = ones.group_sum();
 
     let changes = collect_to_map(&mut counted);
     assert_eq!(changes.get(&("a".to_string(), 3)), Some(&1)); // 3 items with key "a"
@@ -867,7 +867,7 @@ fn test_min_via_max_reverse() {
 
     // Min by wrapping values in Reverse and using max
     let reversed = rel.map(|t| (t.0.clone(), Reverse(t.1)));
-    let mut maxed = reversed.max();
+    let mut maxed = reversed.group_max();
 
     let changes = collect_to_map(&mut maxed);
     // Max of Reverse values is min of original values
