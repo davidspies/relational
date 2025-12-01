@@ -2,25 +2,27 @@
 
 use std::sync::Once;
 
+use anyhow::{Context, Result};
 use cdcl::proof::ProofWriter;
 use cdcl::{Cnf, Var};
 use clap::Parser;
-use relational::database::GraphHandle;
+use consume_on_drop::ConsumeOnDrop;
+use relational::database::{Graph, GraphHandle};
 
 static SVG_DUMP: Once = Once::new();
 
-fn dump_svg(graph: &GraphHandle, path: &str) {
-    use anyhow::Context;
+fn dump_svg_once(graph: &GraphHandle, path: &str) {
     SVG_DUMP.call_once(|| {
-        let result: anyhow::Result<()> = (|| {
-            let svg = graph.to_svg()?;
-            std::fs::write(path, svg).context("failed to write SVG file")?;
-            Ok(())
-        })();
-        if let Err(e) = result {
+        if let Err(e) = dump_svg(graph, path) {
             eprintln!("Error dumping SVG: {e:?}");
         }
     });
+}
+
+fn dump_svg(graph: &Graph, path: &str) -> Result<()> {
+    let svg = graph.to_svg()?;
+    std::fs::write(path, svg).with_context(|| format!("failed to write SVG file {path}"))?;
+    Ok(())
 }
 
 #[derive(Parser)]
@@ -50,30 +52,24 @@ fn main() {
         .as_ref()
         .map(|path| ProofWriter::new(path).unwrap());
 
-    if let Some(svg_path) = &args.svg_output {
+    let _dump_on_finish = args.svg_output.map(|svg_path| {
         let graph = solver.graph();
         let path = svg_path.clone();
 
-        #[cfg(feature = "ctrlc")]
-        {
+        ctrlc::set_handler({
             let graph = graph.clone();
             let path = path.clone();
-            ctrlc::set_handler(move || {
-                dump_svg(&graph, &path);
+            move || {
+                dump_svg_once(&graph, &path);
                 std::process::exit(130);
-            })
-            .expect("Error setting Ctrl-C handler");
-        }
+            }
+        })
+        .expect("Error setting Ctrl-C handler");
 
-        if solver.solve_with_proof(proof_writer.as_mut()) {
-            println!("s SATISFIABLE");
-            print_assignment(&solver, num_vars);
-        } else {
-            println!("s UNSATISFIABLE");
-        }
+        ConsumeOnDrop::new(move || dump_svg_once(&graph, &path))
+    });
 
-        dump_svg(&graph, &path);
-    } else if solver.solve_with_proof(proof_writer.as_mut()) {
+    if solver.solve_with_proof(proof_writer.as_mut()) {
         println!("s SATISFIABLE");
         print_assignment(&solver, num_vars);
     } else {
@@ -88,7 +84,7 @@ fn print_assignment(solver: &cdcl::Solver, num_vars: u32) {
         match solver.value(var) {
             Some(true) => print!(" {}", v),
             Some(false) => print!(" -{}", v),
-            None => print!(" {}", v), // Unassigned = can be either
+            None => {}
         }
     }
     println!(" 0");
