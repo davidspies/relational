@@ -4,15 +4,19 @@
 import sys
 
 
-def parse_solution(solution_line: str) -> set[int]:
-    """Parse a solution line like 'v -1 2 -3 ... 0' into a set of literals."""
-    parts = solution_line.strip().split()
-    if parts[0] == 'v':
-        parts = parts[1:]
-    # Remove trailing 0
-    if parts and parts[-1] == '0':
-        parts = parts[:-1]
-    return set(int(x) for x in parts)
+def parse_solution(output: str) -> set[int]:
+    """Parse solver output, extracting literals from 'v' lines."""
+    literals = set()
+    for line in output.strip().split('\n'):
+        line = line.strip()
+        if not line.startswith('v '):
+            continue
+        parts = line[2:].split()
+        for p in parts:
+            val = int(p)
+            if val != 0:
+                literals.add(val)
+    return literals
 
 
 def parse_cnf(filename: str) -> list[list[int]]:
@@ -49,12 +53,12 @@ def verify(cnf_file: str, solution: set[int]) -> tuple[bool, list[list[int]]]:
 
 
 def main():
-    if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <cnf_file> <solution_line>")
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} <cnf_file> < solution")
         sys.exit(1)
 
     cnf_file = sys.argv[1]
-    solution_line = sys.argv[2]
+    solution_line = sys.stdin.read()
 
     solution = parse_solution(solution_line)
 

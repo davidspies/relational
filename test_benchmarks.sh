@@ -71,10 +71,8 @@ for file in $(find cnf_benchmarks -name "*.cnf" | sort); do
             fi
             ;;
         *"s SATISFIABLE"*)
-            solution_line="${output##*v }"
-            solution_line="v ${solution_line%%$'\n'*}"
             set +e
-            verify_output=$(./verify_sat.py "$file" "$solution_line" 2>&1)
+            verify_output=$(echo "$output" | ./verify_sat.py "$file" 2>&1)
             verify_code=$?
             set -e
             if [ $verify_code -eq 0 ]; then

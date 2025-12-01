@@ -42,6 +42,5 @@ if echo "$output" | grep -q "^s UNSATISFIABLE"; then
 elif echo "$output" | grep -q "^s SATISFIABLE"; then
     echo "---"
     echo "Verifying solution..."
-    solution_line=$(echo "$output" | grep "^v ")
-    ./verify_sat.py "$file" "$solution_line"
+    echo "$output" | ./verify_sat.py "$file"
 fi
