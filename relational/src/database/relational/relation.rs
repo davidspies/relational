@@ -4,10 +4,12 @@
 //! you must first save it to get a `SavedRelation`, then call `.get()`.
 
 use std::cell::Cell;
+use std::hash::Hash;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::Multiset;
 use crate::change::Diff;
 use crate::database::commit_id::CommitId;
 
@@ -18,6 +20,15 @@ use super::graph::{GraphBuilder, NodeId};
 pub trait Op<T>: Sized {
     /// Iterate over pending changes, calling f for each (tuple, count) pair.
     fn foreach(&mut self, f: impl FnMut(T, Diff));
+
+    fn dump_to_multiset(&mut self, multiset: &mut Multiset<T>)
+    where
+        T: Eq + Hash,
+    {
+        self.foreach(|t, diff| {
+            multiset.update(t, diff);
+        });
+    }
 
     /// Box this operator to allow type erasure.
     /// Use this when the compiler struggles with deeply nested types.
@@ -31,11 +42,22 @@ pub trait Op<T>: Sized {
 
 pub trait DynOp<T> {
     fn foreach_dyn(&mut self, f: &mut dyn FnMut(T, Diff));
+
+    fn dump_to_multiset(&mut self, multiset: &mut Multiset<T>)
+    where
+        T: Eq + Hash;
 }
 
 impl<T, R: Op<T>> DynOp<T> for R {
     fn foreach_dyn(&mut self, f: &mut dyn FnMut(T, Diff)) {
         self.foreach(f);
+    }
+
+    fn dump_to_multiset(&mut self, multiset: &mut Multiset<T>)
+    where
+        T: Eq + Hash,
+    {
+        R::dump_to_multiset(self, multiset);
     }
 }
 

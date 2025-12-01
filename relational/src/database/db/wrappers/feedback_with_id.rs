@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::change::Diff;
 use crate::collection::Multiset;
 use crate::database::commit_id::CommitId;
 use crate::database::feedback::Variable;
@@ -65,9 +64,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
 
     fn pull_and_forward_non_checkpoint(&mut self) {
         let mut changes = Multiset::new();
-        self.input.foreach(|tuple: T, diff: Diff| {
-            changes.update(tuple, diff);
-        });
+        self.input.dump_to_multiset(&mut changes);
 
         // Update input_totals and forward in a single pass
         let mut var = self.variable.borrow_mut();
@@ -116,9 +113,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
         // Without consolidation, the Variable's seen-set semantics would incorrectly
         // add tuples that net to zero.
         let mut changes = Multiset::new();
-        self.input.foreach(|tuple: T, diff: Diff| {
-            changes.update(tuple, diff);
-        });
+        self.input.dump_to_multiset(&mut changes);
 
         if changes.is_empty() {
             return false;

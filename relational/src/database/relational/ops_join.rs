@@ -38,12 +38,8 @@ where
         let mut left_changes = Multiset::new();
         let mut right_changes = Multiset::new();
 
-        self.left.foreach(|kv, diff| {
-            left_changes.update(kv, diff);
-        });
-        self.right.foreach(|kv, diff| {
-            right_changes.update(kv, diff);
-        });
+        self.left.dump_to_multiset(&mut left_changes);
+        self.right.dump_to_multiset(&mut right_changes);
 
         // Process left changes - join with existing right state
         for ((k, v1), l_diff) in left_changes {

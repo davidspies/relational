@@ -11,7 +11,6 @@ pub struct Diff(pub i64);
 
 impl Diff {
     pub(crate) const ZERO: Diff = Diff(0);
-    pub(crate) const ONE: Diff = Diff(1);
 
     #[inline]
     pub(crate) fn is_zero(self) -> bool {
@@ -82,23 +81,6 @@ impl From<Diff> for i64 {
     }
 }
 
-/// A change to a tuple: the tuple value paired with its diff.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Change<T> {
-    pub(crate) tuple: T,
-    pub(crate) diff: Diff,
-}
-
-impl<T> Change<T> {
-    pub(crate) fn new(tuple: T, diff: Diff) -> Self {
-        Change { tuple, diff }
-    }
-
-    pub(crate) fn insert(tuple: T) -> Self {
-        Change::new(tuple, Diff::ONE)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,12 +91,5 @@ mod tests {
         assert_eq!(Diff(3) - Diff(2), Diff(1));
         assert_eq!(-Diff(3), Diff(-3));
         assert_eq!(Diff(3) * 2, Diff(6));
-    }
-
-    #[test]
-    fn test_change_creation() {
-        let insert = Change::insert(42);
-        assert_eq!(insert.tuple, 42);
-        assert_eq!(insert.diff, Diff::ONE);
     }
 }

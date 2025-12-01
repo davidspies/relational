@@ -4,7 +4,6 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::change::Diff;
 use crate::collection::Multiset;
 use crate::database::feedback::Variable;
 use crate::database::relational::Op;
@@ -60,9 +59,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
 
     fn pull_and_forward_non_checkpoint(&mut self) {
         let mut changes = Multiset::new();
-        self.input.foreach(|tuple: T, diff: Diff| {
-            changes.update(tuple, diff);
-        });
+        self.input.dump_to_multiset(&mut changes);
 
         let mut var = self.variable.borrow_mut();
         for (tuple, diff) in changes {
@@ -82,9 +79,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
         // Without consolidation, the Variable's seen-set semantics would incorrectly
         // add tuples that net to zero.
         let mut changes = Multiset::new();
-        self.input.foreach(|tuple: T, diff: Diff| {
-            changes.update(tuple, diff);
-        });
+        self.input.dump_to_multiset(&mut changes);
 
         if changes.is_empty() {
             return false;

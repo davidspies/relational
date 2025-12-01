@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use crate::change::{Change, Diff};
+use crate::change::Diff;
 
 /// A differential collection storing tuples with their multiplicities.
 ///
@@ -52,7 +52,7 @@ impl<T: Eq + Hash> Multiset<T> {
 
     /// Insert a tuple (increment multiplicity by 1).
     pub fn insert(&mut self, tuple: T) {
-        self.apply_change(Change::insert(tuple));
+        self.update(tuple, Diff(1));
     }
 
     /// Delete a tuple (decrement multiplicity by 1).
@@ -76,18 +76,6 @@ impl<T: Eq + Hash> Multiset<T> {
             Entry::Vacant(e) => {
                 e.insert(diff);
             }
-        }
-    }
-
-    /// Apply a single change to the collection.
-    pub(crate) fn apply_change(&mut self, change: Change<T>) {
-        self.update(change.tuple, change.diff);
-    }
-
-    /// Apply a batch of changes to the collection.
-    pub(crate) fn apply_changes<I: IntoIterator<Item = Change<T>>>(&mut self, changes: I) {
-        for change in changes {
-            self.apply_change(change);
         }
     }
 
@@ -131,14 +119,6 @@ impl<T: Eq + Hash> FromIterator<T> for Multiset<T> {
         for tuple in iter {
             coll.insert(tuple);
         }
-        coll
-    }
-}
-
-impl<T: Eq + Hash> FromIterator<Change<T>> for Multiset<T> {
-    fn from_iter<I: IntoIterator<Item = Change<T>>>(iter: I) -> Self {
-        let mut coll = Multiset::new();
-        coll.apply_changes(iter);
         coll
     }
 }

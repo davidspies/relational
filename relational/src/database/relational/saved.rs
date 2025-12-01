@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::change::{Change, Diff};
+use crate::change::Diff;
 use crate::collection::Multiset;
 use crate::database::commit_id::CommitId;
 
@@ -37,9 +37,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> SavedState<T, R> {
         let consumer_queues = &self.consumer_queues;
         self.upstream.foreach(|t, diff| {
             for queue in consumer_queues {
-                queue
-                    .borrow_mut()
-                    .apply_change(Change::new(t.clone(), diff));
+                queue.borrow_mut().update(t.clone(), diff);
             }
         });
     }

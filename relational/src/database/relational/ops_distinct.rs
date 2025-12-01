@@ -24,7 +24,7 @@ where
 {
     fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
         let counts = &mut self.counts;
-        self.inner.foreach(|t, diff: Diff| {
+        self.inner.foreach(|t, diff| {
             let old_count = *counts.get(&t).unwrap_or(&0);
             let new_count = old_count + diff.0;
 

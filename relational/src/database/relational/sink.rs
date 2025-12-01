@@ -2,7 +2,7 @@
 
 use std::hash::Hash;
 
-use crate::change::{Change, Diff};
+use crate::change::Diff;
 use crate::collection::Multiset;
 
 /// A sink that can receive changes from a relation.
@@ -16,6 +16,6 @@ pub trait Sink<T> {
 
 impl<T: Eq + Hash> Sink<T> for Multiset<T> {
     fn apply(&mut self, tuple: T, diff: Diff) {
-        self.apply_change(Change::new(tuple, diff));
+        self.update(tuple, diff);
     }
 }
