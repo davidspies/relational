@@ -1,6 +1,6 @@
 //! Convenience methods for common relation patterns.
 
-use std::hash::Hash;
+use std::{cmp::Reverse, hash::Hash};
 
 use super::relation::{Op, Relation};
 
@@ -101,5 +101,58 @@ impl<R> Relation<R> {
         RR: Op<T>,
     {
         self.map(|t: T| (t, ())).antijoin(right).map(|(t, ())| t)
+    }
+
+    /// Set intersection (self ∩ right).
+    /// Keeps only tuples that appear in both relations.
+    pub fn intersection<T, RR>(self, right: Relation<RR>) -> Relation<impl Op<T>>
+    where
+        T: Clone + Eq + Hash,
+        R: Op<T>,
+        RR: Op<T>,
+    {
+        self.map(|t: T| (t, ())).semijoin(right).map(|(t, ())| t)
+    }
+
+    /// Count tuples by key.
+    /// Input must be (K, V) tuples where K is the key.
+    /// Output is (K, count) pairs.
+    pub fn counts<T>(self) -> Relation<impl Op<(T, i64)>>
+    where
+        R: Op<T>,
+        T: Clone + Eq + Hash,
+    {
+        self.map(|t| (t, 1i64)).group_sum()
+    }
+
+    /// Minimum value by key.
+    /// Input must be (K, V) tuples where K is the key and V is the value.
+    pub fn group_min<K, V>(self) -> Relation<impl Op<(K, V)>>
+    where
+        R: Op<(K, V)>,
+        K: Clone + Eq + Hash,
+        V: Clone + Ord,
+    {
+        self.map(|(k, v)| (k, Reverse(v)))
+            .group_max()
+            .map(|(k, Reverse(v))| (k, v))
+    }
+
+    /// Filter tuples by predicate.
+    pub fn filter<T, F>(self, pred: F) -> Relation<impl Op<T>>
+    where
+        R: Op<T>,
+        F: Fn(&T) -> bool,
+    {
+        self.flat_map(move |t| if pred(&t) { Some(t) } else { None })
+    }
+
+    /// Transform each tuple.
+    pub fn map<T, U, F>(self, f: F) -> Relation<impl Op<U>>
+    where
+        R: Op<T>,
+        F: Fn(T) -> U,
+    {
+        self.flat_map(move |t| std::iter::once(f(t)))
     }
 }
