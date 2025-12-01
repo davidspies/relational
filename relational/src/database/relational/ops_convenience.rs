@@ -12,7 +12,7 @@ impl<R> Relation<R> {
         R: Op<(A, B)>,
         A: Eq + Hash,
     {
-        self.map(|(a, _)| a)
+        self.map(|(a, _)| a).with_op_type("fst")
     }
 
     /// Extract the second element of a tuple relation.
@@ -22,7 +22,7 @@ impl<R> Relation<R> {
         R: Op<(A, B)>,
         B: Eq + Hash,
     {
-        self.map(|(_, b)| b)
+        self.map(|(_, b)| b).with_op_type("snd")
     }
 
     /// Swap the elements of a tuple relation.
@@ -33,7 +33,7 @@ impl<R> Relation<R> {
         A: Eq + Hash,
         B: Eq + Hash,
     {
-        self.map(|(a, b)| (b, a))
+        self.map(|(a, b)| (b, a)).with_op_type("swap")
     }
 
     /// Global maximum - finds the max value across all tuples.
@@ -43,7 +43,10 @@ impl<R> Relation<R> {
         R: Op<V>,
         V: Clone + Eq + Hash + Ord,
     {
-        self.map(|v| ((), v)).group_max().map(|((), v)| v)
+        self.map_(|v| ((), v))
+            .group_max()
+            .with_op_type("global_max")
+            .map_(|((), v)| v)
     }
 
     /// Global minimum - finds the min value across all tuples.
@@ -53,7 +56,10 @@ impl<R> Relation<R> {
         R: Op<V>,
         V: Clone + Eq + Hash + Ord,
     {
-        self.map(|v| ((), v)).group_min().map(|((), v)| v)
+        self.map_(|v| ((), v))
+            .group_min()
+            .with_op_type("global_min")
+            .map_(|((), v)| v)
     }
 
     /// Join two relations and discard the key.
@@ -66,7 +72,9 @@ impl<R> Relation<R> {
         V2: Clone + Eq + Hash,
         RR: Op<(K, V2)>,
     {
-        self.join(right).map(|(_k, (v1, v2))| (v1, v2))
+        self.join(right)
+            .with_op_type("join_values")
+            .map_(|(_k, (v1, v2))| (v1, v2))
     }
 
     /// Cartesian product - pairs every tuple from left with every tuple from right.
@@ -78,9 +86,10 @@ impl<R> Relation<R> {
         T2: Clone + Eq + Hash,
         RR: Op<T2>,
     {
-        self.map(|t| ((), t))
-            .join(right.map(|t| ((), t)))
-            .map(|((), (t1, t2))| (t1, t2))
+        self.map_(|t| ((), t))
+            .join(right.map_(|t| ((), t)))
+            .with_op_type("cartesian_product")
+            .map_(|((), (t1, t2))| (t1, t2))
     }
 
     /// Semijoin - filter left relation to only tuples that have a matching key in right.
@@ -93,7 +102,9 @@ impl<R> Relation<R> {
         V: Clone + Eq + Hash,
         RR: Op<K>,
     {
-        self.join(right.map(|k| (k, ()))).map(|(k, (v, ()))| (k, v))
+        self.join(right.map_(|k| (k, ())))
+            .with_op_type("semijoin")
+            .map_(|(k, (v, ()))| (k, v))
     }
 
     /// Set difference (self - right).
@@ -104,7 +115,10 @@ impl<R> Relation<R> {
         R: Op<T>,
         RR: Op<T>,
     {
-        self.map(|t: T| (t, ())).antijoin(right).map(|(t, ())| t)
+        self.map_(|t: T| (t, ()))
+            .antijoin(right)
+            .with_op_type("difference")
+            .map_(|(t, ())| t)
     }
 
     /// Set intersection (self ∩ right).
@@ -115,7 +129,10 @@ impl<R> Relation<R> {
         R: Op<T>,
         RR: Op<T>,
     {
-        self.map(|t: T| (t, ())).semijoin(right).map(|(t, ())| t)
+        self.map_(|t: T| (t, ()))
+            .semijoin(right)
+            .with_op_type("intersection")
+            .map_(|(t, ())| t)
     }
 
     /// Count tuples by key.
@@ -126,7 +143,7 @@ impl<R> Relation<R> {
         R: Op<T>,
         T: Clone + Eq + Hash,
     {
-        self.map(|t| (t, 1i64)).group_sum()
+        self.map_(|t| (t, 1i64)).group_sum().with_op_type("counts")
     }
 
     /// Minimum value by key.
@@ -137,9 +154,10 @@ impl<R> Relation<R> {
         K: Clone + Eq + Hash,
         V: Clone + Eq + Hash + Ord,
     {
-        self.map(|(k, v)| (k, Reverse(v)))
+        self.map_(|(k, v)| (k, Reverse(v)))
             .group_max()
-            .map(|(k, Reverse(v))| (k, v))
+            .with_op_type("group_min")
+            .map_(|(k, Reverse(v))| (k, v))
     }
 
     /// Filter tuples by predicate.
@@ -150,15 +168,6 @@ impl<R> Relation<R> {
         T: Eq + Hash,
     {
         self.flat_map(move |t| if pred(&t) { Some(t) } else { None })
-    }
-
-    /// Transform each tuple.
-    pub fn map<T, U, F>(self, f: F) -> Relation<impl Op<U>>
-    where
-        R: Op<T>,
-        F: Fn(T) -> U,
-        U: Eq + Hash,
-    {
-        self.flat_map(move |t| std::iter::once(f(t)))
+            .with_op_type("filter")
     }
 }

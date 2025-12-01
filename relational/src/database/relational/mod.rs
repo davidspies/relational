@@ -13,6 +13,7 @@ mod ops_consolidate;
 mod ops_convenience;
 mod ops_distinct;
 mod ops_flat_map;
+mod ops_map;
 mod ops_join;
 mod ops_max;
 mod ops_negate;

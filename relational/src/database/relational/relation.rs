@@ -134,6 +134,17 @@ impl<R> Relation<R> {
         self
     }
 
+    /// Override the op_type for this relation's graph node.
+    /// Panics if the graph has already been finalized.
+    pub(crate) fn with_op_type(self, op_type: &'static str) -> Self {
+        self.graph
+            .borrow_mut()
+            .as_mut()
+            .expect("cannot set op_type after build()")
+            .set_op_type(self.node_id, op_type);
+        self
+    }
+
     /// Box this relation to break the type chain.
     /// Use this when the compiler struggles with deeply nested types.
     /// This doesn't create a new node in the graph - it reuses the parent's node.

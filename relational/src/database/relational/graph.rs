@@ -63,6 +63,13 @@ impl Graph {
         }
     }
 
+    /// Override the op_type of a node.
+    pub(crate) fn set_op_type(&mut self, id: NodeId, op_type: &'static str) {
+        if let Some(node) = self.nodes.get_mut(id.index()) {
+            node.op_type = op_type;
+        }
+    }
+
     /// Export the graph to DOT format for Graphviz.
     pub fn to_dot(&self) -> String {
         let mut out = String::from("digraph dataflow {\n");
