@@ -32,15 +32,8 @@ where
     RR: Op<K>,
 {
     fn foreach(&mut self, mut consumer: impl FnMut((K, V), Diff)) {
-        // Collect changes from both sides
-        let mut left_changes = Multiset::new();
-        let mut right_changes = Multiset::new();
-
-        self.left.dump_to_multiset(&mut left_changes);
-        self.right.dump_to_multiset(&mut right_changes);
-
         // Process left changes first
-        for ((k, v), l_diff) in left_changes {
+        self.left.foreach(|(k, v), l_diff| {
             let right_count = *self.right_counts.get(&k).unwrap_or(&0);
             // Only emit if key is not blocked by right side
             if right_count <= 0 && l_diff != 0 {
@@ -49,10 +42,10 @@ where
             // Update left index
             let entry = self.left_index.entry(k).or_default();
             entry.update(v, l_diff);
-        }
+        });
 
         // Process right changes - these can block/unblock left tuples
-        for (k, r_diff) in right_changes {
+        self.right.foreach(|k, r_diff| {
             let old_count = *self.right_counts.get(&k).unwrap_or(&0);
             let new_count = old_count + r_diff;
 
@@ -78,7 +71,7 @@ where
             } else {
                 self.right_counts.insert(k, new_count);
             }
-        }
+        });
     }
 }
 
