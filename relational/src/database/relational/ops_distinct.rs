@@ -45,15 +45,15 @@ where
 
 impl<R> Relation<R> {
     /// Collapse multiplicities to 0 or 1.
-    pub fn distinct<T>(self) -> Relation<DistinctOp<T, R>>
+    pub fn distinct<T>(self) -> Relation<impl Op<T>>
     where
-        T: Eq + Hash,
+        T: Clone + Eq + Hash,
         R: Op<T>,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        Relation::new(
+        let result = Relation::new(
             DistinctOp {
                 inner: self,
                 counts: Multiset::new(),
@@ -62,6 +62,9 @@ impl<R> Relation<R> {
             graph,
             "distinct",
             vec![node_id],
-        )
+        );
+        #[cfg(feature = "consolidate_all")]
+        let result = result.consolidate();
+        result
     }
 }

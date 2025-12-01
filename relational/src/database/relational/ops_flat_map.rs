@@ -1,5 +1,7 @@
 //! FlatMap operator - stateless, transforms each tuple into zero or more tuples.
 
+use std::hash::Hash;
+
 use crate::change::Diff;
 
 use super::relation::{Op, Relation};
@@ -34,16 +36,17 @@ where
 
 impl<R> Relation<R> {
     /// Transform each tuple into zero or more tuples.
-    pub fn flat_map<T, U, I, F>(self, f: F) -> Relation<FlatMapOp<T, U, I, F, R>>
+    pub fn flat_map<T, U, I, F>(self, f: F) -> Relation<impl Op<U>>
     where
         R: Op<T>,
         I: IntoIterator<Item = U>,
         F: Fn(T) -> I,
+        U: Eq + Hash,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        Relation::new(
+        let result = Relation::new(
             FlatMapOp {
                 inner: self,
                 f,
@@ -53,6 +56,9 @@ impl<R> Relation<R> {
             graph,
             "flat_map",
             vec![node_id],
-        )
+        );
+        #[cfg(feature = "consolidate_all")]
+        let result = result.consolidate();
+        result
     }
 }

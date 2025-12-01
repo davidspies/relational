@@ -13,7 +13,7 @@ pub struct ConsolidateOp<T, R: Op<T>> {
     pending: Multiset<T>,
 }
 
-impl<T: Clone + Eq + Hash, R: Op<T>> Op<T> for ConsolidateOp<T, R> {
+impl<T: Eq + Hash, R: Op<T>> Op<T> for ConsolidateOp<T, R> {
     fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
         // Pull all changes from upstream into the pending multiset
         self.upstream.dump_to_multiset(&mut self.pending);
@@ -38,7 +38,7 @@ impl<R> Relation<R> {
     /// Consolidate outputs: `(a, +1)` (the net change)
     pub fn consolidate<T>(self) -> Relation<ConsolidateOp<T, R>>
     where
-        T: Clone + Eq + Hash,
+        T: Eq + Hash,
         R: Op<T>,
     {
         let commit_id = self.commit_id.clone();

@@ -1,5 +1,7 @@
 //! Negate operator.
 
+use std::hash::Hash;
+
 use crate::change::Diff;
 
 use super::relation::{Op, Relation};
@@ -26,14 +28,15 @@ where
 
 impl<R> Relation<R> {
     /// Negate all diffs.
-    pub fn negate<T>(self) -> Relation<NegateOp<T, R>>
+    pub fn negate<T>(self) -> Relation<impl Op<T>>
     where
         R: Op<T>,
+        T: Eq + Hash,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        Relation::new(
+        let result = Relation::new(
             NegateOp {
                 inner: self,
                 _phantom: std::marker::PhantomData,
@@ -42,6 +45,9 @@ impl<R> Relation<R> {
             graph,
             "negate",
             vec![node_id],
-        )
+        );
+        #[cfg(feature = "consolidate_all")]
+        let result = result.consolidate();
+        result
     }
 }

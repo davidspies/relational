@@ -67,16 +67,16 @@ where
 impl<R> Relation<R> {
     /// Maximum value by key.
     /// Input must be (K, V) tuples where K is the key and V is the value.
-    pub fn group_max<K, V>(self) -> Relation<MaxOp<K, V, R>>
+    pub fn group_max<K, V>(self) -> Relation<impl Op<(K, V)>>
     where
         R: Op<(K, V)>,
-        K: Eq + Hash,
-        V: Ord,
+        K: Clone + Eq + Hash,
+        V: Clone + Eq + Hash + Ord,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        Relation::new(
+        let result = Relation::new(
             MaxOp {
                 inner: self,
                 values: HashMap::new(),
@@ -85,6 +85,9 @@ impl<R> Relation<R> {
             graph,
             "max",
             vec![node_id],
-        )
+        );
+        #[cfg(feature = "consolidate_all")]
+        let result = result.consolidate();
+        result
     }
 }

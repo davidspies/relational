@@ -10,6 +10,7 @@ impl<R> Relation<R> {
     pub fn fst<A, B>(self) -> Relation<impl Op<A>>
     where
         R: Op<(A, B)>,
+        A: Eq + Hash,
     {
         self.map(|(a, _)| a)
     }
@@ -19,6 +20,7 @@ impl<R> Relation<R> {
     pub fn snd<A, B>(self) -> Relation<impl Op<B>>
     where
         R: Op<(A, B)>,
+        B: Eq + Hash,
     {
         self.map(|(_, b)| b)
     }
@@ -28,6 +30,8 @@ impl<R> Relation<R> {
     pub fn swap<A, B>(self) -> Relation<impl Op<(B, A)>>
     where
         R: Op<(A, B)>,
+        A: Eq + Hash,
+        B: Eq + Hash,
     {
         self.map(|(a, b)| (b, a))
     }
@@ -37,7 +41,7 @@ impl<R> Relation<R> {
     pub fn global_max<V>(self) -> Relation<impl Op<V>>
     where
         R: Op<V>,
-        V: Clone + Ord,
+        V: Clone + Eq + Hash + Ord,
     {
         self.map(|v| ((), v)).group_max().map(|((), v)| v)
     }
@@ -47,7 +51,7 @@ impl<R> Relation<R> {
     pub fn global_min<V>(self) -> Relation<impl Op<V>>
     where
         R: Op<V>,
-        V: Clone + Ord,
+        V: Clone + Eq + Hash + Ord,
     {
         self.map(|v| ((), v)).group_min().map(|((), v)| v)
     }
@@ -131,7 +135,7 @@ impl<R> Relation<R> {
     where
         R: Op<(K, V)>,
         K: Clone + Eq + Hash,
-        V: Clone + Ord,
+        V: Clone + Eq + Hash + Ord,
     {
         self.map(|(k, v)| (k, Reverse(v)))
             .group_max()
@@ -143,6 +147,7 @@ impl<R> Relation<R> {
     where
         R: Op<T>,
         F: Fn(&T) -> bool,
+        T: Eq + Hash,
     {
         self.flat_map(move |t| if pred(&t) { Some(t) } else { None })
     }
@@ -152,6 +157,7 @@ impl<R> Relation<R> {
     where
         R: Op<T>,
         F: Fn(T) -> U,
+        U: Eq + Hash,
     {
         self.flat_map(move |t| std::iter::once(f(t)))
     }

@@ -3,6 +3,9 @@ name = "relational"
 edition.workspace = true
 version.workspace = true
 
+[features]
+consolidate_all = []
+
 [dependencies]
 derive-where = "*"
 anyhow = "*"

@@ -34,7 +34,10 @@ impl Solver {
         // All clauses (original + learned)
         assign_saved!(all_clauses, clauses_rel.union(learned_rel));
 
-        assign!(all_clause_ids, all_clauses.get().fst().consolidate().distinct());
+        assign!(
+            all_clause_ids,
+            all_clauses.get().fst().consolidate().distinct()
+        );
 
         // === Feedback-based Unit Propagation ===
         // prep_assignments accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
@@ -85,7 +88,12 @@ impl Solver {
         // Clauses with at least one true literal are satisfied
         assign!(
             satisfied_clause_ids,
-            all_clauses.get().swap().semijoin(assigned.get()).snd().consolidate()
+            all_clauses
+                .get()
+                .swap()
+                .semijoin(assigned.get())
+                .snd()
+                .consolidate()
         );
         assign_saved!(
             unsatisfied_clause_ids,
@@ -111,6 +119,7 @@ impl Solver {
             unsatisfied_clause_ids
                 .get()
                 .difference(remaining_clause_literals.get().fst().consolidate())
+                .consolidate()
         );
 
         // Interrupt early when an empty clause is detected
@@ -131,12 +140,14 @@ impl Solver {
         // Unit clauses: exactly one remaining literal (must be assigned true)
         assign!(
             units,
-            remaining_clause_literals.get().semijoin(
-                remaining_clause_sizes
-                    .filter(|&(_cid, size)| size == 1)
-                    .consolidate()
-                    .map(|(cid, _)| cid)
-            ).consolidate()
+            remaining_clause_literals
+                .get()
+                .semijoin(
+                    remaining_clause_sizes
+                        .filter(|&(_cid, size)| size == 1)
+                        .map(|(cid, _)| cid)
+                )
+                .consolidate()
         );
 
         // === Set up the feedback loop ===

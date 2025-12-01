@@ -77,7 +77,7 @@ where
 impl<RL> Relation<RL> {
     /// Antijoin - filter to tuples whose key is NOT in right.
     /// Left input is (K, V), right input is K. Output is (K, V).
-    pub fn antijoin<K, V, RR>(self, right: Relation<RR>) -> Relation<AntijoinOp<K, V, RL, RR>>
+    pub fn antijoin<K, V, RR>(self, right: Relation<RR>) -> Relation<impl Op<(K, V)>>
     where
         RL: Op<(K, V)>,
         K: Eq + Hash + Clone,
@@ -89,7 +89,7 @@ impl<RL> Relation<RL> {
         let right_node = right.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        Relation::new(
+        let result = Relation::new(
             AntijoinOp {
                 left: self,
                 right,
@@ -100,6 +100,9 @@ impl<RL> Relation<RL> {
             graph,
             "antijoin",
             vec![left_node, right_node],
-        )
+        );
+        #[cfg(feature = "consolidate_all")]
+        let result = result.consolidate();
+        result
     }
 }

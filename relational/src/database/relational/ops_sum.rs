@@ -57,16 +57,16 @@ where
 impl<R> Relation<R> {
     /// Sum values by key.
     /// Input must be (K, V) tuples where K is the key and V is the value.
-    pub fn group_sum<K, V>(self) -> Relation<SumOp<K, V, R>>
+    pub fn group_sum<K, V>(self) -> Relation<impl Op<(K, V)>>
     where
         R: Op<(K, V)>,
-        K: Eq + Hash,
-        V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
+        K: Clone + Eq + Hash,
+        V: Clone + Eq + Hash + Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        Relation::new(
+        let result = Relation::new(
             SumOp {
                 inner: self,
                 sums: HashMap::new(),
@@ -75,6 +75,9 @@ impl<R> Relation<R> {
             graph,
             "sum",
             vec![node_id],
-        )
+        );
+        #[cfg(feature = "consolidate_all")]
+        let result = result.consolidate();
+        result
     }
 }
