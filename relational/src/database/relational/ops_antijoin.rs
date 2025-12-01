@@ -43,7 +43,7 @@ where
         for ((k, v), l_diff) in left_changes {
             let right_count = *self.right_counts.get(&k).unwrap_or(&0);
             // Only emit if key is not blocked by right side
-            if right_count <= 0 && l_diff.0 != 0 {
+            if right_count <= 0 && l_diff != 0 {
                 consumer((k.clone(), v.clone()), l_diff);
             }
             // Update left index
@@ -54,7 +54,7 @@ where
         // Process right changes - these can block/unblock left tuples
         for (k, r_diff) in right_changes {
             let old_count = *self.right_counts.get(&k).unwrap_or(&0);
-            let new_count = old_count + r_diff.0;
+            let new_count = old_count + r_diff;
 
             let was_blocked = old_count > 0;
             let is_blocked = new_count > 0;
@@ -62,11 +62,11 @@ where
             if was_blocked != is_blocked {
                 // Blocking state changed - emit/retract all left tuples with this key
                 if let Some(lefts) = self.left_index.get(&k) {
-                    for (v, Diff(l_count)) in lefts.iter_with_multiplicity() {
+                    for (v, l_count) in lefts.iter_with_multiplicity() {
                         if l_count != 0 {
                             // If now blocked, retract; if now unblocked, emit
                             let output_diff = if is_blocked { -l_count } else { l_count };
-                            consumer((k.clone(), v.clone()), Diff(output_diff));
+                            consumer((k.clone(), v.clone()), output_diff);
                         }
                     }
                 }

@@ -19,7 +19,7 @@ where
 {
     fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
         self.inner.foreach(|t, diff| {
-            consumer(t, Diff(-diff.0));
+            consumer(t, -diff);
         });
     }
 }

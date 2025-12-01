@@ -42,34 +42,34 @@ impl<T: Eq + Hash> Multiset<T> {
 
     /// Get the multiplicity of a tuple.
     pub fn get(&self, tuple: &T) -> Diff {
-        self.data.get(tuple).copied().unwrap_or(Diff::ZERO)
+        self.data.get(tuple).copied().unwrap_or(0)
     }
 
     /// Check if a tuple exists with positive multiplicity.
     pub fn contains(&self, tuple: &T) -> bool {
-        self.get(tuple).is_positive()
+        self.get(tuple) > 0
     }
 
     /// Insert a tuple (increment multiplicity by 1).
     pub fn insert(&mut self, tuple: T) {
-        self.update(tuple, Diff(1));
+        self.update(tuple, 1);
     }
 
     /// Delete a tuple (decrement multiplicity by 1).
     pub fn delete(&mut self, tuple: T) {
-        self.update(tuple, Diff(-1));
+        self.update(tuple, -1);
     }
 
     /// Update the multiplicity of a tuple by a diff.
     pub fn update(&mut self, tuple: T, diff: Diff) {
-        if diff.is_zero() {
+        if diff == 0 {
             return;
         }
         use std::collections::hash_map::Entry;
         match self.data.entry(tuple) {
             Entry::Occupied(mut e) => {
                 *e.get_mut() += diff;
-                if e.get().is_zero() {
+                if *e.get() == 0 {
                     e.remove();
                 }
             }
@@ -83,7 +83,7 @@ impl<T: Eq + Hash> Multiset<T> {
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.data
             .iter()
-            .filter(|(_, diff)| diff.is_positive())
+            .filter(|(_, diff)| **diff > 0)
             .map(|(tuple, _)| tuple)
     }
 
@@ -134,9 +134,9 @@ mod tests {
         coll.insert(2);
         coll.insert(1);
 
-        assert_eq!(coll.get(&1), Diff(2));
-        assert_eq!(coll.get(&2), Diff(1));
-        assert_eq!(coll.get(&3), Diff(0));
+        assert_eq!(coll.get(&1), 2);
+        assert_eq!(coll.get(&2), 1);
+        assert_eq!(coll.get(&3), 0);
         assert!(coll.contains(&1));
         assert!(!coll.contains(&3));
     }
@@ -148,7 +148,7 @@ mod tests {
         coll.insert(1);
         coll.delete(1);
 
-        assert_eq!(coll.get(&1), Diff(1));
+        assert_eq!(coll.get(&1), 1);
         coll.delete(1);
         assert!(!coll.contains(&1));
         assert!(coll.is_empty());

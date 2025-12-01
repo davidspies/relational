@@ -36,8 +36,7 @@ pub struct VariableRelation<T> {
 impl<T: Clone + Eq + Hash> Op<T> for VariableRelation<T> {
     fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
         let mut var = self.inner.borrow_mut();
-        let changes = var.take_changes();
-        for (tuple, diff) in changes {
+        for (tuple, diff) in var.drain_pending() {
             consumer(tuple, diff);
         }
     }

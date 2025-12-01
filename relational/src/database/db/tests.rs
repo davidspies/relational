@@ -90,7 +90,7 @@ fn test_db_create_input_and_commit() {
     // (no staging step). commit() records to checkpoint and runs fixpoint.
     let mut count = 0;
     rel.foreach(|t, diff| {
-        assert!(diff.0 > 0);
+        assert!(diff > 0);
         assert!(t == 1 || t == 2);
         count += 1;
     });
@@ -138,7 +138,7 @@ fn test_db_push_pop_simple() {
     // Pull the undo changes
     let mut undos = Vec::new();
     rel.foreach(|t, diff| {
-        undos.push((t, diff.0));
+        undos.push((t, diff));
     });
     undos.sort();
     assert_eq!(undos, vec![(2, -1), (3, -1)]);

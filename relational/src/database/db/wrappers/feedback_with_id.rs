@@ -71,7 +71,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
         for (tuple, diff) in changes {
             // Update our T-keyed input_totals
             let input_total = self.input_totals_by_t.entry(tuple.clone()).or_insert(0);
-            *input_total += diff.0;
+            *input_total += diff;
 
             // Look up the actual (T, CommitId) in our mapping and forward if not in checkpoint
             if let Some(&commit_id) = self.t_to_commit_id.get(&tuple) {
@@ -129,7 +129,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
                 .entry(tuple.clone())
                 .or_insert(current_id);
             // Also track input totals by T
-            *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff.0;
+            *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff;
             // Add to variable with commit ID stamp (use the mapped commit_id, not new_id)
             var.add_change((tuple, commit_id), diff);
         }

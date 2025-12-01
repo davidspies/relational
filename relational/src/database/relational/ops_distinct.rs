@@ -26,7 +26,7 @@ where
         let counts = &mut self.counts;
         self.inner.foreach(|t, diff| {
             let old_count = *counts.get(&t).unwrap_or(&0);
-            let new_count = old_count + diff.0;
+            let new_count = old_count + diff;
 
             if new_count == 0 {
                 counts.remove(&t);
@@ -38,9 +38,9 @@ where
             let is_present = new_count > 0;
 
             if !was_present && is_present {
-                consumer(t, Diff(1)); // appeared
+                consumer(t, 1); // appeared
             } else if was_present && !is_present {
-                consumer(t, Diff(-1)); // disappeared
+                consumer(t, -1); // disappeared
             }
             // else: no change to output
         });

@@ -1,11 +1,10 @@
 //! Variable for tracking iterative computation state.
 
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-};
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 
 use crate::change::Diff;
+use crate::collection::Multiset;
 
 /// A variable in an iterative computation.
 ///
@@ -25,9 +24,9 @@ pub struct Variable<T> {
     /// The seen set - tuples we've emitted +1 for.
     output_seen: HashSet<T>,
     /// Staged changes (not yet committed).
-    staged: Vec<(T, Diff)>,
+    staged: Multiset<T>,
     /// Pending changes (committed, ready to be pulled).
-    pending: Vec<(T, Diff)>,
+    pending: Multiset<T>,
     /// Stack of outputs added at each checkpoint level.
     outputs_by_checkpoint: Vec<Vec<T>>,
 }
@@ -38,8 +37,8 @@ impl<T: Clone + Eq + Hash> Variable<T> {
         Variable {
             input_totals: HashMap::new(),
             output_seen: HashSet::new(),
-            staged: Vec::new(),
-            pending: Vec::new(),
+            staged: Multiset::new(),
+            pending: Multiset::new(),
             outputs_by_checkpoint: Vec::new(),
         }
     }
@@ -50,14 +49,14 @@ impl<T: Clone + Eq + Hash> Variable<T> {
     pub(crate) fn add_input(&mut self, tuple: T, diff: Diff) {
         // Update input_totals
         let total = self.input_totals.entry(tuple.clone()).or_insert(0);
-        *total += diff.0;
+        *total += diff;
 
         // Only add to output if:
         // 1. input_totals is now positive, AND
         // 2. not already in output_seen (seen set semantics)
         if *total > 0 && !self.output_seen.contains(&tuple) {
             self.output_seen.insert(tuple.clone());
-            self.staged.push((tuple.clone(), Diff(1)));
+            self.staged.update(tuple.clone(), 1);
             if let Some(level) = self.outputs_by_checkpoint.last_mut() {
                 level.push(tuple);
             }
@@ -71,13 +70,15 @@ impl<T: Clone + Eq + Hash> Variable<T> {
     }
 
     /// Take the pending changes (empties the buffer).
-    pub(crate) fn take_changes(&mut self) -> Vec<(T, Diff)> {
-        std::mem::take(&mut self.pending)
+    pub(crate) fn drain_pending(&mut self) -> impl Iterator<Item = (T, Diff)> {
+        self.pending.drain()
     }
 
     /// Commit staged changes to pending.
     pub(crate) fn commit(&mut self) {
-        self.pending.append(&mut self.staged);
+        for (tuple, diff) in self.staged.drain() {
+            self.pending.update(tuple, diff);
+        }
     }
 
     /// Push a new checkpoint level.
@@ -93,14 +94,14 @@ impl<T: Clone + Eq + Hash> Variable<T> {
                 // Remove from output_seen
                 self.output_seen.remove(tuple);
                 // Emit -1 to staged
-                self.staged.push((tuple.clone(), Diff(-1)));
+                self.staged.update(tuple.clone(), -1);
             }
         }
     }
 
     /// Update input_totals with a change (used during pop).
     pub(crate) fn update_input_total(&mut self, tuple: T, diff: Diff) {
-        *self.input_totals.entry(tuple).or_insert(0) += diff.0;
+        *self.input_totals.entry(tuple).or_insert(0) += diff;
     }
 
     /// Set input_total to a specific value (used by FeedbackWithIdWrapper during pop).
@@ -125,7 +126,7 @@ impl<T: Clone + Eq + Hash> Variable<T> {
     pub(crate) fn forward_reachable(&mut self, tuple: &T) {
         if !self.output_seen.contains(tuple) {
             self.output_seen.insert(tuple.clone());
-            self.staged.push((tuple.clone(), Diff(1)));
+            self.staged.update(tuple.clone(), 1);
             if let Some(parent) = self.outputs_by_checkpoint.last_mut() {
                 parent.push(tuple.clone());
             }
@@ -145,7 +146,7 @@ impl<T: Clone + Eq + Hash> Variable<T> {
             if input_total > 0 && !self.output_seen.contains(tuple) {
                 // Re-add to output_seen
                 self.output_seen.insert(tuple.clone());
-                self.staged.push((tuple.clone(), Diff(1)));
+                self.staged.update(tuple.clone(), 1);
                 // Record in parent checkpoint
                 if self.outputs_by_checkpoint.len() >= 2 {
                     let parent_idx = self.outputs_by_checkpoint.len() - 2;
@@ -163,7 +164,7 @@ impl<T: Clone + Eq + Hash> Variable<T> {
                 if input_total > 0 && !self.output_seen.contains(&tuple) {
                     // Still reachable - re-add to output_seen
                     self.output_seen.insert(tuple.clone());
-                    self.staged.push((tuple.clone(), Diff(1)));
+                    self.staged.update(tuple.clone(), 1);
                     // Record in parent checkpoint
                     if let Some(parent) = self.outputs_by_checkpoint.last_mut() {
                         parent.push(tuple);

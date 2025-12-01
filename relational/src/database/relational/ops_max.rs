@@ -38,7 +38,7 @@ where
 
             // Update the value count
             let count = key_values.entry(v.clone()).or_insert(0);
-            *count += diff.0;
+            *count += diff;
             if *count == 0 {
                 key_values.remove(&v);
             }
@@ -54,10 +54,10 @@ where
             // Output changes if max changed
             if old_max != new_max {
                 if let Some(old) = old_max {
-                    consumer((k.clone(), old), Diff(-1));
+                    consumer((k.clone(), old), -1);
                 }
                 if let Some(new) = new_max {
-                    consumer((k, new), Diff(1));
+                    consumer((k, new), 1);
                 }
             }
         });

@@ -31,7 +31,7 @@ where
         let sums = &mut self.sums;
 
         self.inner.foreach(|(k, v), diff| {
-            let delta = v * diff.0;
+            let delta = v * diff;
 
             let old_sum = sums.get(&k).cloned().unwrap_or_default();
             let new_sum = old_sum.clone() + delta;
@@ -45,10 +45,10 @@ where
 
             // Output: delete old (key, sum), insert new (key, sum)
             if old_sum != zero {
-                consumer((k.clone(), old_sum), Diff(-1));
+                consumer((k.clone(), old_sum), -1);
             }
             if new_sum != zero {
-                consumer((k, new_sum), Diff(1));
+                consumer((k, new_sum), 1);
             }
         });
     }

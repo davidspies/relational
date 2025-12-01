@@ -45,9 +45,9 @@ where
         for ((k, v1), l_diff) in left_changes {
             // Join with existing right tuples
             if let Some(rights) = self.right_index.get(&k) {
-                for (v2, Diff(r_count)) in rights.iter_with_multiplicity() {
-                    let output_diff = Diff(l_diff.0 * r_count);
-                    if output_diff.0 != 0 {
+                for (v2, r_count) in rights.iter_with_multiplicity() {
+                    let output_diff = l_diff * r_count;
+                    if output_diff != 0 {
                         consumer((k.clone(), (v1.clone(), v2.clone())), output_diff);
                     }
                 }
@@ -62,9 +62,9 @@ where
         for ((k, v2), r_diff) in right_changes {
             // Join with left tuples (now includes newly added ones)
             if let Some(lefts) = self.left_index.get(&k) {
-                for (v1, Diff(l_count)) in lefts.iter_with_multiplicity() {
-                    let output_diff = Diff(l_count * r_diff.0);
-                    if output_diff.0 != 0 {
+                for (v1, l_count) in lefts.iter_with_multiplicity() {
+                    let output_diff = l_count * r_diff;
+                    if output_diff != 0 {
                         consumer((k.clone(), (v1.clone(), v2.clone())), output_diff);
                     }
                 }
