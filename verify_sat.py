@@ -33,6 +33,11 @@ def parse_cnf(filename: str) -> list[list[int]]:
     return clauses
 
 
+def check_consistency(solution: set[int]) -> list[int]:
+    """Return list of variables that appear both positive and negative."""
+    return [lit for lit in solution if lit > 0 and -lit in solution]
+
+
 def verify(cnf_file: str, solution: set[int]) -> tuple[bool, list[list[int]]]:
     """Verify solution against CNF. Returns (success, unsatisfied_clauses)."""
     clauses = parse_cnf(cnf_file)
@@ -52,6 +57,12 @@ def main():
     solution_line = sys.argv[2]
 
     solution = parse_solution(solution_line)
+
+    contradictions = check_consistency(solution)
+    if contradictions:
+        print(f"s NOT VERIFIED (contradictory assignments for variables: {contradictions})")
+        sys.exit(1)
+
     success, unsatisfied = verify(cnf_file, solution)
 
     if success:
