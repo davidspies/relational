@@ -9,15 +9,15 @@ use super::relation::{Op, Relation};
 
 impl<R> Relation<R> {
     /// Minimum value by key.
-    pub fn min<T, K, V, FK, FV>(self, key_fn: FK, val_fn: FV) -> Relation<impl Op<(K, V)>>
+    /// Input must be (K, V) tuples where K is the key and V is the value.
+    pub fn min<K, V>(self) -> Relation<impl Op<(K, V)>>
     where
-        R: Op<T>,
+        R: Op<(K, V)>,
         K: Clone + Eq + Hash,
         V: Clone + Ord,
-        FK: Fn(&T) -> K,
-        FV: Fn(&T) -> V,
     {
-        self.max(key_fn, move |t| Reverse(val_fn(t)))
+        self.map(|(k, v)| (k, Reverse(v)))
+            .max()
             .map(|(k, Reverse(v))| (k, v))
     }
 }

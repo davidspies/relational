@@ -9,101 +9,89 @@ use crate::collection::Multiset;
 use super::relation::{Op, Relation, assert_same_commit_id};
 
 /// A join operator - joins left and right on matching keys.
+/// Input is (K, V) tuples on both sides, output is (K, (V1, V2)) tuples.
 /// Tracks both input states to compute correct output deltas.
-pub struct JoinOp<L, R, K, FL, FR, RL, RR>
+pub struct JoinOp<K, V1, V2, RL, RR>
 where
     K: Eq + Hash + Clone,
-    FL: Fn(&L) -> K,
-    FR: Fn(&R) -> K,
-    RL: Op<L>,
-    RR: Op<R>,
+    RL: Op<(K, V1)>,
+    RR: Op<(K, V2)>,
 {
     left: Relation<RL>,
     right: Relation<RR>,
-    key_left: FL,
-    key_right: FR,
-    /// Index of left tuples by key: key -> [(tuple, count)]
-    left_index: HashMap<K, Multiset<L>>,
-    /// Index of right tuples by key: key -> [(tuple, count)]
-    right_index: HashMap<K, Multiset<R>>,
+    /// Index of left tuples by key: key -> [(value, count)]
+    left_index: HashMap<K, Multiset<V1>>,
+    /// Index of right tuples by key: key -> [(value, count)]
+    right_index: HashMap<K, Multiset<V2>>,
 }
 
-impl<L, R, K, FL, FR, RL, RR> Op<(L, R)> for JoinOp<L, R, K, FL, FR, RL, RR>
+impl<K, V1, V2, RL, RR> Op<(K, (V1, V2))> for JoinOp<K, V1, V2, RL, RR>
 where
-    L: Clone + Eq + Hash,
-    R: Clone + Eq + Hash,
-    K: Eq + Hash + Clone,
-    FL: Fn(&L) -> K,
-    FR: Fn(&R) -> K,
-    RL: Op<L>,
-    RR: Op<R>,
+    K: Clone + Eq + Hash,
+    V1: Clone + Eq + Hash,
+    V2: Clone + Eq + Hash,
+    RL: Op<(K, V1)>,
+    RR: Op<(K, V2)>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut((L, R), Diff)) {
+    fn foreach(&mut self, consumer: &mut dyn FnMut((K, (V1, V2)), Diff)) {
         // Collect changes from both sides using Multiset to consolidate duplicates
         let mut left_changes = Multiset::new();
         let mut right_changes = Multiset::new();
 
-        self.left.foreach(&mut |l, diff| {
-            left_changes.update(l, diff);
+        self.left.foreach(&mut |kv, diff| {
+            left_changes.update(kv, diff);
         });
-        self.right.foreach(&mut |r, diff| {
-            right_changes.update(r, diff);
+        self.right.foreach(&mut |kv, diff| {
+            right_changes.update(kv, diff);
         });
 
         // Process left changes - join with existing right state
-        for (l, l_diff) in left_changes {
-            let k = (self.key_left)(&l);
-
+        for ((k, v1), l_diff) in left_changes {
             // Join with existing right tuples
             if let Some(rights) = self.right_index.get(&k) {
-                for (r, Diff(r_count)) in rights.iter_with_multiplicity() {
+                for (v2, Diff(r_count)) in rights.iter_with_multiplicity() {
                     let output_diff = Diff(l_diff.0 * r_count);
                     if output_diff.0 != 0 {
-                        consumer((l.clone(), r.clone()), output_diff);
+                        consumer((k.clone(), (v1.clone(), v2.clone())), output_diff);
                     }
                 }
             }
 
             // Update left index
             let entry = self.left_index.entry(k).or_default();
-            entry.update(l, l_diff);
+            entry.update(v1, l_diff);
         }
 
         // Process right changes - join with updated left state (includes new left tuples)
-        for (r, r_diff) in right_changes {
-            let k = (self.key_right)(&r);
-
+        for ((k, v2), r_diff) in right_changes {
             // Join with left tuples (now includes newly added ones)
             if let Some(lefts) = self.left_index.get(&k) {
-                for (l, Diff(l_count)) in lefts.iter_with_multiplicity() {
+                for (v1, Diff(l_count)) in lefts.iter_with_multiplicity() {
                     let output_diff = Diff(l_count * r_diff.0);
                     if output_diff.0 != 0 {
-                        consumer((l.clone(), r.clone()), output_diff);
+                        consumer((k.clone(), (v1.clone(), v2.clone())), output_diff);
                     }
                 }
             }
 
             // Update right index
             let entry = self.right_index.entry(k).or_default();
-            entry.update(r, r_diff);
+            entry.update(v2, r_diff);
         }
     }
 }
 
 impl<RL> Relation<RL> {
     /// Join two relations on matching keys.
-    pub fn join<L, R, K, FL, FR, RR>(
+    /// Both inputs must be (K, V) tuples. Output is (K, (V1, V2)) tuples.
+    pub fn join<K, V1, V2, RR>(
         self,
         right: Relation<RR>,
-        key_left: FL,
-        key_right: FR,
-    ) -> Relation<JoinOp<L, R, K, FL, FR, RL, RR>>
+    ) -> Relation<JoinOp<K, V1, V2, RL, RR>>
     where
-        RL: Op<L>,
+        RL: Op<(K, V1)>,
         K: Eq + Hash + Clone,
-        FL: Fn(&L) -> K,
-        FR: Fn(&R) -> K,
-        RR: Op<R>,
+        RR: Op<(K, V2)>,
     {
         assert_same_commit_id(&self.commit_id, &right.commit_id);
         let left_node = self.node_id;
@@ -114,8 +102,6 @@ impl<RL> Relation<RL> {
             JoinOp {
                 left: self,
                 right,
-                key_left,
-                key_right,
                 left_index: HashMap::new(),
                 right_index: HashMap::new(),
             },

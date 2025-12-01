@@ -8,41 +8,29 @@ use crate::change::Diff;
 use super::relation::{Op, Relation};
 
 /// A max operator - tracks maximum value by key.
-/// Output is (key, max_value) pairs.
-pub struct MaxOp<T, K, V, FK, FV, R>
+/// Input is (key, value) pairs, output is (key, max_value) pairs.
+pub struct MaxOp<K, V, R>
 where
     K: Eq + Hash,
     V: Ord,
-    FK: Fn(&T) -> K,
-    FV: Fn(&T) -> V,
-    R: Op<T>,
+    R: Op<(K, V)>,
 {
     inner: Relation<R>,
-    key_fn: FK,
-    val_fn: FV,
     /// Track all values per key with their counts: key -> (value -> count)
     /// Using BTreeMap so we can efficiently find max
     values: HashMap<K, BTreeMap<V, i64>>,
-    _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, K, V, FK, FV, R> Op<(K, V)> for MaxOp<T, K, V, FK, FV, R>
+impl<K, V, R> Op<(K, V)> for MaxOp<K, V, R>
 where
     K: Clone + Eq + Hash,
     V: Clone + Ord,
-    FK: Fn(&T) -> K,
-    FV: Fn(&T) -> V,
-    R: Op<T>,
+    R: Op<(K, V)>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
-        let key_fn = &self.key_fn;
-        let val_fn = &self.val_fn;
         let values = &mut self.values;
 
-        self.inner.foreach(&mut |t, diff| {
-            let k = key_fn(&t);
-            let v = val_fn(&t);
-
+        self.inner.foreach(&mut |(k, v), diff| {
             let key_values = values.entry(k.clone()).or_default();
 
             // Get old max before update
@@ -78,13 +66,12 @@ where
 
 impl<R> Relation<R> {
     /// Maximum value by key.
-    pub fn max<T, K, V, FK, FV>(self, key_fn: FK, val_fn: FV) -> Relation<MaxOp<T, K, V, FK, FV, R>>
+    /// Input must be (K, V) tuples where K is the key and V is the value.
+    pub fn max<K, V>(self) -> Relation<MaxOp<K, V, R>>
     where
-        R: Op<T>,
+        R: Op<(K, V)>,
         K: Eq + Hash,
         V: Ord,
-        FK: Fn(&T) -> K,
-        FV: Fn(&T) -> V,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
@@ -92,10 +79,7 @@ impl<R> Relation<R> {
         Relation::new(
             MaxOp {
                 inner: self,
-                key_fn,
-                val_fn,
                 values: HashMap::new(),
-                _phantom: std::marker::PhantomData,
             },
             commit_id,
             graph,

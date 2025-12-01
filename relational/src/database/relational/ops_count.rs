@@ -8,12 +8,13 @@ use super::relation::{Op, Relation};
 
 impl<R> Relation<R> {
     /// Count tuples by key.
-    pub fn count<T, K, FK>(self, key_fn: FK) -> Relation<impl Op<(K, i64)>>
+    /// Input must be (K, V) tuples where K is the key.
+    /// Output is (K, count) pairs.
+    pub fn count<K, V>(self) -> Relation<impl Op<(K, i64)>>
     where
-        R: Op<T>,
+        R: Op<(K, V)>,
         K: Clone + Eq + Hash,
-        FK: Fn(&T) -> K,
     {
-        self.sum(key_fn, |_| 1i64)
+        self.map(|(k, _): (K, V)| (k, 1i64)).sum()
     }
 }

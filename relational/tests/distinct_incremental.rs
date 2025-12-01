@@ -149,10 +149,12 @@ fn test_cdcl_pattern() {
     let saved_clauses = clauses_rel.save();
 
     // Clause literals that are true (satisfied)
-    let clause_lit_true = saved_clauses
+    // Semijoin clauses with assigned literals, keeping the clause id
+    let satisfied_clauses = saved_clauses
         .get()
-        .join(assigned_rel, |(_, lit)| *lit, |lit| *lit);
-    let satisfied_clauses = clause_lit_true.map(|((cid, _), _)| cid);
+        .swap()
+        .semijoin(assigned_rel)
+        .map(|(_, cid)| cid);
     let satisfied_distinct = satisfied_clauses.distinct();
 
     // All clause IDs

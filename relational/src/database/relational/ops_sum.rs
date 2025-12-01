@@ -9,39 +9,28 @@ use crate::change::Diff;
 use super::relation::{Op, Relation};
 
 /// A sum operator - sums values by key.
-/// Output is (key, sum) pairs.
-pub struct SumOp<T, K, V, FK, FV, R>
+/// Input is (key, value) pairs, output is (key, sum) pairs.
+pub struct SumOp<K, V, R>
 where
     K: Eq + Hash,
     V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
-    FK: Fn(&T) -> K,
-    FV: Fn(&T) -> V,
-    R: Op<T>,
+    R: Op<(K, V)>,
 {
     inner: Relation<R>,
-    key_fn: FK,
-    val_fn: FV,
     /// Track sum per key
     sums: HashMap<K, V>,
-    _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, K, V, FK, FV, R> Op<(K, V)> for SumOp<T, K, V, FK, FV, R>
+impl<K, V, R> Op<(K, V)> for SumOp<K, V, R>
 where
     K: Clone + Eq + Hash,
     V: Clone + Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
-    FK: Fn(&T) -> K,
-    FV: Fn(&T) -> V,
-    R: Op<T>,
+    R: Op<(K, V)>,
 {
     fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
-        let key_fn = &self.key_fn;
-        let val_fn = &self.val_fn;
         let sums = &mut self.sums;
 
-        self.inner.foreach(&mut |t, diff| {
-            let k = key_fn(&t);
-            let v = val_fn(&t);
+        self.inner.foreach(&mut |(k, v), diff| {
             let delta = v * diff.0;
 
             let old_sum = sums.get(&k).cloned().unwrap_or_default();
@@ -67,13 +56,12 @@ where
 
 impl<R> Relation<R> {
     /// Sum values by key.
-    pub fn sum<T, K, V, FK, FV>(self, key_fn: FK, val_fn: FV) -> Relation<SumOp<T, K, V, FK, FV, R>>
+    /// Input must be (K, V) tuples where K is the key and V is the value.
+    pub fn sum<K, V>(self) -> Relation<SumOp<K, V, R>>
     where
-        R: Op<T>,
+        R: Op<(K, V)>,
         K: Eq + Hash,
         V: Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
-        FK: Fn(&T) -> K,
-        FV: Fn(&T) -> V,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
@@ -81,10 +69,7 @@ impl<R> Relation<R> {
         Relation::new(
             SumOp {
                 inner: self,
-                key_fn,
-                val_fn,
                 sums: HashMap::new(),
-                _phantom: std::marker::PhantomData,
             },
             commit_id,
             graph,

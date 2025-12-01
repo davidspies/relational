@@ -38,10 +38,9 @@ fn apply_ops_with_pop(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     let path_rel = path_var_rel.save();
 
     let edges_saved = edges_rel.save();
-    let extended = path_rel
-        .get()
-        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    // path_rel: (a, b), edges: (b, c) -> need to join on b
+    // Swap path to (b, a), join_values with edges (b, c) -> (a, c)
+    let new_paths = path_rel.get().swap().join_values(edges_saved.get());
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
@@ -106,10 +105,9 @@ fn apply_ops_replay_model(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     let path_rel = path_var_rel.save();
 
     let edges_saved = edges_rel.save();
-    let extended = path_rel
-        .get()
-        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    // path_rel: (a, b), edges: (b, c) -> need to join on b
+    // Swap path to (b, a), join_values with edges (b, c) -> (a, c)
+    let new_paths = path_rel.get().swap().join_values(edges_saved.get());
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
@@ -291,18 +289,18 @@ fn test_multiple_feedbacks_with_pop() {
     let reach_rel = reach_var_rel.save();
 
     let edges_saved = edges_rel.save();
-    let extended_reach = reach_rel
-        .get()
-        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_reach = extended_reach.map(|((a, _), (_, c))| (a, c));
+    // reach: (a, b), edges: (b, c) -> need to join on b
+    // Swap reach to (b, a), join_values with edges (b, c) -> (a, c)
+    let new_reach = reach_rel.get().swap().join_values(edges_saved.get());
     let all_reach = edges_saved.get().union(new_reach);
 
     // Second feedback: count reachable pairs (self-join on reach)
     let (pairs_var, pairs_var_rel) = db.create_variable::<(i32, i32, i32)>();
-    let reach_join = reach_rel
-        .get()
-        .join(reach_rel.get(), |(_, b)| *b, |(b, _)| *b);
-    let triples = reach_join.map(|((a, b), (_, c))| (a, b, c));
+    // reach: (a, b) self-join on b -> join (b, a) with (b, c) -> (a, c)
+    // But we want triples (a, b, c), so we need to keep b
+    // Use join (not join_values) to keep key: (b, (a, c))
+    let reach_join = reach_rel.get().swap().join(reach_rel.get());
+    let triples = reach_join.map(|(b, (a, c))| (a, b, c));
 
     // Set up edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));

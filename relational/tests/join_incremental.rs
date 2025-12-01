@@ -21,7 +21,7 @@ fn test_join_simultaneous_inserts() {
     let (mut right, right_rel) = db.create_input::<(i32, i32)>(); // (key, right_val)
 
     // Join on the first element (key)
-    let joined = left_rel.join(right_rel, |(k, _)| *k, |(k, _)| *k);
+    let joined = left_rel.join(right_rel);
     let joined_out = output(joined.boxed());
 
     // Initial state: left has (1, 10), right has (1, 100)
@@ -32,7 +32,7 @@ fn test_join_simultaneous_inserts() {
     let result = joined_out.collect();
     assert_eq!(
         result,
-        vec![((1, 10), (1, 100))],
+        vec![(1, (10, 100))],
         "Initial join should have one result"
     );
 
@@ -52,10 +52,10 @@ fn test_join_simultaneous_inserts() {
     result.sort();
 
     let mut expected = vec![
-        ((1, 10), (1, 100)),
-        ((1, 10), (1, 200)),
-        ((1, 20), (1, 100)),
-        ((1, 20), (1, 200)), // new_left × new_right
+        (1, (10, 100)),
+        (1, (10, 200)),
+        (1, (20, 100)),
+        (1, (20, 200)), // new_left × new_right
     ];
     expected.sort();
 
@@ -70,24 +70,24 @@ fn test_join_simultaneous_inserts() {
 fn test_join_both_sides_from_empty() {
     let mut db = Database::new();
 
-    let (mut left, left_rel) = db.create_input::<i32>();
-    let (mut right, right_rel) = db.create_input::<i32>();
+    let (mut left, left_rel) = db.create_input::<(i32, ())>();
+    let (mut right, right_rel) = db.create_input::<(i32, ())>();
 
     // Join where left == right (identity key)
-    let joined = left_rel.join(right_rel, |x| *x, |x| *x);
+    let joined = left_rel.join(right_rel);
     let joined_out = output(joined.boxed());
 
     // Insert 1 into both sides in a single commit
-    left.insert(1);
-    right.insert(1);
+    left.insert((1, ()));
+    right.insert((1, ()));
     db.commit();
 
     let result = joined_out.collect();
 
-    // Should have (1, 1) from left=1 joining with right=1
+    // Should have (1, ((), ())) from left=1 joining with right=1
     assert_eq!(
         result,
-        vec![(1, 1)],
+        vec![(1, ((), ()))],
         "Join of matching values inserted simultaneously should produce a result"
     );
 }
@@ -100,23 +100,23 @@ fn test_join_both_sides_from_empty() {
 fn test_join_multiplicity_not_doubled() {
     let mut db = Database::new();
 
-    let (mut left, left_rel) = db.create_input::<i32>();
-    let (mut right, right_rel) = db.create_input::<i32>();
+    let (mut left, left_rel) = db.create_input::<(i32, ())>();
+    let (mut right, right_rel) = db.create_input::<(i32, ())>();
 
     // Join where left == right (identity key)
-    let joined = left_rel.join(right_rel, |x| *x, |x| *x);
+    let joined = left_rel.join(right_rel);
     let joined_out = output(joined.boxed());
 
     // Insert 1 into both sides in a single commit
-    left.insert(1);
-    right.insert(1);
+    left.insert((1, ()));
+    right.insert((1, ()));
     db.commit();
 
     // The output's state should have multiplicity exactly 1
     let result = joined_out.collect();
 
     assert_eq!(result.len(), 1, "Should have exactly one result tuple");
-    assert_eq!(result[0], (1, 1), "Tuple should be (1, 1)");
+    assert_eq!(result[0], (1, ((), ())), "Tuple should be (1, ((), ()))");
 }
 
 /// Test with multiple matching keys inserted simultaneously.
@@ -127,7 +127,7 @@ fn test_join_multiple_keys_simultaneous() {
     let (mut left, left_rel) = db.create_input::<(char, i32)>(); // (key, val)
     let (mut right, right_rel) = db.create_input::<(char, i32)>(); // (key, val)
 
-    let joined = left_rel.join(right_rel, |(k, _)| *k, |(k, _)| *k);
+    let joined = left_rel.join(right_rel);
     let joined_out = output(joined.boxed());
 
     // Insert matching pairs for keys 'a' and 'b' in one commit
@@ -140,7 +140,7 @@ fn test_join_multiple_keys_simultaneous() {
     let mut result = joined_out.collect();
     result.sort();
 
-    let mut expected = vec![(('a', 1), ('a', 10)), (('b', 2), ('b', 20))];
+    let mut expected = vec![('a', (1, 10)), ('b', (2, 20))];
     expected.sort();
 
     assert_eq!(

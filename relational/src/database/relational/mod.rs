@@ -9,6 +9,7 @@
 pub(crate) mod graph;
 pub(crate) mod input;
 mod ops_consolidate;
+mod ops_convenience;
 mod ops_count;
 mod ops_difference;
 mod ops_distinct;

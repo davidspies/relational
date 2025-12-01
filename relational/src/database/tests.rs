@@ -69,12 +69,12 @@ fn test_join() {
     handle_labels.insert((5, "five".to_string()));
     db.commit();
 
-    let mut joined = rel_edges.join(rel_labels, |e| e.0, |l| l.0);
+    let mut joined = rel_edges.join(rel_labels);
 
     let changes = collect_to_map(&mut joined);
     assert_eq!(changes.len(), 2);
-    assert_eq!(changes.get(&((1, 2), (1, "one".to_string()))), Some(&1));
-    assert_eq!(changes.get(&((2, 3), (2, "two".to_string()))), Some(&1));
+    assert_eq!(changes.get(&(1, (2, "one".to_string()))), Some(&1));
+    assert_eq!(changes.get(&(2, (3, "two".to_string()))), Some(&1));
 }
 
 #[test]
@@ -93,8 +93,7 @@ fn test_transitive_closure() {
 
     // Recursive case: extend paths by one edge
     // path(a, c) :- path(a, b), edge(b, c)
-    let extended = path_rel.get().join(edges_for_join, |p| p.1, |e| e.0);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges_for_join);
 
     // Combine base (edges) and recursive (new_paths)
     let all_paths = edges_for_union.union(new_paths);
@@ -218,8 +217,7 @@ fn test_commit_id_advances_with_feedback() {
     let edges_for_join = saved_edges.get();
 
     // path(a, c) :- path(a, b), edge(b, c)
-    let extended = path_rel.get().join(edges_for_join, |p| p.1, |e| e.0);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges_for_join);
     let all_paths = edges_for_union.union(new_paths);
 
     db.feedback(path_var, all_paths);
@@ -327,8 +325,7 @@ fn test_commit_id_advances_per_feedback_iteration() {
     let edges_for_join = saved_edges.get();
 
     // path(a, c) :- path(a, b), edges(b, c)
-    let extended = path_rel.get().join(edges_for_join, |p| p.1, |e| e.0);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges_for_join);
     let all_paths = edges_for_union.union(new_paths);
 
     // Wire up the feedback
@@ -392,8 +389,7 @@ fn test_feedback_with_id_discovery_order() {
     let path_tuples = path_rel.get().map(|((a, b), _)| (a, b));
 
     // path(a, c) :- path(a, b), edges(b, c)
-    let extended = path_tuples.join(saved_edges.get(), |p| p.1, |e| e.0);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_tuples.swap().join_values(saved_edges.get());
     let all_paths = saved_edges.get().union(new_paths);
 
     // Wire up the timestamped feedback
@@ -632,7 +628,7 @@ fn test_join_incremental() {
     handle_a.insert((1, 10));
     db.commit();
 
-    let mut joined = rel_a.join(rel_b, |a| a.0, |b| b.0);
+    let mut joined = rel_a.join(rel_b);
 
     // First batch: no matches yet
     let changes1 = collect_to_map(&mut joined);
@@ -644,7 +640,7 @@ fn test_join_incremental() {
 
     // Second batch: now we have a match
     let changes2 = collect_to_map(&mut joined);
-    assert_eq!(changes2.get(&((1, 10), (1, 20))), Some(&1));
+    assert_eq!(changes2.get(&(1, (10, 20))), Some(&1));
 }
 
 #[test]
@@ -737,11 +733,11 @@ fn test_self_join_with_saved() {
     let right = saved.get();
 
     // Self-join: find paths of length 2
-    let mut joined = left.join(right, |e| e.1, |e| e.0);
+    let mut joined = left.swap().join(right);
 
     let changes = collect_to_map(&mut joined);
     // (1,2) joins with (2,3) giving us path 1 -> 2 -> 3
-    assert_eq!(changes.get(&((1, 2), (2, 3))), Some(&1));
+    assert_eq!(changes.get(&(2, (1, 3))), Some(&1));
 }
 
 #[test]
@@ -754,7 +750,7 @@ fn test_sum() {
     handle.insert(("b".to_string(), 5));
     db.commit();
 
-    let mut summed = rel.sum(|t| t.0.clone(), |t| t.1);
+    let mut summed = rel.sum();
 
     let changes = collect_to_map(&mut summed);
     // Net result: ("a", 30) and ("b", 5)
@@ -770,7 +766,7 @@ fn test_sum_incremental() {
     handle.insert(("a".to_string(), 10));
     db.commit();
 
-    let mut summed = rel.sum(|t| t.0.clone(), |t| t.1);
+    let mut summed = rel.sum();
 
     let changes1 = collect_to_map(&mut summed);
     assert_eq!(changes1.get(&("a".to_string(), 10)), Some(&1));
@@ -796,7 +792,7 @@ fn test_max() {
     handle.insert(("b".to_string(), 5));
     db.commit();
 
-    let mut maxed = rel.max(|t| t.0.clone(), |t| t.1);
+    let mut maxed = rel.max();
 
     let changes = collect_to_map(&mut maxed);
     // Max of "a" is 20, max of "b" is 5
@@ -812,7 +808,7 @@ fn test_max_incremental_with_pop() {
     handle.insert(("a".to_string(), 10));
     db.commit();
 
-    let mut maxed = rel.max(|t| t.0.clone(), |t| t.1);
+    let mut maxed = rel.max();
 
     let changes1 = collect_to_map(&mut maxed);
     assert_eq!(changes1.get(&("a".to_string(), 10)), Some(&1));
@@ -850,7 +846,7 @@ fn test_count_via_sum() {
 
     // Count by mapping each tuple to 1 and summing
     let ones = rel.map(|t| (t.0.clone(), 1i64));
-    let mut counted = ones.sum(|t| t.0.clone(), |t| t.1);
+    let mut counted = ones.sum();
 
     let changes = collect_to_map(&mut counted);
     assert_eq!(changes.get(&("a".to_string(), 3)), Some(&1)); // 3 items with key "a"
@@ -871,7 +867,7 @@ fn test_min_via_max_reverse() {
 
     // Min by wrapping values in Reverse and using max
     let reversed = rel.map(|t| (t.0.clone(), Reverse(t.1)));
-    let mut maxed = reversed.max(|t| t.0.clone(), |t| t.1);
+    let mut maxed = reversed.max();
 
     let changes = collect_to_map(&mut maxed);
     // Max of Reverse values is min of original values

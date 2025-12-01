@@ -25,16 +25,16 @@ fn test_stratified_two_feedbacks() {
     let (reach_var, reach_var_rel) = db.create_variable::<(i32, i32)>();
     let reach_rel = reach_var_rel.save();
 
-    let extended_reach = reach_rel.get().join(edges.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_reach = extended_reach.map(|((a, _), (_, c))| (a, c));
+    let new_reach = reach_rel.get().swap().join_values(edges.get());
     let all_reach = edges.get().union(new_reach);
 
     // Second feedback: triples (a, b, c) where reach(a, b) and reach(b, c)
     let (extended_var, extended_var_rel) = db.create_variable::<(i32, i32, i32)>();
     let reach_join = reach_rel
         .get()
-        .join(reach_rel.get(), |(_, b)| *b, |(b, _)| *b);
-    let triples = reach_join.map(|((a, b), (_, c))| (a, b, c));
+        .swap()
+        .join(reach_rel.get());
+    let triples = reach_join.map(|(b, (a, c))| (a, b, c));
 
     // Set up first feedback (reach)
     let reach_input = edges.get().union(all_reach);
@@ -88,8 +88,7 @@ fn test_incremental_after_feedback() {
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
     let path_rel = path_var_rel.save();
 
-    let extended = path_rel.get().join(edges.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges.get());
     let all_paths = edges.get().union(new_paths);
 
     let path_input = edges.get().union(all_paths);
@@ -135,8 +134,7 @@ fn test_feedback_order_independence() {
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
     let path_rel = path_var_rel.save();
 
-    let extended = path_rel.get().join(edges.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges.get());
     let all_paths = edges.get().union(new_paths);
 
     db.feedback(path_var, all_paths);
@@ -312,17 +310,15 @@ fn test_a_reaches_fixpoint_between_b_applications() {
     let (v_var, v_var_rel) = db.create_variable::<i32>();
     let v_rel = v_var_rel.save();
 
-    // v_max = max(v) - use unit key for global max
-    let v_max = v_rel.get().max(|_| (), |x| *x);
-    let v_max_val = v_max.map(|(_, v)| v);
+    // v_max = max(v)
+    let v_max = v_rel.get().global_max();
 
     // a = v_max.map(|x| if x % 100 < 50 { x + 7 } else { x })
-    let a = v_max_val.map(|x| if x % 100 < 50 { x + 7 } else { x });
+    let a = v_max.map(|x| if x % 100 < 50 { x + 7 } else { x });
 
     // b = v_max.map(|x| if x < 200 { x + 31 } else { x })
-    let v_max_for_b = v_rel.get().max(|_| (), |x| *x);
-    let v_max_for_b_val = v_max_for_b.map(|(_, v)| v);
-    let b = v_max_for_b_val.map(|x| if x < 200 { x + 31 } else { x });
+    let v_max_for_b = v_rel.get().global_max();
+    let b = v_max_for_b.map(|x| if x < 200 { x + 31 } else { x });
 
     // a_new = a.difference(v) - only the NEW values from A
     let a_new = a.difference(v_rel.get());
@@ -607,8 +603,7 @@ fn test_push_pop_with_feedback() {
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
     let path_rel = path_var_rel.save();
 
-    let extended = path_rel.get().join(edges.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges.get());
     let all_paths = edges.get().union(new_paths);
 
     db.feedback(path_var, all_paths);
@@ -911,8 +906,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
 
     // path(a, c) :- path(a, b), edges(b, c)
     let edges_saved = edges_rel.save();
-    let extended = path_tuples.join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_tuples.swap().join_values(edges_saved.get());
     let all_paths = edges_saved.get().union(new_paths);
 
     // Wire up timestamped feedback
@@ -1026,10 +1020,7 @@ fn test_push_insert_pop_minimal() {
     let path_rel = path_var_rel.save();
 
     let edges_saved = edges_rel.save();
-    let extended = path_rel
-        .get()
-        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges_saved.get());
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
@@ -1070,10 +1061,7 @@ fn test_push_insert_pop() {
     let path_rel = path_var_rel.save();
 
     let edges_saved = edges_rel.save();
-    let extended = path_rel
-        .get()
-        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges_saved.get());
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
@@ -1109,10 +1097,7 @@ fn test_push_no_changes_pop() {
     let path_rel = path_var_rel.save();
 
     let edges_saved = edges_rel.save();
-    let extended = path_rel
-        .get()
-        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges_saved.get());
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
@@ -1157,10 +1142,7 @@ fn test_regular_feedback_with_persistent_input_and_pop() {
 
     // path(a, c) :- path(a, b), edges(b, c)
     let edges_saved = edges_rel.save();
-    let extended = path_rel
-        .get()
-        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    let new_paths = path_rel.get().swap().join_values(edges_saved.get());
     let all_paths = edges_saved.get().union(new_paths);
 
     db.feedback(path_var, all_paths);

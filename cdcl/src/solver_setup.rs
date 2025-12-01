@@ -25,10 +25,7 @@ impl Solver {
         // Current level = max(levels)
         assign!(
             current_level_rel,
-            levels_rel
-                .max(|_| (), |l| *l)
-                .map(|((), level)| level)
-                .boxed()
+            levels_rel.global_max().boxed()
         );
 
         // All clauses (original + learned)
@@ -49,7 +46,8 @@ impl Solver {
             assignments_with_id,
             prep_rel
                 .get()
-                .min(|((lit, _, _), _)| *lit, |((_, level, _), id)| (*level, *id))
+                .map(|((lit, level, _cid), id)| (lit, (level, id)))
+                .min()
         );
         assign_saved!(
             assignments,
@@ -68,18 +66,18 @@ impl Solver {
         );
 
         // Derived: which literals are assigned true
-        assign_saved!(assigned, assignments.get().map(|(lit, _)| lit).boxed());
+        assign_saved!(assigned, assignments.get().fst().boxed());
 
         // === Compute Units ===
-        assign!(
-            clause_lit_true,
-            all_clauses
-                .get()
-                .join(assigned.get(), |(_, lit)| *lit, |lit| *lit)
-        );
+        // Clauses with at least one true literal are satisfied
         assign!(
             satisfied_clauses,
-            clause_lit_true.map(|((cid, _), _)| cid).boxed()
+            all_clauses
+                .get()
+                .swap()
+                .semijoin(assigned.get())
+                .snd()
+                .boxed()
         );
 
         assign!(assigned_vars, assigned.get().map(var).boxed());
@@ -90,14 +88,13 @@ impl Solver {
                 .map(|(cid, lit)| (cid, lit, var(lit)))
                 .boxed()
         );
-        assign!(
-            clause_assigned_lits,
-            clause_lit_with_var.join(assigned_vars, |(_, _, v)| *v, |v| *v)
-        );
+        // Clause-literal pairs where the variable is assigned
         assign!(
             clause_assigned_lit_ids,
-            clause_assigned_lits
-                .map(|((cid, lit, _), _)| (cid, lit))
+            clause_lit_with_var
+                .map(|(cid, lit, v)| (v, (cid, lit)))
+                .semijoin(assigned_vars)
+                .snd()
                 .boxed()
         );
 
@@ -110,38 +107,31 @@ impl Solver {
         );
         assign_saved!(
             unassigned_count,
-            clause_unassigned_lits.get().count(|(cid, _)| *cid).boxed()
+            clause_unassigned_lits.get().count().boxed()
         );
 
         assign!(
             unit_candidate_clauses,
             unassigned_count.get().filter(|(_, cnt)| *cnt == 1)
         );
-        assign!(
-            unit_clause_ids,
-            unit_candidate_clauses.map(|(cid, _)| cid).boxed()
-        );
+        assign!(unit_clause_ids, unit_candidate_clauses.fst().boxed());
 
-        assign!(
-            units_with_lit,
-            unit_clause_ids.join(clause_unassigned_lits.get(), |cid| *cid, |(cid, _)| *cid)
-        );
+        // Get the unassigned literal for each unit clause
         assign_saved!(
             potential_units,
-            units_with_lit.map(|(cid, (_, lit))| (cid, lit)).boxed()
+            clause_unassigned_lits
+                .get()
+                .semijoin(unit_clause_ids)
+                .boxed()
         );
 
         assign_saved!(satisfied_set, satisfied_clauses);
-        assign!(
-            unit_clause_sat_check,
-            potential_units
-                .get()
-                .join(satisfied_set.get(), |(cid, _)| *cid, |cid| *cid)
-        );
+        // Filter out potential units whose clause is already satisfied
         assign!(
             units_from_sat,
-            unit_clause_sat_check
-                .map(|((cid, lit), _)| (cid, lit))
+            potential_units
+                .get()
+                .semijoin(satisfied_set.get())
                 .boxed()
         );
 
@@ -151,15 +141,9 @@ impl Solver {
         );
 
         // === Conflict Detection ===
-        assign!(
-            all_clause_ids,
-            all_clauses.get().map(|(cid, _)| cid).boxed()
-        );
+        assign!(all_clause_ids, all_clauses.get().fst().boxed());
         assign!(all_clause_ids_distinct, all_clause_ids.distinct().boxed());
-        assign!(
-            clauses_with_unassigned,
-            unassigned_count.get().map(|(cid, _)| cid).boxed()
-        );
+        assign!(clauses_with_unassigned, unassigned_count.get().fst().boxed());
         assign!(
             fully_assigned_clauses,
             all_clause_ids_distinct
@@ -176,21 +160,20 @@ impl Solver {
 
         assign_saved!(
             assigned_with_var,
-            assigned.get().map(|lit| (lit, var(lit))).boxed()
+            assigned.get().map(|lit| (var(lit), lit)).boxed()
         );
+        // Self-join to find pairs of literals with the same variable
         assign!(
             both_polarities,
-            assigned_with_var
-                .get()
-                .join(assigned_with_var.get(), |(_, v)| *v, |(_, v)| *v)
+            assigned_with_var.get().join(assigned_with_var.get())
         );
-        assign!(
-            conflicting_pairs,
-            both_polarities.filter(|((lit1, _), (lit2, _))| lit1 != lit2)
-        );
+        // Conflict if two different literals have the same variable
         assign!(
             direct_conflict_vars,
-            conflicting_pairs.map(|((_, v), _)| v).boxed()
+            both_polarities
+                .filter(|(_, (lit1, lit2))| lit1 != lit2)
+                .fst()
+                .boxed()
         );
         assign!(
             direct_conflict_vars_distinct,
@@ -219,7 +202,7 @@ impl Solver {
         // === Set up the feedback loop ===
         assign!(
             unit_with_level,
-            units.join(current_level_rel, |_| (), |_| ())
+            units.cartesian_product(current_level_rel)
         );
         assign!(
             unit_lit_level_cid,

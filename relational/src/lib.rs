@@ -24,8 +24,8 @@
 //! let mut path_rel = path_var_rel.save();
 //!
 //! // path(a, c) :- path(a, b), edge(b, c)
-//! let extended = path_rel.get().join(edges.get(), |(_, b)| *b, |(b, _)| *b);
-//! let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+//! // Swap path to (b, a), join_values with edges (b, c) -> (a, c)
+//! let new_paths = path_rel.get().swap().join_values(edges.get());
 //!
 //! // path = edges ∪ new_paths
 //! let all_paths = edges.get().union(new_paths);

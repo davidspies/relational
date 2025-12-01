@@ -45,10 +45,9 @@ fn test_pop_transitive_closure() {
     let path_rel = path_var_rel.save();
 
     let edges_saved = edges_rel.save();
-    let extended = path_rel
-        .get()
-        .join(edges_saved.get(), |(_, b)| *b, |(b, _)| *b);
-    let new_paths = extended.map(|((a, _), (_, c))| (a, c));
+    // path: (a, b), edges: (b, c) -> join on b
+    // Swap path to (b, a), join_values with edges (b, c) -> (a, c)
+    let new_paths = path_rel.get().swap().join_values(edges_saved.get());
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
