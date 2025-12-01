@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 
-use relational::Diff;
 use relational::Multiset;
 use relational::database::Sink;
 
@@ -33,11 +32,13 @@ impl AssignmentsSink {
 }
 
 impl Sink<(Lit, Level)> for AssignmentsSink {
-    fn apply(&mut self, (lit, level): (Lit, Level), diff: Diff) {
-        let ms = self.data.entry(lit).or_default();
-        ms.update(level, diff);
-        if ms.is_empty() {
-            self.data.remove(&lit);
+    fn dump_all(&mut self, incoming: &mut Multiset<(Lit, Level)>) {
+        for ((lit, level), diff) in incoming.drain() {
+            let ms = self.data.entry(lit).or_default();
+            ms.update(level, diff);
+            if ms.is_empty() {
+                self.data.remove(&lit);
+            }
         }
     }
 }

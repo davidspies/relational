@@ -26,11 +26,20 @@ pub type SavedOutput<T, S = Multiset<T>> = Output<T, S, SavedGetter<T, Box<dyn D
 
 struct OutputInner<T, S, R> {
     relation: Relation<R>,
+    scratch: Multiset<T>,
     state: S,
     _phantom: PhantomData<T>,
 }
 
-impl<T, S: Sink<T>, R: Op<T>> Output<T, S, R> {
+impl<T: Eq + Hash, S: Sink<T>, R: Op<T>> OutputInner<T, S, R> {
+    /// Pull all pending changes from the relation into the accumulated state.
+    fn update(&mut self) {
+        Op::dump_to_multiset(&mut self.relation, &mut self.scratch);
+        self.state.dump_all(&mut self.scratch);
+    }
+}
+
+impl<T: Eq + Hash, S: Sink<T>, R: Op<T>> Output<T, S, R> {
     /// Create a new output wrapping the given relation.
     pub(crate) fn new(relation: Relation<R>) -> Self
     where
@@ -39,26 +48,17 @@ impl<T, S: Sink<T>, R: Op<T>> Output<T, S, R> {
         Output {
             inner: RefCell::new(OutputInner {
                 relation,
+                scratch: Multiset::new(),
                 state: S::default(),
                 _phantom: PhantomData,
             }),
         }
     }
 
-    /// Pull all pending changes from the relation into the accumulated state.
-    fn update(inner: &mut OutputInner<T, S, R>) {
-        inner.relation.foreach(|t, diff| {
-            inner.state.apply(t, diff);
-        });
-    }
-
     /// Get a reference to the accumulated state after pulling pending changes.
     /// Uses interior mutability so this takes `&self` rather than `&mut self`.
     pub fn get(&self) -> std::cell::Ref<'_, S> {
-        {
-            let mut inner = self.inner.borrow_mut();
-            Self::update(&mut inner);
-        }
+        self.inner.borrow_mut().update();
         std::cell::Ref::map(self.inner.borrow(), |inner| &inner.state)
     }
 }
@@ -68,7 +68,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> Output<T, Multiset<T>, R> {
     /// Automatically pulls pending changes first.
     pub fn collect(&self) -> Vec<T> {
         let mut inner = self.inner.borrow_mut();
-        Output::<T, Multiset<T>, R>::update(&mut inner);
+        inner.update();
         inner.state.iter().cloned().collect()
     }
 }
@@ -83,7 +83,7 @@ impl<R> Relation<R> {
     }
 
     /// Create an output from a relation with a custom sink type.
-    pub fn output_with_sink<T, S: Default + Sink<T>>(self) -> Output<T, S, R>
+    pub fn output_with_sink<T: Eq + Hash, S: Default + Sink<T>>(self) -> Output<T, S, R>
     where
         R: Op<T>,
     {

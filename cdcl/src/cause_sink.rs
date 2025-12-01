@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use relational::Diff;
 use relational::Multiset;
 use relational::database::{CommitId, Sink};
 
@@ -48,13 +47,17 @@ impl CauseSink {
 }
 
 impl Sink<((Lit, CommitId), (ClauseId, Level))> for CauseSink {
-    fn apply(&mut self, tuple: ((Lit, CommitId), (ClauseId, Level)), diff: Diff) {
-        let ((lit, commit_id), (clause_id, level)) = tuple;
-        let commits = self.data.entry(lit).or_default();
-        let multiset = commits.entry(commit_id).or_default();
-        multiset.update((clause_id, level), diff);
-        if multiset.is_empty() {
-            commits.remove(&commit_id);
+    fn dump_all(&mut self, incoming: &mut Multiset<((Lit, CommitId), (ClauseId, Level))>) {
+        for (((lit, commit_id), (clause_id, level)), diff) in incoming.drain() {
+            let commits = self.data.entry(lit).or_default();
+            let multiset = commits.entry(commit_id).or_default();
+            multiset.update((clause_id, level), diff);
+            if multiset.is_empty() {
+                commits.remove(&commit_id);
+                if commits.is_empty() {
+                    self.data.remove(&lit);
+                }
+            }
         }
     }
 }

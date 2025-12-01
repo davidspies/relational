@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use relational::Diff;
 use relational::Multiset;
 use relational::database::Sink;
 
@@ -25,11 +24,13 @@ impl LiteralCountsSink {
 }
 
 impl Sink<(Lit, i64)> for LiteralCountsSink {
-    fn apply(&mut self, (lit, count): (Lit, i64), diff: Diff) {
-        let ms = self.data.entry(count).or_default();
-        ms.update(lit, diff);
-        if ms.is_empty() {
-            self.data.remove(&count);
+    fn dump_all(&mut self, incoming: &mut Multiset<(Lit, i64)>) {
+        for ((lit, count), diff) in incoming.drain() {
+            let ms = self.data.entry(count).or_default();
+            ms.update(lit, diff);
+            if ms.is_empty() {
+                self.data.remove(&count);
+            }
         }
     }
 }
