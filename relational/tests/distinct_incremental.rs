@@ -4,7 +4,7 @@
 //! When input state is already updated (NEW state) before the incremental function
 //! runs, it must reconstruct OLD state by reversing the changes.
 
-use relational::database::{Database, output};
+use relational::database::Database;
 
 /// Test: distinct after map produces correct results.
 /// This is the pattern used in CDCL: map extracts clause IDs, distinct deduplicates.
@@ -18,7 +18,7 @@ fn test_distinct_after_map() {
     // Extract clause IDs and deduplicate
     let clause_ids = clauses_rel.map(|(cid, _)| cid);
     let clause_ids_distinct = clause_ids.distinct();
-    let out = output(clause_ids_distinct.boxed());
+    let out = clause_ids_distinct.boxed().output();
 
     // Add clauses: clause 1 has literals 1 and 2, clause 2 has literal -1
     clauses.insert((1, 1));
@@ -44,7 +44,7 @@ fn test_distinct_incremental_insert() {
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = input_rel.distinct();
-    let out = output(distinct_rel.boxed());
+    let out = distinct_rel.boxed().output();
 
     // Initial state: one copy of 1
     input.insert(1);
@@ -72,7 +72,7 @@ fn test_distinct_incremental_with_pop() {
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = input_rel.distinct();
-    let out = output(distinct_rel.boxed());
+    let out = distinct_rel.boxed().output();
 
     // Initial state: 1
     input.insert(1);
@@ -107,7 +107,7 @@ fn test_distinct_with_push_pop() {
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = input_rel.distinct();
-    let out = output(distinct_rel.boxed());
+    let out = distinct_rel.boxed().output();
 
     // Initial state
     input.insert(1);
@@ -163,7 +163,7 @@ fn test_cdcl_pattern() {
 
     // Clauses that are NOT satisfied
     let unsatisfied = all_clause_ids_distinct.difference(satisfied_distinct);
-    let unsatisfied_out = output(unsatisfied.boxed());
+    let unsatisfied_out = unsatisfied.boxed().output();
 
     // Add clauses: (x1) AND (NOT x1) - unsatisfiable
     clauses.insert((1, 1)); // clause 1 contains x1
@@ -212,7 +212,7 @@ fn test_distinct_multiplicity() {
 
     let (mut input, input_rel) = db.create_input::<i32>();
     let distinct_rel = input_rel.distinct();
-    let out = output(distinct_rel.boxed());
+    let out = distinct_rel.boxed().output();
 
     // Add same value multiple times
     input.insert(1);

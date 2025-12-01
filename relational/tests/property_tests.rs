@@ -4,7 +4,7 @@
 //! excluding any operations that were inside popped frames.
 
 use proptest::prelude::*;
-use relational::database::{Database, output};
+use relational::database::Database;
 
 /// An operation that can be performed on the database.
 #[derive(Debug, Clone)]
@@ -44,7 +44,7 @@ fn apply_ops_with_pop(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     for op in ops {
         match op {
@@ -111,7 +111,7 @@ fn apply_ops_replay_model(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     for (i, op) in ops.iter().enumerate() {
         if !surviving[i] {
@@ -177,8 +177,8 @@ fn apply_ops_with_persistent(ops: &[ReplayOp]) -> (Vec<i32>, Vec<i32>) {
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
-    let regular_out = output(regular_rel.boxed());
-    let persistent_out = output(persistent_rel.boxed());
+    let regular_out = regular_rel.boxed().output();
+    let persistent_out = persistent_rel.boxed().output();
 
     for op in ops {
         match op {
@@ -231,8 +231,8 @@ fn apply_ops_replay_persistent_model(ops: &[ReplayOp]) -> (Vec<i32>, Vec<i32>) {
     let (mut regular_h, regular_rel) = db.create_input::<i32>();
     let (mut persistent_h, persistent_rel) = db.create_input::<i32>(); // Use regular input for replay
 
-    let regular_out = output(regular_rel.boxed());
-    let persistent_out = output(persistent_rel.boxed());
+    let regular_out = regular_rel.boxed().output();
+    let persistent_out = persistent_rel.boxed().output();
 
     for (i, op) in ops.iter().enumerate() {
         match op {
@@ -310,8 +310,8 @@ fn test_multiple_feedbacks_with_pop() {
     db.feedback(reach_var, all_reach);
     db.feedback(pairs_var, triples);
 
-    let reach_out = output(reach_rel.get().boxed());
-    let pairs_out = output(pairs_var_rel.boxed());
+    let reach_out = reach_rel.get().boxed().output();
+    let pairs_out = pairs_var_rel.boxed().output();
 
     // Initial state
     let reach_before = reach_out.collect();

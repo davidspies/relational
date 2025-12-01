@@ -1,6 +1,6 @@
 //! Tests for Database.
 
-use crate::database::{Database, Op, output};
+use crate::database::{Database, Op};
 
 /// Test that re-inserting already-present item during push doesn't affect pop.
 #[test]
@@ -8,7 +8,7 @@ fn test_pop_duplicate_insert() {
     let mut db = Database::new();
     let (mut handle, rel) = db.create_input::<i32>();
 
-    let out = output(rel.boxed());
+    let out = rel.boxed().output();
 
     // Insert 0 before push
     handle.insert(0);
@@ -51,7 +51,7 @@ fn test_pop_transitive_closure() {
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // Push
     db.push();

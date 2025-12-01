@@ -2,7 +2,7 @@
 
 use std::ops::Not;
 
-use relational::database::{CommitId, Database, output, output_with_sink};
+use relational::database::{CommitId, Database};
 use relational::{assign, assign_saved, create_input, create_persistent_input, create_variable};
 
 use crate::Conflict;
@@ -165,11 +165,11 @@ impl Solver {
         db.commit();
 
         // Create outputs from relations (need to box them to store in struct)
-        let assignments_out = output_with_sink(assignments.get());
-        let causes_out = output_with_sink(causes);
-        let assigned_out = output(assigned.get());
-        let conflicts_out = output(conflicts);
-        let literal_counts_out = output_with_sink(literal_counts);
+        let assignments_out = assignments.get().output_with_sink();
+        let causes_out = causes.output_with_sink();
+        let assigned_out = assigned.get().output();
+        let conflicts_out = conflicts.output();
+        let literal_counts_out = literal_counts.output_with_sink();
 
         Solver {
             db,

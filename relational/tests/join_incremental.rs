@@ -9,7 +9,7 @@
 //!   left_changes × new_right + new_left × right_changes
 //! This double-counts (left_changes × right_changes).
 
-use relational::database::{Database, output};
+use relational::database::Database;
 
 /// Test: Insert into both sides of a join in a single commit.
 /// This exercises the case where left_changes and right_changes are both non-empty.
@@ -22,7 +22,7 @@ fn test_join_simultaneous_inserts() {
 
     // Join on the first element (key)
     let joined = left_rel.join(right_rel);
-    let joined_out = output(joined.boxed());
+    let joined_out = joined.boxed().output();
 
     // Initial state: left has (1, 10), right has (1, 100)
     left.insert((1, 10));
@@ -75,7 +75,7 @@ fn test_join_both_sides_from_empty() {
 
     // Join where left == right (identity key)
     let joined = left_rel.join(right_rel);
-    let joined_out = output(joined.boxed());
+    let joined_out = joined.boxed().output();
 
     // Insert 1 into both sides in a single commit
     left.insert((1, ()));
@@ -105,7 +105,7 @@ fn test_join_multiplicity_not_doubled() {
 
     // Join where left == right (identity key)
     let joined = left_rel.join(right_rel);
-    let joined_out = output(joined.boxed());
+    let joined_out = joined.boxed().output();
 
     // Insert 1 into both sides in a single commit
     left.insert((1, ()));
@@ -128,7 +128,7 @@ fn test_join_multiple_keys_simultaneous() {
     let (mut right, right_rel) = db.create_input::<(char, i32)>(); // (key, val)
 
     let joined = left_rel.join(right_rel);
-    let joined_out = output(joined.boxed());
+    let joined_out = joined.boxed().output();
 
     // Insert matching pairs for keys 'a' and 'b' in one commit
     left.insert(('a', 1));

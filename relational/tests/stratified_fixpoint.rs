@@ -3,7 +3,7 @@
 //! These tests verify that feedback loops are processed in declaration order,
 //! with each reaching fixpoint before the next is applied.
 
-use relational::database::{Database, output};
+use relational::database::Database;
 
 /// Test that multiple feedbacks run in stratified order.
 ///
@@ -38,8 +38,8 @@ fn test_stratified_two_feedbacks() {
     db.feedback(reach_var, reach_input);
 
     // Create outputs for reading BEFORE inserting data
-    let reach_out = output(reach_rel.get().boxed());
-    let extended_out = output(extended_var_rel.boxed());
+    let reach_out = reach_rel.get().boxed().output();
+    let extended_out = extended_var_rel.boxed().output();
 
     // Insert edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));
@@ -91,7 +91,7 @@ fn test_incremental_after_feedback() {
     let path_input = edges.get().union(all_paths);
     db.feedback(path_var, path_input);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // Initial edges
     edges_h.insert((1, 2));
@@ -136,7 +136,7 @@ fn test_feedback_order_independence() {
 
     db.feedback(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     edges_h.insert((1, 2));
     edges_h.insert((2, 3));
@@ -179,7 +179,7 @@ fn test_three_feedbacks_chain() {
     db.feedback(doubled_var, double_op);
 
     // Create output for reading
-    let doubled_out = output(doubled_saved.get().boxed());
+    let doubled_out = doubled_saved.get().boxed().output();
 
     // After first feedback: doubled = {2}
     let doubled_result = doubled_out.collect();
@@ -189,7 +189,7 @@ fn test_three_feedbacks_chain() {
     db.feedback(tripled_var, triple_op);
 
     // Create output for reading
-    let tripled_out = output(tripled_saved.get().boxed());
+    let tripled_out = tripled_saved.get().boxed().output();
 
     // After second feedback: tripled = {6}
     let tripled_result = tripled_out.collect();
@@ -199,7 +199,7 @@ fn test_three_feedbacks_chain() {
     db.feedback(plus_one_var, plus_one_op);
 
     // Create output for reading
-    let plus_one_out = output(plus_one_var_rel.boxed());
+    let plus_one_out = plus_one_var_rel.boxed().output();
 
     // After third feedback: plus_one = {7}
     let plus_one_result = plus_one_out.collect();
@@ -221,7 +221,7 @@ fn test_feedback_immediate_fixpoint() {
 
     db.feedback(var, items_rel);
 
-    let var_out = output(var_rel.boxed());
+    let var_out = var_rel.boxed().output();
     let result = var_out.collect();
 
     assert_eq!(result.len(), 2);
@@ -336,7 +336,7 @@ fn test_a_reaches_fixpoint_between_b_applications() {
     db.feedback(v_var.clone(), v_with_b);
 
     // Create output for reading
-    let v_out = output(v_rel.get().boxed());
+    let v_out = v_rel.get().boxed().output();
 
     // Seed with 0
     seeds_h.insert(0);
@@ -410,8 +410,8 @@ fn test_interleaved_mutual_fixpoint() {
     db.feedback(b_var, b_filtered);
 
     // Create outputs for reading
-    let a_out = output(a_rel.get().boxed());
-    let b_out = output(b_rel.get().boxed());
+    let a_out = a_rel.get().boxed().output();
+    let b_out = b_rel.get().boxed().output();
 
     // Start with just 1
     input_h.insert(1);
@@ -482,7 +482,7 @@ fn test_diamond_dependency() {
     input_h.insert(10);
     db.commit();
 
-    let d_out = output(d_var_rel.boxed());
+    let d_out = d_var_rel.boxed().output();
     let result: Vec<_> = d_out.collect();
     assert!(result.contains(&20), "should have 10*2=20 from B");
     assert!(result.contains(&15), "should have 10+5=15 from C");
@@ -507,8 +507,8 @@ fn test_push_pop_simple() {
     items_h.insert(2);
     db.commit();
 
-    let items_out = output(items_saved.get().boxed());
-    let doubled_out = output(doubled.boxed());
+    let items_out = items_saved.get().boxed().output();
+    let doubled_out = doubled.boxed().output();
 
     assert_eq!(items_out.collect().len(), 2);
     assert_eq!(doubled_out.collect().len(), 2);
@@ -554,7 +554,7 @@ fn test_push_pop_nested() {
     items_h.insert(1);
     db.commit();
 
-    let items_out = output(items_rel.boxed());
+    let items_out = items_rel.boxed().output();
 
     // First push
     db.push();
@@ -605,7 +605,7 @@ fn test_push_pop_with_feedback() {
 
     db.feedback(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // Initial edges: 1 -> 2 -> 3
     edges_h.insert((1, 2));
@@ -659,7 +659,7 @@ fn test_push_pop_no_changes() {
     items_h.insert(2);
     db.commit();
 
-    let items_out = output(items_rel.boxed());
+    let items_out = items_rel.boxed().output();
 
     db.push();
     // No changes made
@@ -697,8 +697,8 @@ fn test_persistent_vs_regular_inputs() {
     learned_h.insert(100);
     db.commit();
 
-    let decisions_out = output(decisions_rel.boxed());
-    let learned_out = output(learned_rel.boxed());
+    let decisions_out = decisions_rel.boxed().output();
+    let learned_out = learned_rel.boxed().output();
 
     // Push checkpoint
     db.push();
@@ -752,8 +752,8 @@ fn test_persistent_nested_checkpoints() {
     persistent_h.insert(100);
     db.commit();
 
-    let regular_out = output(regular_rel.boxed());
-    let persistent_out = output(persistent_rel.boxed());
+    let regular_out = regular_rel.boxed().output();
+    let persistent_out = persistent_rel.boxed().output();
 
     // Level 1
     db.push();
@@ -810,7 +810,7 @@ fn test_persistent_with_derived() {
 
     // Derived: union of regular and persistent
     let combined = regular_rel.union(persistent_rel);
-    let combined_out = output(combined.boxed());
+    let combined_out = combined.boxed().output();
 
     regular_h.insert(1);
     persistent_h.insert(100);
@@ -850,7 +850,7 @@ fn test_persistent_delete() {
     persistent_h.insert(200);
     db.commit();
 
-    let persistent_out = output(persistent_rel.boxed());
+    let persistent_out = persistent_rel.boxed().output();
 
     db.push();
 
@@ -909,7 +909,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     // Wire up timestamped feedback
     db.feedback_with_id(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // Initial edge
     edges_h.insert((1, 2));
@@ -1021,7 +1021,7 @@ fn test_push_insert_pop_minimal() {
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // At this point, path should be empty
     assert_eq!(
@@ -1062,7 +1062,7 @@ fn test_push_insert_pop() {
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     db.push();
 
@@ -1098,7 +1098,7 @@ fn test_push_no_changes_pop() {
     let all_paths = edges_saved.get().union(new_paths);
     db.feedback(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // At this point, path should be empty
     assert_eq!(
@@ -1144,7 +1144,7 @@ fn test_regular_feedback_with_persistent_input_and_pop() {
 
     db.feedback(path_var, all_paths);
 
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // Initial edge
     edges_h.insert((1, 2));

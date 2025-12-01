@@ -25,14 +25,14 @@ pub struct Output<T, S = Multiset<T>, R = Box<dyn DynOp<T>>> {
 pub type SavedOutput<T, S = Multiset<T>> = Output<T, S, SavedGetter<T, Box<dyn DynOp<T>>>>;
 
 struct OutputInner<T, S, R> {
-    relation: R,
+    relation: Relation<R>,
     state: S,
     _phantom: PhantomData<T>,
 }
 
 impl<T, S: Sink<T>, R: Op<T>> Output<T, S, R> {
     /// Create a new output wrapping the given relation.
-    pub(crate) fn new(relation: R) -> Self
+    pub(crate) fn new(relation: Relation<R>) -> Self
     where
         S: Default,
     {
@@ -73,14 +73,20 @@ impl<T: Clone + Eq + Hash, R: Op<T>> Output<T, Multiset<T>, R> {
     }
 }
 
-/// Create an output from a relation with Multiset state.
-pub fn output<T: Eq + Hash, R: Op<T>>(relation: Relation<R>) -> Output<T, Multiset<T>, R> {
-    Output::new(relation.inner)
-}
+impl<R> Relation<R> {
+    /// Create an output from a relation with Multiset state.
+    pub fn output<T: Eq + Hash>(self) -> Output<T, Multiset<T>, R>
+    where
+        R: Op<T>,
+    {
+        Output::new(self)
+    }
 
-/// Create an output from a relation with a custom sink type.
-pub fn output_with_sink<T, S: Default + Sink<T>, R: Op<T>>(
-    relation: Relation<R>,
-) -> Output<T, S, R> {
-    Output::new(relation.inner)
+    /// Create an output from a relation with a custom sink type.
+    pub fn output_with_sink<T, S: Default + Sink<T>>(self) -> Output<T, S, R>
+    where
+        R: Op<T>,
+    {
+        Output::new(self)
+    }
 }

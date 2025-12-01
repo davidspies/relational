@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use super::relational::{Op, output};
+use super::relational::Op;
 use super::*;
 
 /// Helper to collect changes into a HashMap of tuple -> total diff
@@ -102,7 +102,7 @@ fn test_transitive_closure() {
     db.feedback(path_var, all_paths);
 
     // Create output before inserting data
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // Create graph: 1->2->3->4
     handle.insert((1, 2));
@@ -126,7 +126,7 @@ fn test_transitive_closure() {
 fn test_multiplicities() {
     let mut db = Database::new();
     let (mut handle, rel) = db.create_input::<i32>();
-    let out = output(rel.boxed());
+    let out = rel.boxed().output();
 
     // Insert duplicates
     handle.insert(10);
@@ -168,7 +168,7 @@ fn test_checkpoint_and_restore() {
     db.commit();
 
     let doubled = rel.map(|n| n * 2);
-    let doubled_out = output(doubled.boxed());
+    let doubled_out = doubled.boxed().output();
 
     // Verify initial state
     let initial = doubled_out.collect();
@@ -223,7 +223,7 @@ fn test_commit_id_advances_with_feedback() {
     db.feedback(path_var, all_paths);
 
     // Create output
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // Add edges: 1->2->3
     // This triggers feedback iterations, incrementing commit ID
@@ -340,7 +340,7 @@ fn test_commit_id_advances_per_feedback_iteration() {
     );
 
     // Create output
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // Add chain edges: 1->2->3->4->5
     // This creates paths of lengths 1, 2, 3, and 4
@@ -396,7 +396,7 @@ fn test_feedback_with_id_discovery_order() {
     db.feedback_with_id(path_var, all_paths);
 
     // Create output
-    let path_out = output(path_rel.get().boxed());
+    let path_out = path_rel.get().boxed().output();
 
     // Add edges AFTER setting up feedback so they're discovered during commit
     handle.insert((1, 2));

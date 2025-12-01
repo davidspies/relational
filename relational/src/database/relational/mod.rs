@@ -31,7 +31,7 @@ pub use saved::SavedRelation;
 pub use variable_relation::{Variable, VariableRelation};
 
 // Output
-pub use output::{Output, SavedOutput, output, output_with_sink};
+pub use output::{Output, SavedOutput};
 pub use sink::Sink;
 
 // Graph exports (only public types)

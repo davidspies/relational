@@ -11,7 +11,7 @@
 //! # Example: Transitive Closure
 //!
 //! ```
-//! use relational::database::{Database, Op, output};
+//! use relational::database::{Database, Op};
 //!
 //! let mut db = Database::new();
 //!
@@ -34,7 +34,7 @@
 //! db.feedback(path_var, all_paths);
 //!
 //! // Create output before inserting data
-//! let mut path_out = output(path_rel.get().boxed());
+//! let mut path_out = path_rel.get().boxed().output();
 //!
 //! // Add edges: 1->2->3->4
 //! edges_h.insert((1, 2));
@@ -50,14 +50,14 @@
 //! # Example: Using Push/Pop Checkpoints
 //!
 //! ```
-//! use relational::database::{Database, Op, output};
+//! use relational::database::{Database, Op};
 //!
 //! let mut db = Database::new();
 //! let (mut numbers_h, numbers_rel) = db.create_input::<i32>();
 //! let mut numbers = numbers_rel.save();
 //! let doubled = numbers.get().map(|n| n * 2);
-//! let mut doubled_out = output(doubled.boxed());
-//! let mut numbers_out = output(numbers.get().boxed());
+//! let mut doubled_out = doubled.boxed().output();
+//! let mut numbers_out = numbers.get().boxed().output();
 //!
 //! // Add initial data
 //! numbers_h.insert(1);
