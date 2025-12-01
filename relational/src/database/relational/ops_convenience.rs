@@ -43,10 +43,10 @@ impl<R> Relation<R> {
         R: Op<V>,
         V: Clone + Eq + Hash + Ord,
     {
-        self.map_(|v| ((), v))
+        self.map_h(|v| ((), v))
             .group_max()
             .with_op_type("global_max")
-            .map_(|((), v)| v)
+            .map_h(|((), v)| v)
     }
 
     /// Global minimum - finds the min value across all tuples.
@@ -56,10 +56,10 @@ impl<R> Relation<R> {
         R: Op<V>,
         V: Clone + Eq + Hash + Ord,
     {
-        self.map_(|v| ((), v))
+        self.map_h(|v| ((), v))
             .group_min()
             .with_op_type("global_min")
-            .map_(|((), v)| v)
+            .map_h(|((), v)| v)
     }
 
     /// Join two relations and discard the key.
@@ -74,7 +74,7 @@ impl<R> Relation<R> {
     {
         self.join(right)
             .with_op_type("join_values")
-            .map_(|(_k, (v1, v2))| (v1, v2))
+            .map_h(|(_k, (v1, v2))| (v1, v2))
     }
 
     /// Cartesian product - pairs every tuple from left with every tuple from right.
@@ -86,10 +86,10 @@ impl<R> Relation<R> {
         T2: Clone + Eq + Hash,
         RR: Op<T2>,
     {
-        self.map_(|t| ((), t))
-            .join(right.map_(|t| ((), t)))
+        self.map_h(|t| ((), t))
+            .join(right.map_h(|t| ((), t)))
             .with_op_type("cartesian_product")
-            .map_(|((), (t1, t2))| (t1, t2))
+            .map_h(|((), (t1, t2))| (t1, t2))
     }
 
     /// Semijoin - filter left relation to only tuples that have a matching key in right.
@@ -102,9 +102,9 @@ impl<R> Relation<R> {
         V: Clone + Eq + Hash,
         RR: Op<K>,
     {
-        self.join(right.map_(|k| (k, ())))
+        self.join(right.map_h(|k| (k, ())))
             .with_op_type("semijoin")
-            .map_(|(k, (v, ()))| (k, v))
+            .map_h(|(k, (v, ()))| (k, v))
     }
 
     /// Set difference (self - right).
@@ -115,10 +115,10 @@ impl<R> Relation<R> {
         R: Op<T>,
         RR: Op<T>,
     {
-        self.map_(|t: T| (t, ()))
+        self.map_h(|t: T| (t, ()))
             .antijoin(right)
             .with_op_type("difference")
-            .map_(|(t, ())| t)
+            .map_h(|(t, ())| t)
     }
 
     /// Set intersection (self ∩ right).
@@ -129,10 +129,10 @@ impl<R> Relation<R> {
         R: Op<T>,
         RR: Op<T>,
     {
-        self.map_(|t: T| (t, ()))
+        self.map_h(|t: T| (t, ()))
             .semijoin(right)
             .with_op_type("intersection")
-            .map_(|(t, ())| t)
+            .map_h(|(t, ())| t)
     }
 
     /// Count tuples by key.
@@ -143,7 +143,7 @@ impl<R> Relation<R> {
         R: Op<T>,
         T: Clone + Eq + Hash,
     {
-        self.map_(|t| (t, 1i64)).group_sum().with_op_type("counts")
+        self.map_h(|t| (t, 1i64)).group_sum().with_op_type("counts")
     }
 
     /// Minimum value by key.
@@ -154,10 +154,10 @@ impl<R> Relation<R> {
         K: Clone + Eq + Hash,
         V: Clone + Eq + Hash + Ord,
     {
-        self.map_(|(k, v)| (k, Reverse(v)))
+        self.map_h(|(k, v)| (k, Reverse(v)))
             .group_max()
             .with_op_type("group_min")
-            .map_(|(k, Reverse(v))| (k, v))
+            .map_h(|(k, Reverse(v))| (k, v))
     }
 
     /// Filter tuples by predicate.

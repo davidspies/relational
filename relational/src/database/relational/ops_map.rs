@@ -1,6 +1,6 @@
 //! Map operator - stateless, transforms each tuple into exactly one tuple.
 
-use std::hash::Hash;
+use std::{hash::Hash, marker::PhantomData};
 
 use crate::change::Diff;
 
@@ -12,9 +12,9 @@ where
     F: Fn(T) -> U,
     R: Op<T>,
 {
-    inner: Relation<R>,
+    inner: R,
     f: F,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: PhantomData<T>,
 }
 
 impl<T, U, F, R> Op<U> for MapOp<T, U, F, R>
@@ -41,17 +41,26 @@ impl<R> Relation<R> {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
-        Relation::new(
-            MapOp {
-                inner: self,
-                f,
-                _phantom: std::marker::PhantomData,
-            },
-            commit_id,
-            graph,
-            "map",
-            vec![node_id],
-        )
+        let op = MapOp {
+            inner: self,
+            f,
+            _phantom: PhantomData,
+        };
+        Relation::new(op, commit_id, graph, "map", vec![node_id])
+    }
+
+    /// Transform each tuple. Skip creating node and counter and instead directly modify the operator.
+    pub fn map_h<T, U, F>(self, f: F) -> Relation<impl Op<U>>
+    where
+        R: Op<T>,
+        F: Fn(T) -> U,
+        U: Eq + Hash,
+    {
+        self.modify_inner(|inner| MapOp {
+            inner,
+            f,
+            _phantom: PhantomData,
+        })
     }
 
     /// Transform each tuple.

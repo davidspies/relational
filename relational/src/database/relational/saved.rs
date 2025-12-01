@@ -70,7 +70,7 @@ impl<T: Eq + Hash, R: Op<T>> SavedRelation<T, R> {
             },
             commit_id,
             graph,
-            "saved_get",
+            "get",
             vec![parent_node],
         )
     }

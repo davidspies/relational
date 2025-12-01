@@ -118,6 +118,23 @@ impl<R> Relation<R> {
         }
     }
 
+    pub(crate) fn modify_inner<RR>(self, f: impl FnOnce(R) -> RR) -> Relation<RR> {
+        let Self {
+            inner,
+            commit_id,
+            graph,
+            node_id,
+            counter,
+        } = self;
+        Relation {
+            inner: f(inner),
+            commit_id,
+            graph,
+            node_id,
+            counter,
+        }
+    }
+
     /// Get the node ID for this relation in the dataflow graph.
     pub fn node_id(&self) -> NodeId {
         self.node_id
