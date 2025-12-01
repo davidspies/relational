@@ -65,7 +65,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
 
     fn pull_and_forward_non_checkpoint(&mut self) {
         let mut changes = Multiset::new();
-        self.input.foreach(&mut |tuple: T, diff: Diff| {
+        self.input.foreach(|tuple: T, diff: Diff| {
             changes.update(tuple, diff);
         });
 
@@ -116,7 +116,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
         // Without consolidation, the Variable's seen-set semantics would incorrectly
         // add tuples that net to zero.
         let mut changes = Multiset::new();
-        self.input.foreach(&mut |tuple: T, diff: Diff| {
+        self.input.foreach(|tuple: T, diff: Diff| {
             changes.update(tuple, diff);
         });
 

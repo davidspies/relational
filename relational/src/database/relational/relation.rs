@@ -15,35 +15,45 @@ use super::graph::{GraphBuilder, NodeId};
 
 /// The core trait for relational operators.
 /// An operator is a stream of changes - call foreach to iterate over pending changes.
-pub trait Op<T> {
+pub trait Op<T>: Sized {
     /// Iterate over pending changes, calling f for each (tuple, count) pair.
-    fn foreach(&mut self, f: &mut dyn FnMut(T, Diff));
+    fn foreach(&mut self, f: impl FnMut(T, Diff));
 
     /// Box this operator to allow type erasure.
     /// Use this when the compiler struggles with deeply nested types.
-    fn boxed<'a>(self) -> Box<dyn Op<T> + 'a>
+    fn boxed<'a>(self) -> Box<dyn DynOp<T> + 'a>
     where
-        Self: Sized + 'a,
+        Self: 'a,
     {
         Box::new(self)
     }
 }
 
+pub trait DynOp<T> {
+    fn foreach_dyn(&mut self, f: &mut dyn FnMut(T, Diff));
+}
+
+impl<T, R: Op<T>> DynOp<T> for R {
+    fn foreach_dyn(&mut self, f: &mut dyn FnMut(T, Diff)) {
+        self.foreach(f);
+    }
+}
+
 /// Implement Op for Box<dyn Op<T>> to allow type erasure.
 impl<T, R: Op<T>> Op<T> for Box<R> {
-    fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
+    fn foreach(&mut self, f: impl FnMut(T, Diff)) {
         (**self).foreach(f);
     }
 }
 
-impl<T> Op<T> for Box<dyn Op<T>> {
-    fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
-        (**self).foreach(f);
+impl<T> Op<T> for Box<dyn DynOp<T>> {
+    fn foreach(&mut self, mut f: impl FnMut(T, Diff)) {
+        (**self).foreach_dyn(&mut f);
     }
 
-    fn boxed<'a>(self) -> Box<dyn Op<T> + 'a>
+    fn boxed<'a>(self) -> Box<dyn DynOp<T> + 'a>
     where
-        Self: Sized + 'a,
+        Self: 'a,
     {
         self
     }
@@ -94,7 +104,7 @@ impl<R> Relation<R> {
     /// Box this relation to break the type chain.
     /// Use this when the compiler struggles with deeply nested types.
     /// This doesn't create a new node in the graph - it reuses the parent's node.
-    pub fn boxed<'a, T>(self) -> Relation<Box<dyn Op<T> + 'a>>
+    pub fn boxed<'a, T>(self) -> Relation<Box<dyn DynOp<T> + 'a>>
     where
         R: Op<T> + 'a,
     {
@@ -118,9 +128,9 @@ pub(crate) fn assert_same_commit_id(left: &Rc<Cell<CommitId>>, right: &Rc<Cell<C
 }
 
 impl<T, R: Op<T>> Op<T> for Relation<R> {
-    fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
+    fn foreach(&mut self, mut f: impl FnMut(T, Diff)) {
         let counter = self.counter.clone();
-        self.inner.foreach(&mut |t, diff| {
+        self.inner.foreach(|t, diff| {
             counter.fetch_add(1, Ordering::Relaxed);
             f(t, diff);
         });

@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use crate::collection::Multiset;
 use crate::database::saved::SavedGetter;
 
-use super::relation::{Op, Relation};
+use super::relation::{DynOp, Op, Relation};
 use super::sink::Sink;
 
 /// An output that accumulates changes from a relation into a Sink.
@@ -18,11 +18,11 @@ use super::sink::Sink;
 ///
 /// Default type parameters allow `Output<T>` as shorthand for boxed relations
 /// with Multiset state.
-pub struct Output<T, S = Multiset<T>, R = Box<dyn Op<T>>> {
+pub struct Output<T, S = Multiset<T>, R = Box<dyn DynOp<T>>> {
     inner: RefCell<OutputInner<T, S, R>>,
 }
 
-pub type SavedOutput<T, S = Multiset<T>> = Output<T, S, SavedGetter<T, Box<dyn Op<T>>>>;
+pub type SavedOutput<T, S = Multiset<T>> = Output<T, S, SavedGetter<T, Box<dyn DynOp<T>>>>;
 
 struct OutputInner<T, S, R> {
     relation: R,
@@ -47,7 +47,7 @@ impl<T, S: Sink<T>, R: Op<T>> Output<T, S, R> {
 
     /// Pull all pending changes from the relation into the accumulated state.
     fn update(inner: &mut OutputInner<T, S, R>) {
-        inner.relation.foreach(&mut |t, diff| {
+        inner.relation.foreach(|t, diff| {
             inner.state.apply(t, diff);
         });
     }

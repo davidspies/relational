@@ -14,10 +14,11 @@ pub struct ConsolidateOp<T, R: Op<T>> {
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> Op<T> for ConsolidateOp<T, R> {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
+    fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
         // Pull all changes from upstream into the pending multiset
-        self.upstream.foreach(&mut |t, diff| {
-            self.pending.update(t, diff);
+        let pending = &mut self.pending;
+        self.upstream.foreach(|t, diff| {
+            pending.update(t, diff);
         });
 
         // Drain the multiset, forwarding non-zero entries

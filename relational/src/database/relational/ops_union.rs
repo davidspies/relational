@@ -20,8 +20,8 @@ where
     L: Op<T>,
     R: Op<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
-        self.left.foreach(consumer);
+    fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
+        self.left.foreach(&mut consumer);
         self.right.foreach(consumer);
     }
 }

@@ -27,10 +27,10 @@ where
     V: Clone + Add<Output = V> + Sub<Output = V> + Mul<i64, Output = V> + Default + PartialEq,
     R: Op<(K, V)>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
+    fn foreach(&mut self, mut consumer: impl FnMut((K, V), Diff)) {
         let sums = &mut self.sums;
 
-        self.inner.foreach(&mut |(k, v), diff| {
+        self.inner.foreach(|(k, v), diff| {
             let delta = v * diff.0;
 
             let old_sum = sums.get(&k).cloned().unwrap_or_default();

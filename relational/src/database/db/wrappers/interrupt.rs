@@ -29,9 +29,10 @@ impl<T, R: Op<T>> InterruptWrapper<T, R> {
 
 impl<T, R: Op<T>> AnyInterrupt for InterruptWrapper<T, R> {
     fn check(&mut self) -> bool {
-        self.input.foreach(&mut |_, diff| {
+        let has_positive = &mut self.has_positive;
+        self.input.foreach(|_, diff| {
             if diff.0 > 0 {
-                self.has_positive = true;
+                *has_positive = true;
             }
         });
         self.has_positive

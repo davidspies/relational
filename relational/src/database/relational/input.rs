@@ -66,7 +66,7 @@ pub struct InputRelation<T> {
 }
 
 impl<T: Eq + Hash> Op<T> for InputRelation<T> {
-    fn foreach(&mut self, f: &mut dyn FnMut(T, Diff)) {
+    fn foreach(&mut self, mut f: impl FnMut(T, Diff)) {
         let mut state = self.state.borrow_mut();
         for (t, diff) in state.pending.drain() {
             f(t, diff);

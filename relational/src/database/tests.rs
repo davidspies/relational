@@ -9,7 +9,7 @@ use super::*;
 /// Helper to collect changes into a HashMap of tuple -> total diff
 fn collect_to_map<T: Clone + Eq + Hash, R: Op<T>>(rel: &mut R) -> HashMap<T, i64> {
     let mut result = HashMap::new();
-    rel.foreach(&mut |t, diff| {
+    rel.foreach(|t, diff| {
         *result.entry(t.clone()).or_insert(0) += diff.0;
     });
     // Remove zero entries

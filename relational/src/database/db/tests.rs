@@ -89,7 +89,7 @@ fn test_db_create_input_and_commit() {
     // With seen-set semantics, changes are immediately in pending
     // (no staging step). commit() records to checkpoint and runs fixpoint.
     let mut count = 0;
-    rel.foreach(&mut |t, diff| {
+    rel.foreach(|t, diff| {
         assert!(diff.0 > 0);
         assert!(t == 1 || t == 2);
         count += 1;
@@ -99,7 +99,7 @@ fn test_db_create_input_and_commit() {
     // After foreach drains pending, commit has nothing new to process
     db.commit();
     let mut count2 = 0;
-    rel.foreach(&mut |_, _| count2 += 1);
+    rel.foreach(|_, _| count2 += 1);
     assert_eq!(count2, 0); // already drained
 }
 
@@ -114,7 +114,7 @@ fn test_db_push_pop_simple() {
 
     // Drain initial changes
     let mut values = Vec::new();
-    rel.foreach(&mut |t, _| values.push(t));
+    rel.foreach(|t, _| values.push(t));
     assert_eq!(values, vec![1]);
 
     // Push checkpoint
@@ -127,7 +127,7 @@ fn test_db_push_pop_simple() {
 
     // Verify changes are there
     values.clear();
-    rel.foreach(&mut |t, _| values.push(t));
+    rel.foreach(|t, _| values.push(t));
     values.sort();
     assert_eq!(values, vec![2, 3]);
 
@@ -137,7 +137,7 @@ fn test_db_push_pop_simple() {
 
     // Pull the undo changes
     let mut undos = Vec::new();
-    rel.foreach(&mut |t, diff| {
+    rel.foreach(|t, diff| {
         undos.push((t, diff.0));
     });
     undos.sort();

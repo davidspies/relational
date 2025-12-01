@@ -22,9 +22,9 @@ impl<T: Clone + Eq + Hash, R> Op<T> for DistinctOp<T, R>
 where
     R: Op<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
+    fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
         let counts = &mut self.counts;
-        self.inner.foreach(&mut |t, diff| {
+        self.inner.foreach(|t, diff: Diff| {
             let old_count = *counts.get(&t).unwrap_or(&0);
             let new_count = old_count + diff.0;
 

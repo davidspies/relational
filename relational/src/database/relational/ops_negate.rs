@@ -17,8 +17,8 @@ impl<T, R> Op<T> for NegateOp<T, R>
 where
     R: Op<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
-        self.inner.foreach(&mut |t, diff| {
+    fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
+        self.inner.foreach(|t, diff| {
             consumer(t, Diff(-diff.0));
         });
     }

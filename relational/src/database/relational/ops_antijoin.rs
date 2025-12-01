@@ -31,15 +31,15 @@ where
     RL: Op<(K, V)>,
     RR: Op<K>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
+    fn foreach(&mut self, mut consumer: impl FnMut((K, V), Diff)) {
         // Collect changes from both sides
         let mut left_changes = Multiset::new();
         let mut right_changes = Multiset::new();
 
-        self.left.foreach(&mut |kv, diff| {
+        self.left.foreach(|kv, diff| {
             left_changes.update(kv, diff);
         });
-        self.right.foreach(&mut |k, diff| {
+        self.right.foreach(|k, diff| {
             right_changes.update(k, diff);
         });
 

@@ -27,10 +27,10 @@ where
     V: Clone + Ord,
     R: Op<(K, V)>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut((K, V), Diff)) {
+    fn foreach(&mut self, mut consumer: impl FnMut((K, V), Diff)) {
         let values = &mut self.values;
 
-        self.inner.foreach(&mut |(k, v), diff| {
+        self.inner.foreach(|(k, v), diff| {
             let key_values = values.entry(k.clone()).or_default();
 
             // Get old max before update

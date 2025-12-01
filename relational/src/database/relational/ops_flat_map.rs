@@ -22,9 +22,9 @@ where
     F: Fn(T) -> I,
     R: Op<T>,
 {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(U, Diff)) {
+    fn foreach(&mut self, mut consumer: impl FnMut(U, Diff)) {
         let f = &self.f;
-        self.inner.foreach(&mut |t, diff| {
+        self.inner.foreach(|t, diff| {
             for u in f(t) {
                 consumer(u, diff);
             }

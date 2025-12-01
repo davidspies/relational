@@ -34,8 +34,9 @@ impl<T: Clone + Eq + Hash, R: Op<T>> SavedState<T, R> {
         }
         self.last_update_commit_id = current;
 
-        self.upstream.foreach(&mut |t, diff| {
-            for queue in &self.consumer_queues {
+        let consumer_queues = &self.consumer_queues;
+        self.upstream.foreach(|t, diff| {
+            for queue in consumer_queues {
                 queue
                     .borrow_mut()
                     .apply_change(Change::new(t.clone(), diff));
@@ -84,7 +85,7 @@ pub struct SavedGetter<T, R: Op<T>> {
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> Op<T> for SavedGetter<T, R> {
-    fn foreach(&mut self, consumer: &mut dyn FnMut(T, Diff)) {
+    fn foreach(&mut self, mut consumer: impl FnMut(T, Diff)) {
         // First pull from upstream to all queues
         self.state.borrow_mut().update();
 
