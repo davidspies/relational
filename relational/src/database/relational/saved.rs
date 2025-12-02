@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::change::Diff;
+use crate::Diff;
 use crate::collection::Multiset;
 use crate::database::commit_id::CommitId;
 

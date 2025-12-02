@@ -10,8 +10,8 @@ use std::rc::Rc;
 
 use derive_where::derive_where;
 
+use crate::Diff;
 use crate::Multiset;
-use crate::change::Diff;
 
 use super::relation::Op;
 

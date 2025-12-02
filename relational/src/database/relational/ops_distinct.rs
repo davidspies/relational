@@ -2,7 +2,7 @@
 
 use std::hash::Hash;
 
-use crate::{Multiset, change::Diff};
+use crate::{Diff, Multiset};
 
 use super::relation::{Op, Relation};
 

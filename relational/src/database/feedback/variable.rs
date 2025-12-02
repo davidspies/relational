@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-use crate::change::Diff;
+use crate::Diff;
 use crate::collection::Multiset;
 
 /// A variable in an iterative computation.

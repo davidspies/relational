@@ -9,8 +9,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::Diff;
 use crate::Multiset;
-use crate::change::Diff;
 use crate::database::commit_id::CommitId;
 
 use super::graph::{GraphBuilder, NodeId};

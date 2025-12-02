@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use crate::change::Diff;
+use crate::Diff;
 
 /// A differential collection storing tuples with their multiplicities.
 ///
