@@ -13,6 +13,9 @@ cargo build --release -p cdcl 2>/dev/null
 # Build drat-trim
 make -s bin/drat-trim
 
+# Create output directory
+mkdir -p solve_output
+
 failed=()
 timedout=()
 
