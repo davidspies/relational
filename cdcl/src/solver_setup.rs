@@ -1,5 +1,6 @@
 //! CDCL Solver dataflow setup and constructor.
 
+use std::collections::HashMap;
 use std::ops::Not;
 
 use relational::database::{CommitId, DatabaseBuilder};
@@ -207,7 +208,7 @@ impl Solver {
                 current_level: Level::TOP,
                 next_learned_id: ClauseId::new(1),
                 decision_stack: Vec::new(),
-                clause_db: std::collections::HashMap::new(),
+                clause_db: HashMap::new(),
             },
         }
     }
