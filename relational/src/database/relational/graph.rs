@@ -93,6 +93,73 @@ impl Graph {
         self.feedback_edges.push((source, target));
     }
 
+    /// Export the graph to a simple text format, easy for LLMs to parse.
+    ///
+    /// Format: one line per node showing name, op, count, and parent counts.
+    /// Example:
+    /// ```text
+    /// n0: clauses_rel [input] count=7255
+    /// n6: [union] count=42107 <- n0(7255), n1(34852)
+    /// n7: all_clauses [consolidate] count=42107 <- n6(42107)
+    /// ```
+    pub fn to_text(&self) -> String {
+        let mut out = String::new();
+
+        for node in &self.nodes {
+            // Node ID and name
+            let name_part = node
+                .name
+                .as_ref()
+                .map(|n| format!("{} ", n))
+                .unwrap_or_default();
+
+            // Count
+            let count_part = node
+                .count
+                .as_ref()
+                .map(|c| format!(" count={}", c.load(Ordering::Relaxed)))
+                .unwrap_or_default();
+
+            // Parents with their counts
+            let parents_part = if node.parents.is_empty() {
+                String::new()
+            } else {
+                let parent_strs: Vec<_> = node
+                    .parents
+                    .iter()
+                    .map(|p| {
+                        let parent_count = self.nodes[p.index()]
+                            .count
+                            .as_ref()
+                            .map(|c| c.load(Ordering::Relaxed).to_string())
+                            .unwrap_or_else(|| "?".to_string());
+                        format!("n{}({})", p.index(), parent_count)
+                    })
+                    .collect();
+                format!(" <- {}", parent_strs.join(", "))
+            };
+
+            out.push_str(&format!(
+                "n{}: {}[{}]{}{}\n",
+                node.id.index(),
+                name_part,
+                node.op_type,
+                count_part,
+                parents_part
+            ));
+        }
+
+        // Feedback edges
+        if !self.feedback_edges.is_empty() {
+            out.push_str("\nFeedback edges:\n");
+            for (source, target) in &self.feedback_edges {
+                out.push_str(&format!("  n{} -> n{}\n", source.index(), target.index()));
+            }
+        }
+
+        out
+    }
+
     /// Export the graph to DOT format for Graphviz.
     pub fn to_dot(&self) -> String {
         let mut out = String::from("digraph dataflow {\n");
@@ -102,7 +169,12 @@ impl Graph {
         for node in &self.nodes {
             let label = match (&node.name, &node.count) {
                 (Some(name), Some(count)) => {
-                    format!("{}\\n{}\\n{}", name, node.op_type, count.load(Ordering::Relaxed))
+                    format!(
+                        "{}\\n{}\\n{}",
+                        name,
+                        node.op_type,
+                        count.load(Ordering::Relaxed)
+                    )
                 }
                 (Some(name), None) => format!("{}\\n{}", name, node.op_type),
                 (None, Some(count)) => {
@@ -183,12 +255,7 @@ impl Graph {
                     count.load(Ordering::Relaxed)
                 );
             } else {
-                eprintln!(
-                    "  Node {}: {} [{}]",
-                    node.id.index(),
-                    name,
-                    node.op_type
-                );
+                eprintln!("  Node {}: {} [{}]", node.id.index(), name, node.op_type);
             }
             if !node.parents.is_empty() {
                 let parents: Vec<_> = node.parents.iter().map(|p| p.index().to_string()).collect();

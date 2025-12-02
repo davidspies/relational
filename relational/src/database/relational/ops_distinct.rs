@@ -73,7 +73,7 @@ impl<R> Relation<R> {
     {
         let result = self.distinct_();
         #[cfg(feature = "consolidate_all")]
-        let result = result.consolidate_();
+        let result = result.consolidate_passthrough_();
         result
     }
 }

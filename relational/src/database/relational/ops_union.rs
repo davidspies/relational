@@ -63,7 +63,7 @@ impl<L> Relation<L> {
     {
         let result = self.union_(right);
         #[cfg(feature = "consolidate_all")]
-        let result = result.consolidate_();
+        let result = result.consolidate_passthrough_();
         result
     }
 }

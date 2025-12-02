@@ -80,7 +80,7 @@ impl<R> Relation<R> {
             },
             commit_id,
             graph,
-            "sum",
+            "group_sum",
             vec![node_id],
         )
     }
@@ -102,7 +102,7 @@ impl<R> Relation<R> {
     {
         let result = self.group_sum_();
         #[cfg(feature = "consolidate_all")]
-        let result = result.consolidate_();
+        let result = result.consolidate_passthrough_();
         result
     }
 }

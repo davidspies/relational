@@ -69,7 +69,7 @@ impl<R> Relation<R> {
     {
         let result = self.flat_map_(f);
         #[cfg(feature = "consolidate_all")]
-        let result = result.consolidate_();
+        let result = result.consolidate_passthrough_();
         result
     }
 }

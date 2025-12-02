@@ -118,7 +118,7 @@ impl<RL> Relation<RL> {
     {
         let result = self.join_(right);
         #[cfg(feature = "consolidate_all")]
-        let result = result.consolidate_();
+        let result = result.consolidate_passthrough_();
         result
     }
 }

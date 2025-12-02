@@ -83,7 +83,7 @@ impl<R> Relation<R> {
             },
             commit_id,
             graph,
-            "max",
+            "group_max",
             vec![node_id],
         )
     }
@@ -98,7 +98,7 @@ impl<R> Relation<R> {
     {
         let result = self.group_max_();
         #[cfg(feature = "consolidate_all")]
-        let result = result.consolidate_();
+        let result = result.consolidate_passthrough_();
         result
     }
 }

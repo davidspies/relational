@@ -27,6 +27,13 @@ fn dump_svg(graph: &Graph, path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn dump_graph_text(graph: &Graph, path: &Path) -> Result<()> {
+    let text = graph.to_text();
+    std::fs::write(path, text)
+        .with_context(|| format!("failed to write graph file {}", path.display()))?;
+    Ok(())
+}
+
 #[derive(Parser)]
 #[command(about = "CDCL SAT Solver")]
 struct Args {
@@ -36,6 +43,10 @@ struct Args {
     /// Output SVG file for dataflow graph visualization
     #[arg(long)]
     svg: Option<PathBuf>,
+
+    /// Output text file for dataflow graph (LLM-friendly format)
+    #[arg(long)]
+    graph: Option<PathBuf>,
 
     /// Output DRAT proof file (for UNSAT results)
     #[arg(long)]
@@ -77,6 +88,12 @@ fn main() {
         print_assignment(&solver, num_vars);
     } else {
         println!("s UNSATISFIABLE");
+    }
+
+    if let Some(path) = &args.graph {
+        if let Err(e) = dump_graph_text(&solver.graph(), path) {
+            eprintln!("Error dumping graph: {e:?}");
+        }
     }
 }
 

@@ -11,6 +11,7 @@ use super::relation::{Op, Relation};
 pub struct ConsolidateOp<T, R: Op<T>> {
     upstream: Relation<R>,
     pending: Multiset<T>,
+    passthrough: bool,
 }
 
 impl<T: Eq + Hash, R: Op<T>> Op<T> for ConsolidateOp<T, R> {
@@ -22,6 +23,13 @@ impl<T: Eq + Hash, R: Op<T>> Op<T> for ConsolidateOp<T, R> {
         for (t, diff) in self.pending.drain() {
             consumer(t, diff);
         }
+    }
+
+    fn passthrough_op_name(&self, name: &'static str) -> bool {
+        if self.passthrough {
+            self.upstream.set_op_type(name);
+        }
+        self.passthrough
     }
 }
 
@@ -63,6 +71,28 @@ impl<R> Relation<R> {
             ConsolidateOp {
                 upstream: self,
                 pending: Multiset::new(),
+                passthrough: false,
+            },
+            commit_id,
+            graph,
+            "consolidate",
+            vec![parent],
+        )
+    }
+
+    pub fn consolidate_passthrough_<T>(self) -> Relation<impl Op<T>>
+    where
+        T: Eq + Hash,
+        R: Op<T>,
+    {
+        let commit_id = self.commit_id.clone();
+        let graph = self.graph.clone();
+        let parent = self.node_id;
+        Relation::new(
+            ConsolidateOp {
+                upstream: self,
+                pending: Multiset::new(),
+                passthrough: true,
             },
             commit_id,
             graph,

@@ -41,6 +41,10 @@ pub trait Op<T>: Sized {
     {
         Box::new(self)
     }
+
+    fn passthrough_op_name(&self, _name: &'static str) -> bool {
+        false
+    }
 }
 
 pub trait DynOp<T> {
@@ -153,13 +157,23 @@ impl<R> Relation<R> {
 
     /// Override the op_type for this relation's graph node.
     /// Panics if the graph has already been finalized.
-    pub(crate) fn with_op_type(self, op_type: &'static str) -> Self {
+    pub(crate) fn with_op_type<T>(self, op_type: &'static str) -> Self
+    where
+        R: Op<T>,
+    {
+        if self.inner.passthrough_op_name(op_type) {
+            return self;
+        }
+        self.set_op_type(op_type);
+        self
+    }
+
+    pub(crate) fn set_op_type(&self, op_type: &'static str) {
         self.graph
             .borrow_mut()
             .as_mut()
             .expect("cannot set op_type after build()")
             .set_op_type(self.node_id, op_type);
-        self
     }
 
     /// Box this relation to break the type chain.
