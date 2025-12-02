@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 
 use anyhow::{Context, Result, bail};
+use relational::database::{Database, DatabaseBuilder};
 
 use crate::{ClauseId, Lit, Solver, Var};
 
@@ -115,13 +116,15 @@ impl Cnf {
 
     /// Solve the CNF formula.
     pub fn solve(&self) -> SolveResult {
-        let mut solver = Solver::new();
+        let mut db_builder = DatabaseBuilder::new();
+        let mut solver = Solver::new(&mut db_builder);
+        let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {
-            solver.add_clause(ClauseId::new((i + 1) as u32), clause);
+            solver.add_clause(&mut db, ClauseId::new((i + 1) as u32), clause);
         }
 
-        if solver.solve() {
+        if solver.solve(&mut db) {
             let mut assignment = vec![None; (self.num_vars + 1) as usize];
             for v in 1..=self.num_vars {
                 assignment[v as usize] = solver.value(Var::new(v));
@@ -132,15 +135,17 @@ impl Cnf {
         }
     }
 
-    /// Solve and return the solver (for access to more detailed results).
-    pub fn into_solver(self) -> Solver {
-        let mut solver = Solver::new();
+    /// Solve and return the database and solver (for access to more detailed results).
+    pub fn into_solver(self) -> (Database, Solver) {
+        let mut db_builder = DatabaseBuilder::new();
+        let mut solver = Solver::new(&mut db_builder);
+        let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {
-            solver.add_clause(ClauseId::new((i + 1) as u32), clause);
+            solver.add_clause(&mut db, ClauseId::new((i + 1) as u32), clause);
         }
 
-        solver
+        (db, solver)
     }
 }
 

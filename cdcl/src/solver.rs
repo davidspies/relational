@@ -56,7 +56,6 @@ pub(super) struct State {
 
 /// CDCL SAT Solver.
 pub struct Solver {
-    pub(super) db: Database,
     pub(super) inputs: Inputs,
     pub(super) outputs: Outputs,
     pub(super) state: State,
@@ -64,7 +63,7 @@ pub struct Solver {
 
 impl Solver {
     /// Add an original clause to the solver.
-    pub fn add_clause(&mut self, clause_id: ClauseId, literals: &[Lit]) {
+    pub fn add_clause(&mut self, db: &mut Database, clause_id: ClauseId, literals: &[Lit]) {
         for &lit in literals {
             self.inputs.clauses.insert((clause_id, lit));
         }
@@ -74,13 +73,13 @@ impl Solver {
         if clause_id >= self.state.next_learned_id {
             self.state.next_learned_id = ClauseId::new(clause_id.raw() + 1);
         }
-        self.db.commit();
+        db.commit();
     }
 
     /// Make a decision: assign a literal at a new decision level.
     /// `tried_opposite` indicates if we've already tried the opposite polarity.
-    pub(super) fn decide_internal(&mut self, lit: Lit, tried_opposite: bool) {
-        self.db.push();
+    pub(super) fn decide_internal(&mut self, db: &mut Database, lit: Lit, tried_opposite: bool) {
+        db.push();
         self.state.current_level.inc();
         self.state
             .decision_stack
@@ -92,12 +91,12 @@ impl Solver {
             self.state.current_level,
             ClauseId::DECISION,
         ));
-        self.db.commit();
+        db.commit();
     }
 
     /// Make a decision: assign a literal at a new decision level.
-    pub fn decide(&mut self, lit: Lit) {
-        self.decide_internal(lit, false);
+    pub fn decide(&mut self, db: &mut Database, lit: Lit) {
+        self.decide_internal(db, lit, false);
     }
 
     /// Propagate units until fixpoint or conflict.
@@ -110,19 +109,19 @@ impl Solver {
     }
 
     /// Backtrack to the given level, popping decision stack entries.
-    pub fn backtrack_to(&mut self, level: Level) {
+    pub fn backtrack_to(&mut self, db: &mut Database, level: Level) {
         while self.state.current_level > level {
-            let popped = self.db.pop();
+            let popped = db.pop();
             assert!(popped, "Tried to backtrack past level 0");
             self.state.decision_stack.pop();
             self.state.current_level.dec();
         }
         // Trigger propagation after backtracking to pick up any unit learned clauses
-        self.db.commit();
+        db.commit();
     }
 
     /// Learn a clause (adds to persistent learned relation).
-    pub fn learn_clause(&mut self, literals: &[Lit]) -> ClauseId {
+    pub fn learn_clause(&mut self, db: &mut Database, literals: &[Lit]) -> ClauseId {
         let cid = self.state.next_learned_id;
         self.state.next_learned_id = ClauseId::new(self.state.next_learned_id.raw() + 1);
         for &lit in literals {
@@ -130,7 +129,7 @@ impl Solver {
         }
         // Cache clause contents for conflict analysis
         self.state.clause_db.insert(cid, literals.to_vec());
-        self.db.commit();
+        db.commit();
         cid
     }
 
@@ -143,7 +142,7 @@ impl Solver {
     ///
     /// The returned handle is thread-safe and can be sent to another thread
     /// (e.g., for a ctrl-C handler to dump the graph).
-    pub fn graph(&self) -> relational::database::GraphHandle {
-        self.db.graph()
+    pub fn graph(db: &Database) -> relational::database::GraphHandle {
+        db.graph()
     }
 }

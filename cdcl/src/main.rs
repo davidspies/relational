@@ -59,7 +59,7 @@ fn main() {
     let cnf = Cnf::from_file(&args.cnf_file).unwrap();
 
     let num_vars = cnf.num_vars;
-    let mut solver = cnf.into_solver();
+    let (mut db, mut solver) = cnf.into_solver();
 
     let mut proof_writer = args
         .proof
@@ -67,7 +67,7 @@ fn main() {
         .map(|path| ProofWriter::new(path).unwrap());
 
     let _dump_on_finish = args.svg.map(|svg_path| {
-        let graph = solver.graph();
+        let graph = db.graph();
         let path = svg_path.clone();
 
         ctrlc::set_handler({
@@ -83,7 +83,7 @@ fn main() {
         ConsumeOnDrop::new(move || dump_svg_once(&graph, &path))
     });
 
-    if solver.solve_with_proof(proof_writer.as_mut()) {
+    if solver.solve_with_proof(&mut db, proof_writer.as_mut()) {
         println!("s SATISFIABLE");
         print_assignment(&solver, num_vars);
     } else {
@@ -91,7 +91,7 @@ fn main() {
     }
 
     if let Some(path) = &args.graph {
-        if let Err(e) = dump_graph_text(&solver.graph(), path) {
+        if let Err(e) = dump_graph_text(&db.graph(), path) {
             eprintln!("Error dumping graph: {e:?}");
         }
     }

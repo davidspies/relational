@@ -13,11 +13,11 @@ use super::solver::{Inputs, Outputs, Solver, State};
 use super::types::{ClauseId, Level, Lit};
 
 impl Solver {
-    /// Create a new solver.
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        let mut db = DatabaseBuilder::new();
-
+    /// Create a new solver using the provided database builder.
+    ///
+    /// The caller is responsible for calling `db.build()` after this returns
+    /// and passing the resulting `&mut Database` to solver methods.
+    pub fn new(db: &mut DatabaseBuilder) -> Self {
         // === Input Relations ===
         create_input!(db, clauses, clauses_rel, (ClauseId, Lit));
         create_persistent_input!(db, learned, learned_rel, (ClauseId, Lit));
@@ -185,12 +185,7 @@ impl Solver {
         // Initialize with Level::TOP so unit propagation works at level 0
         levels.insert(Level::TOP);
 
-        // Finalize the dataflow graph and create the runtime Database
-        let mut db = db.build();
-        db.commit();
-
         Solver {
-            db,
             inputs: Inputs {
                 clauses,
                 learned,

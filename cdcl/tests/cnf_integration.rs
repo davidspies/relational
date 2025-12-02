@@ -116,6 +116,6 @@ fn test_parse_from_string() {
 #[test]
 fn test_into_solver() {
     let cnf = load_cnf("simple_sat.cnf");
-    let mut solver = cnf.into_solver();
-    assert!(solver.solve());
+    let (mut db, mut solver) = cnf.into_solver();
+    assert!(solver.solve(&mut db));
 }

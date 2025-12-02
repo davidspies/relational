@@ -1,5 +1,7 @@
 //! Main solve loop for the CDCL solver.
 
+use relational::database::Database;
+
 use super::Solver;
 use super::proof::ProofWriter;
 
@@ -8,16 +10,16 @@ impl Solver {
     ///
     /// Uses 1-UIP conflict analysis to learn clauses and perform
     /// non-chronological backtracking.
-    pub fn solve(&mut self) -> bool {
-        self.solve_with_proof(None)
+    pub fn solve(&mut self, db: &mut Database) -> bool {
+        self.solve_with_proof(db, None)
     }
 
     /// Solve with optional DRAT proof logging.
-    pub fn solve_with_proof(&mut self, proof: Option<&mut ProofWriter>) -> bool {
-        self.solve_internal(proof)
+    pub fn solve_with_proof(&mut self, db: &mut Database, proof: Option<&mut ProofWriter>) -> bool {
+        self.solve_internal(db, proof)
     }
 
-    fn solve_internal(&mut self, mut proof: Option<&mut ProofWriter>) -> bool {
+    fn solve_internal(&mut self, db: &mut Database, mut proof: Option<&mut ProofWriter>) -> bool {
         loop {
             // Propagate
             match self.propagate() {
@@ -25,7 +27,7 @@ impl Solver {
                     // No conflict - pick next literal or return SAT
                     match self.pick_branching_literal() {
                         Some(lit) => {
-                            self.decide(lit);
+                            self.decide(db, lit);
                         }
                         None => {
                             // All variables assigned, no conflict = SAT
@@ -51,10 +53,10 @@ impl Solver {
                             }
 
                             // Non-chronological backtrack to the computed level FIRST
-                            self.backtrack_to(analysis.backtrack_level);
+                            self.backtrack_to(db, analysis.backtrack_level);
 
                             // Then learn the clause (it should now be unit/asserting)
-                            self.learn_clause(&analysis.learned_clause);
+                            self.learn_clause(db, &analysis.learned_clause);
 
                             // The learned clause is now unit (asserting), so propagation
                             // will assign the UIP literal on the next iteration
