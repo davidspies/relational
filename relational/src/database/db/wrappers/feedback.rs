@@ -1,6 +1,7 @@
 //! Feedback wrapper for type-erased feedback operations.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::rc::Rc;
 
@@ -32,11 +33,20 @@ pub(crate) struct FeedbackWrapper<T, R: Op<T>> {
     variable: Rc<RefCell<Variable<T>>>,
     /// The input relation that feeds into this variable.
     input: Relation<R>,
+    /// Scratch space for collecting changes.
+    change_scratch: Multiset<T>,
+    /// Scratch space for checkpoint tuples during pop.
+    checkpoint_scratch: HashSet<T>,
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWrapper<T, R> {
     pub(crate) fn new(variable: Rc<RefCell<Variable<T>>>, input: Relation<R>) -> Self {
-        FeedbackWrapper { variable, input }
+        FeedbackWrapper {
+            variable,
+            input,
+            change_scratch: Multiset::new(),
+            checkpoint_scratch: HashSet::new(),
+        }
     }
 
     pub(crate) fn push_initial_checkpoints(&mut self, depth: usize) {
@@ -61,31 +71,23 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
 
     fn pop_pull_and_forward(&mut self) {
         // 1. Pop checkpoint and get its contents
-        let checkpoint_tuples: Vec<T> = {
-            let mut var = self.variable.borrow_mut();
-            var.pop_checkpoint_drain().collect()
-        };
+        assert!(self.checkpoint_scratch.is_empty());
+        self.checkpoint_scratch
+            .extend(self.variable.borrow_mut().pop_checkpoint_drain());
 
-        // 2. Pull changes and update input totals
-        let mut changes = Multiset::new();
-        self.input.dump_to_multiset(&mut changes);
-
-        let change_tuples: Vec<_> = changes.drain().collect();
+        // 2. Pull changes, update input totals, and forward non-checkpoint items
+        self.input.dump_to_multiset(&mut self.change_scratch);
 
         let mut var = self.variable.borrow_mut();
-        for (tuple, diff) in &change_tuples {
-            var.update_input_total(tuple.clone(), *diff);
-        }
-
-        // 3. Forward items from changes that weren't in the popped checkpoint
-        for (tuple, _) in change_tuples {
-            if !checkpoint_tuples.contains(&tuple) {
+        for (tuple, diff) in self.change_scratch.drain() {
+            var.update_input_total(tuple.clone(), diff);
+            if !self.checkpoint_scratch.contains(&tuple) {
                 var.forward_reachable(&tuple);
             }
         }
 
-        // 4. Forward items from popped checkpoint that are still reachable
-        for tuple in checkpoint_tuples {
+        // 3. Forward items from popped checkpoint that are still reachable
+        for tuple in self.checkpoint_scratch.drain() {
             var.forward_reachable(&tuple);
         }
     }
@@ -95,15 +97,14 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
         // upstream emits both +1 and -1 for the same tuple within a single step.
         // Without consolidation, the Variable's seen-set semantics would incorrectly
         // add tuples that net to zero.
-        let mut changes = Multiset::new();
-        self.input.dump_to_multiset(&mut changes);
+        self.input.dump_to_multiset(&mut self.change_scratch);
 
-        if changes.is_empty() {
+        if self.change_scratch.is_empty() {
             return false;
         }
 
         let mut var = self.variable.borrow_mut();
-        for (tuple, diff) in changes {
+        for (tuple, diff) in self.change_scratch.drain() {
             var.add_change(tuple, diff);
         }
         var.commit();

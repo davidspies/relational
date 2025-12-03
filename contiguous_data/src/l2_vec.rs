@@ -53,7 +53,11 @@ impl<T> L2Vec<T> {
             return None;
         }
         let start = self.starts[index];
-        let end = self.starts.get(index + 1).copied().unwrap_or(self.data.len());
+        let end = self
+            .starts
+            .get(index + 1)
+            .copied()
+            .unwrap_or(self.data.len());
         Some(&self.data[start..end])
     }
 

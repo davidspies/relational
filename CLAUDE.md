@@ -24,6 +24,9 @@ Bad patterns that hide bugs:
 - Default values that mask logic errors
 - `let _ = ...` or `if let Ok(_) = ...` to discard errors silently
 - `match ... { Ok(x) => use(x), Err(_) => {} }` - either handle the error or propagate it
+- Silently enforcing invariants instead of asserting them - if something should be true, `assert!` it rather than making it true:
+  - `.clear()` on a collection that should already be empty → `assert!(x.is_empty())`
+  - `.first()` / `.next()` when expecting exactly one element → assert there's exactly one
 
 Good patterns:
 - `.unwrap()` or `.expect("explanation")` for cases that indicate bugs

@@ -27,6 +27,10 @@ pub(crate) struct FeedbackWithIdWrapper<T, R: Op<T>> {
     input_totals_by_t: HashMap<T, i64>,
     /// Maps T -> CommitId for tuples currently in output.
     t_to_commit_id: HashMap<T, CommitId>,
+    /// Scratch space for collecting changes.
+    change_scratch: Multiset<T>,
+    /// Scratch space for checkpoint tuples during pop (T -> CommitId).
+    checkpoint_scratch: HashMap<T, CommitId>,
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
@@ -41,6 +45,8 @@ impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
             input,
             input_totals_by_t: HashMap::new(),
             t_to_commit_id: HashMap::new(),
+            change_scratch: Multiset::new(),
+            checkpoint_scratch: HashMap::new(),
         }
     }
 
@@ -66,39 +72,30 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
 
     fn pop_pull_and_forward(&mut self) {
         // 1. Pop checkpoint and get its contents
-        let checkpoint_tuples: Vec<(T, CommitId)> = {
-            let mut var = self.variable.borrow_mut();
-            var.pop_checkpoint_drain().collect()
-        };
-
-        // 2. Pull changes and update input totals
-        let mut changes = Multiset::new();
-        self.input.dump_to_multiset(&mut changes);
-
-        let change_tuples: Vec<_> = changes.drain().collect();
-
-        for (tuple, diff) in &change_tuples {
-            let input_total = self.input_totals_by_t.entry(tuple.clone()).or_insert(0);
-            *input_total += diff;
+        assert!(self.checkpoint_scratch.is_empty());
+        for (tuple, commit_id) in self.variable.borrow_mut().pop_checkpoint_drain() {
+            self.checkpoint_scratch.insert(tuple, commit_id);
         }
 
-        // 3. Forward items from changes that weren't in the popped checkpoint
+        // 2. Pull changes, update input totals, and forward non-checkpoint items
+        self.input.dump_to_multiset(&mut self.change_scratch);
+
         let mut var = self.variable.borrow_mut();
-        for (tuple, _) in change_tuples {
-            if let Some(&commit_id) = self.t_to_commit_id.get(&tuple) {
+        for (tuple, diff) in self.change_scratch.drain() {
+            *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff;
+
+            if let Some(&commit_id) = self.t_to_commit_id.get(&tuple)
+                && !self.checkpoint_scratch.contains_key(&tuple)
+            {
                 let full_tuple = (tuple.clone(), commit_id);
-                // Check if this tuple was in the popped checkpoint
-                let in_checkpoint = checkpoint_tuples.iter().any(|(t, _)| t == &tuple);
-                if !in_checkpoint {
-                    let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
-                    var.set_input_total(full_tuple.clone(), input_total);
-                    var.forward_reachable(&full_tuple);
-                }
+                let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
+                var.set_input_total(full_tuple.clone(), input_total);
+                var.forward_reachable(&full_tuple);
             }
         }
 
-        // 4. Forward items from popped checkpoint that are still reachable
-        for (tuple, commit_id) in checkpoint_tuples {
+        // 3. Forward items from popped checkpoint that are still reachable
+        for (tuple, commit_id) in self.checkpoint_scratch.drain() {
             let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
             if input_total > 0 {
                 var.forward_reachable(&(tuple, commit_id));
