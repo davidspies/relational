@@ -24,7 +24,7 @@ pub(crate) trait AnyFeedback {
     /// but pops first so all mutations go to the new last checkpoint.
     fn pop_pull_and_forward(&mut self);
     /// Run one step: pull from input relation, add to variable. Returns true if new output.
-    fn step(&mut self, recording: bool) -> bool;
+    fn step(&mut self) -> bool;
 }
 
 /// Wrapper to make feedback type-erased.
@@ -92,7 +92,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
         }
     }
 
-    fn step(&mut self, _recording: bool) -> bool {
+    fn step(&mut self) -> bool {
         // Consolidate changes per tuple using Multiset to handle cases where
         // upstream emits both +1 and -1 for the same tuple within a single step.
         // Without consolidation, the Variable's seen-set semantics would incorrectly

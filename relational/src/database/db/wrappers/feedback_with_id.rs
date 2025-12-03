@@ -105,7 +105,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
         }
     }
 
-    fn step(&mut self, _recording: bool) -> bool {
+    fn step(&mut self) -> bool {
         // Consolidate changes per tuple using Multiset to handle cases where
         // upstream emits both +1 and -1 for the same tuple within a single step.
         // Without consolidation, the Variable's seen-set semantics would incorrectly

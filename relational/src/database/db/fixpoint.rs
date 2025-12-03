@@ -26,7 +26,6 @@ impl Database {
 
     /// Run stratified fixpoint up to and including the given step index.
     pub(super) fn run_stratified_fixpoint_up_to(&mut self, limit: usize) {
-        let recording = self.checkpoint_depth > 0;
         let mut iterations = 0;
 
         'outer: loop {
@@ -45,7 +44,7 @@ impl Database {
                         }
                     }
                     StratifiedStep::Feedback(feedback) => {
-                        if feedback.step(recording) {
+                        if feedback.step() {
                             // Increment commit ID so SavedRelations know to re-pull
                             self.increment_commit_id();
                             iterations += 1;
