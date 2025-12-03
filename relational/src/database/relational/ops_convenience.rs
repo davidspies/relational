@@ -2,6 +2,8 @@
 
 use std::{cmp::Reverse, hash::Hash};
 
+use contiguous_data::ArrayVec;
+
 use super::relation::{Op, Relation};
 
 impl<R> Relation<R> {
@@ -146,6 +148,24 @@ impl<R> Relation<R> {
         self.map_h(|t| (t, 1i64)).group_sum().with_op_type("counts")
     }
 
+    /// Minimum value by key (without consolidation).
+    /// Input must be (K, V) tuples where K is the key and V is the value.
+    pub fn group_min<K, V>(self) -> Relation<impl Op<(K, V)>>
+    where
+        R: Op<(K, V)>,
+        K: Clone + Eq + Hash,
+        V: Clone + Eq + Hash + Ord,
+    {
+        self.group_min_n::<K, V, 1>()
+            .with_op_type("group_min")
+            .map_h(|(k, arr)| {
+                let mut iter = arr.into_iter();
+                let v = iter.next().unwrap();
+                assert!(iter.next().is_none());
+                (k, v)
+            })
+    }
+
     /// Maximum value by key.
     /// Input must be (K, V) tuples where K is the key and V is the value.
     pub fn group_max<K, V>(self) -> Relation<impl Op<(K, V)>>
@@ -158,6 +178,18 @@ impl<R> Relation<R> {
             .group_min()
             .with_op_type("group_max")
             .map_h(|(k, Reverse(v))| (k, v))
+    }
+
+    pub fn group_max_n<K, V, const N: usize>(self) -> Relation<impl Op<(K, ArrayVec<V, N>)>>
+    where
+        R: Op<(K, V)>,
+        K: Clone + Eq + Hash,
+        V: Clone + Eq + Hash + Ord,
+    {
+        self.map_h(|(k, v)| (k, Reverse(v)))
+            .group_min_n::<K, Reverse<V>, N>()
+            .with_op_type("group_max_n")
+            .map_h(|(k, arr)| (k, arr.into_iter().map(|Reverse(v)| v).collect()))
     }
 
     /// Filter tuples by predicate.

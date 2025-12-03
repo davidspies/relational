@@ -61,6 +61,15 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K
         }
     }
 
+    /// Get the top N smallest values for a key (or fewer if less than N exist).
+    /// Returns None if no values exist for the key.
+    pub fn get_top(&self, key: &K) -> Option<&ArrayVec<V, N>> {
+        match self.roots.get(key)? {
+            HeapRoot::Small(arr) => Some(arr),
+            HeapRoot::Large { top, .. } => Some(top),
+        }
+    }
+
     pub fn push(&mut self, key: K, value: V) {
         match self.roots.get(&key) {
             None => {
