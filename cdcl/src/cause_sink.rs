@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use relational::Multiset;
+use contiguous_data::Multiset;
 use relational::database::{CommitId, Sink};
 
 use super::types::{ClauseId, Level, Lit};

@@ -4,7 +4,8 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use crate::collection::Multiset;
+use contiguous_data::Multiset;
+
 use crate::database::saved::SavedGetter;
 
 use super::relation::{DynOp, Op, Relation};

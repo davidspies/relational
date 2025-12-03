@@ -4,7 +4,8 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::collection::Multiset;
+use contiguous_data::Multiset;
+
 use crate::database::Relation;
 use crate::database::feedback::Variable;
 use crate::database::relational::Op;

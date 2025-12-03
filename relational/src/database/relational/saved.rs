@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::Diff;
-use crate::collection::Multiset;
+use contiguous_data::{Diff, Multiset};
+
 use crate::database::commit_id::CommitId;
 
 use super::graph::{GraphBuilder, NodeId};

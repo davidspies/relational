@@ -4,7 +4,8 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::Diff;
+use contiguous_data::Diff;
+
 use crate::database::feedback::Variable as InternalVariable;
 
 use super::graph::NodeId;

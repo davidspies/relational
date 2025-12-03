@@ -2,7 +2,7 @@
 
 use std::hash::Hash;
 
-use crate::collection::Multiset;
+use contiguous_data::Multiset;
 
 /// A sink that can receive changes from a relation.
 ///

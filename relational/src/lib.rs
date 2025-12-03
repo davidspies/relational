@@ -87,14 +87,9 @@
 //! assert_eq!(numbers_out.collect().len(), 2);
 //! ```
 
-mod collection;
 pub mod database;
 
-pub use collection::Multiset;
 pub use database::{CommitId, Database, DatabaseBuilder};
-
-/// A difference/multiplicity value. Positive means insertions, negative means deletions.
-pub type Diff = i64;
 
 /// Assign a relation to a variable with a name derived from the variable.
 ///

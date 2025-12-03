@@ -4,8 +4,7 @@ use std::hash::Hash;
 
 use contiguous_data::L2Heaps;
 
-use crate::Diff;
-use crate::collection::Multiset;
+use contiguous_data::{Diff, Multiset};
 
 use super::relation::{Op, Relation};
 

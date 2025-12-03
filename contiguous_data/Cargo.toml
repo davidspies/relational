@@ -4,8 +4,8 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-index_list = { version = "*", features = ["iter_mut"] }
 arrayvec = "*"
+index_list = { version = "*" }
 
 [dev-dependencies]
 proptest = "*"

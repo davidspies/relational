@@ -8,10 +8,8 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::rc::Rc;
 
+use contiguous_data::{Diff, Multiset};
 use derive_where::derive_where;
-
-use crate::Diff;
-use crate::Multiset;
 
 use super::relation::Op;
 

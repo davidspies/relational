@@ -7,9 +7,9 @@ version.workspace = true
 consolidate_all = []
 
 [dependencies]
-derive-where = "*"
 anyhow = "*"
 contiguous_data = { path = "../contiguous_data" }
+derive-where = "*"
 
 [dev-dependencies]
 proptest = "*"

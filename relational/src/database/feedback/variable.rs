@@ -1,10 +1,10 @@
 //! Variable for tracking iterative computation state.
 
+use contiguous_data::Diff;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-use crate::Diff;
-use crate::collection::Multiset;
+use contiguous_data::Multiset;
 
 /// A variable in an iterative computation.
 ///

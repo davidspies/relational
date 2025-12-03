@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use relational::Multiset;
+use contiguous_data::Multiset;
 use relational::database::Sink;
 
 use super::types::{Level, Lit};

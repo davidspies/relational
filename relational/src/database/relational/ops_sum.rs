@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::{Add, Mul, Sub};
 
-use crate::Diff;
+use contiguous_data::Diff;
 
 use super::relation::{Op, Relation};
 

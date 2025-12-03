@@ -4,8 +4,9 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-relational = { path = "../relational" }
-ctrlc = "*"
 anyhow = "*"
 clap = { version = "*", features = ["derive"] }
 consume_on_drop = "*"
+contiguous_data = { path = "../contiguous_data" }
+ctrlc = "*"
+relational = { path = "../relational" }

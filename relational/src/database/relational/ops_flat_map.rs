@@ -2,7 +2,7 @@
 
 use std::hash::Hash;
 
-use crate::Diff;
+use contiguous_data::Diff;
 
 use super::relation::{Op, Relation};
 

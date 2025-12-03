@@ -107,6 +107,7 @@ dependencies = [
  "anyhow",
  "clap",
  "consume_on_drop",
+ "contiguous_data",
  "ctrlc",
  "relational",
 ]

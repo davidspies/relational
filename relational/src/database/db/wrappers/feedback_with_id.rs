@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::collection::Multiset;
+use contiguous_data::Multiset;
+
 use crate::database::Relation;
 use crate::database::commit_id::CommitId;
 use crate::database::feedback::Variable;

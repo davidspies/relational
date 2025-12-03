@@ -3,8 +3,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use crate::Diff;
-use crate::collection::Multiset;
+use contiguous_data::{Diff, Multiset};
 
 use super::relation::{Op, Relation, assert_same_commit_id};
 
