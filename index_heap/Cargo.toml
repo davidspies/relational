@@ -1,0 +1,10 @@
+[package]
+name = "index_heap"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+index_list = { version = "*", features = ["iter_mut"] }
+
+[dev-dependencies]
+proptest = "*"
