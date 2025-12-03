@@ -145,7 +145,6 @@ impl Solver {
                 .get()
                 .swap()
                 .semijoin(assigned.get())
-                .consolidate()
                 .snd()
                 .consolidate(),
         );
@@ -223,7 +222,6 @@ impl Solver {
                 .get()
                 .swap()
                 .semijoin(current_level_rel.get())
-                .consolidate()
                 .snd()
                 .consolidate()
         );
