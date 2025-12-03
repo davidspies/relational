@@ -45,9 +45,9 @@ impl<T: Eq + Hash> Multiset<T> {
         self.data.get(tuple).copied().unwrap_or(0)
     }
 
-    /// Check if a tuple exists with positive multiplicity.
+    /// Check if a tuple exists with non-zero multiplicity.
     pub fn contains(&self, tuple: &T) -> bool {
-        self.get(tuple) > 0
+        self.get(tuple) != 0
     }
 
     /// Insert a tuple (increment multiplicity by 1).
@@ -79,12 +79,9 @@ impl<T: Eq + Hash> Multiset<T> {
         }
     }
 
-    /// Iterate over tuples with positive multiplicity.
+    /// Iterate over tuples with non-zero multiplicity.
     pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.data
-            .iter()
-            .filter(|(_, diff)| **diff > 0)
-            .map(|(tuple, _)| tuple)
+        self.data.keys()
     }
 
     /// Iterate over tuples with their multiplicities.

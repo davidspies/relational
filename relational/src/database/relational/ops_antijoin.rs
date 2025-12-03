@@ -34,8 +34,8 @@ where
         // Process left changes first
         self.left.foreach(|(k, v), l_diff| {
             let right_count = self.right_counts.get(&k);
-            // Only emit if key is not blocked by right side
-            if right_count <= 0 && l_diff != 0 {
+            // Only emit if key is not blocked by right side (blocked when count != 0)
+            if right_count == 0 && l_diff != 0 {
                 consumer((k.clone(), v.clone()), l_diff);
             }
             // Update left index
@@ -51,8 +51,8 @@ where
             let old_count = self.right_counts.get(&k);
             let new_count = old_count + r_diff;
 
-            let was_blocked = old_count > 0;
-            let is_blocked = new_count > 0;
+            let was_blocked = old_count != 0;
+            let is_blocked = new_count != 0;
 
             if was_blocked != is_blocked {
                 // Blocking state changed - emit/retract all left tuples with this key

@@ -7,8 +7,8 @@ use contiguous_data::{Diff, Multiset};
 use super::relation::{Op, Relation};
 
 /// A distinct operator - outputs each tuple at most once.
-/// Tracks input multiplicities to emit +1 when count goes from 0 to positive,
-/// and -1 when count goes from positive to 0.
+/// Tracks input multiplicities to emit +1 when count goes from 0 to non-zero,
+/// and -1 when count goes from non-zero to 0.
 pub struct DistinctOp<T, R>
 where
     R: Op<T>,
@@ -30,8 +30,8 @@ where
 
             counts.update(t.clone(), diff);
 
-            let was_present = old_count > 0;
-            let is_present = new_count > 0;
+            let was_present = old_count != 0;
+            let is_present = new_count != 0;
 
             if !was_present && is_present {
                 consumer(t, 1); // appeared

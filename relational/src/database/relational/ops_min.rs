@@ -42,10 +42,10 @@ where
             counts.update((k.clone(), v.clone()), diff);
             let new_count = counts.get(&(k.clone(), v.clone()));
 
-            // Update heap based on count transitions
-            if old_count <= 0 && new_count > 0 {
+            // Update heap based on count transitions (present when count != 0)
+            if old_count == 0 && new_count != 0 {
                 heap.push(k.clone(), v.clone());
-            } else if old_count > 0 && new_count <= 0 {
+            } else if old_count != 0 && new_count == 0 {
                 heap.remove(&k, &v);
             }
 

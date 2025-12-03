@@ -90,10 +90,10 @@ fn main() {
         println!("s UNSATISFIABLE");
     }
 
-    if let Some(path) = &args.graph {
-        if let Err(e) = dump_graph_text(&db.graph(), path) {
-            eprintln!("Error dumping graph: {e:?}");
-        }
+    if let Some(path) = &args.graph
+        && let Err(e) = dump_graph_text(&db.graph(), path)
+    {
+        eprintln!("Error dumping graph: {e:?}");
     }
 }
 

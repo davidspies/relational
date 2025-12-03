@@ -76,13 +76,11 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone> L2Heaps<K, V> {
             Some(HeapRoot::Large { size, .. }) if *size <= 2
         );
 
-        if should_demote {
-            if let Some(HeapRoot::Large { root, size }) = self.roots.remove(key) {
-                let values = self.extract_and_remove_all(key, root, size);
-                let arr: ArrayVec<V, 2> = values.into_iter().collect();
-                // arr is never empty: we only demote when size is 1 or 2
-                self.roots.insert(key.clone(), HeapRoot::Small(arr));
-            }
+        if should_demote && let Some(HeapRoot::Large { root, size }) = self.roots.remove(key) {
+            let values = self.extract_and_remove_all(key, root, size);
+            let arr: ArrayVec<V, 2> = values.into_iter().collect();
+            // arr is never empty: we only demote when size is 1 or 2
+            self.roots.insert(key.clone(), HeapRoot::Small(arr));
         }
     }
 
