@@ -1,5 +1,7 @@
 //! Main solve loop for the CDCL solver.
 
+use std::time::Instant;
+
 use relational::database::Database;
 
 use super::Solver;
@@ -24,10 +26,14 @@ impl Solver {
 
     /// Solve with optional DRAT proof logging.
     pub fn solve_with_proof(&mut self, db: &mut Database, proof: Option<&mut ProofWriter>) -> bool {
+        let start = Instant::now();
         let (result, stats) = self.solve_internal(db, proof);
         eprintln!(
-            "c stats: decisions={} conflicts={} restarts={}",
-            stats.decisions, stats.conflicts, stats.restarts
+            "c stats: {:.3}s decisions={} conflicts={} restarts={}",
+            start.elapsed().as_secs_f64(),
+            stats.decisions,
+            stats.conflicts,
+            stats.restarts
         );
         result
     }
@@ -38,15 +44,20 @@ impl Solver {
         mut proof: Option<&mut ProofWriter>,
     ) -> (bool, SolveStats) {
         let mut stats = SolveStats::default();
-        let mut last_report = 0u64;
+        let start = Instant::now();
+        let mut last_report = start;
         loop {
-            // Periodic progress report
-            if stats.conflicts >= last_report + 10000 {
+            // Periodic progress report every 5 seconds
+            let now = Instant::now();
+            if now.duration_since(last_report).as_secs() >= 5 {
                 eprintln!(
-                    "c progress: decisions={} conflicts={} restarts={}",
-                    stats.decisions, stats.conflicts, stats.restarts
+                    "c progress: {:.1}s decisions={} conflicts={} restarts={}",
+                    start.elapsed().as_secs_f64(),
+                    stats.decisions,
+                    stats.conflicts,
+                    stats.restarts
                 );
-                last_report = stats.conflicts;
+                last_report = now;
             }
             // Propagate
             match self.propagate() {
