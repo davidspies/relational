@@ -114,7 +114,11 @@ proptest! {
             match op {
                 Op::Insert(k, v) => {
                     l2.insert(k, v);
-                    reference.entry(k).or_default().insert(v);
+                    let ms = reference.entry(k).or_default();
+                    ms.insert(v);
+                    if ms.is_empty() {
+                        reference.remove(&k);
+                    }
                 }
                 Op::Delete(k, v) => {
                     l2.delete(&k, &v);

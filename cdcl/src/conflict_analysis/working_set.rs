@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use relational::database::CommitId;
 
-use crate::assignments_sink::AssignmentsSink;
+use crate::AssignmentsSink;
 use crate::cause_sink::CauseSink;
 use crate::types::{Level, Lit};
 
@@ -33,7 +33,7 @@ impl WorkingSet {
         assignments: &AssignmentsSink,
         causes: &CauseSink,
     ) {
-        let at_current = assignments.get(&lit) == Some(current_level);
+        let at_current = *assignments.get_singleton(&lit) == current_level;
         let in_current = self
             .at_current_level
             .values()

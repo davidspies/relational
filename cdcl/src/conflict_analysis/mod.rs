@@ -60,7 +60,7 @@ impl Solver {
         // Use the minimum of current level and max level in conflict literals
         let max_conflict_level = initial_lits
             .iter()
-            .filter_map(|lit| assignments.get(lit))
+            .map(|lit| *assignments.get_singleton(lit))
             .max()
             .unwrap_or(Level::TOP);
         let current_level = self.state.current_level.min(max_conflict_level);
@@ -113,7 +113,7 @@ impl Solver {
         // Find backtrack level: second-highest level among learned clause literals
         let mut levels: Vec<Level> = learned_clause
             .iter()
-            .filter_map(|&lit| assignments.get(&(!lit)))
+            .map(|&lit| *assignments.get_singleton(&(!lit)))
             .collect();
         levels.sort();
         levels.dedup();

@@ -6,7 +6,7 @@ use relational::database::{
     CommitId, Database, InputHandle, Output, PersistentInputHandle, SavedOutput,
 };
 
-use super::assignments_sink::AssignmentsSink;
+use super::AssignmentsSink;
 use super::cause_sink::CauseSink;
 use super::literal_counts_sink::LiteralCountsSink;
 use super::types::{ClauseId, Conflict, Level, Lit};

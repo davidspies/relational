@@ -2,9 +2,8 @@
 
 use std::cell::Ref;
 
-use super::Solver;
-use super::assignments_sink::AssignmentsSink;
 use super::types::{Level, Lit, Var};
+use super::{AssignmentsSink, Solver};
 
 impl Solver {
     /// Get a reference to the assignments sink.
