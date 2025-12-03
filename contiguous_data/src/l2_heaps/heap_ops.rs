@@ -61,10 +61,8 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K
             Some(HeapRoot::Large { heap_size: 0, .. })
         );
 
-        if should_demote {
-            if let Some(HeapRoot::Large { top, .. }) = self.roots.remove(key) {
-                self.roots.insert(key.clone(), HeapRoot::Small(top));
-            }
+        if should_demote && let Some(HeapRoot::Large { top, .. }) = self.roots.remove(key) {
+            self.roots.insert(key.clone(), HeapRoot::Small(top));
         }
     }
 

@@ -92,7 +92,11 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K
                     ArrayVec::new(),
                 );
                 let (top, root) = self.promote_to_large(&key, arr, value);
-                *self.roots.get_mut(&key).unwrap() = HeapRoot::Large { top, root, heap_size: 1 };
+                *self.roots.get_mut(&key).unwrap() = HeapRoot::Large {
+                    top,
+                    root,
+                    heap_size: 1,
+                };
             }
             Some(HeapRoot::Large { top, root, .. }) => {
                 let root = *root;
@@ -128,9 +132,15 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K
                 let replacement = self.remove_at_large(key, root_idx);
                 let pos = {
                     let top = self.roots.get(key).unwrap().as_top();
-                    top.iter().position(|v| &replacement < v).unwrap_or(top.len())
+                    top.iter()
+                        .position(|v| &replacement < v)
+                        .unwrap_or(top.len())
                 };
-                self.roots.get_mut(key).unwrap().as_top_mut().insert(pos, replacement);
+                self.roots
+                    .get_mut(key)
+                    .unwrap()
+                    .as_top_mut()
+                    .insert(pos, replacement);
                 self.maybe_demote(key);
                 Some(value)
             }
@@ -159,9 +169,15 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K
                     let replacement = self.remove_at_large(key, root_idx);
                     let pos = {
                         let top = self.roots.get(key).unwrap().as_top();
-                        top.iter().position(|v| &replacement < v).unwrap_or(top.len())
+                        top.iter()
+                            .position(|v| &replacement < v)
+                            .unwrap_or(top.len())
                     };
-                    self.roots.get_mut(key).unwrap().as_top_mut().insert(pos, replacement);
+                    self.roots
+                        .get_mut(key)
+                        .unwrap()
+                        .as_top_mut()
+                        .insert(pos, replacement);
                     self.maybe_demote(key);
                     true
                 } else if let Some(&idx) = self.positions.get(&(key.clone(), value.clone())) {
@@ -213,7 +229,9 @@ impl<V, const N: usize> HeapRoot<V, N> {
     }
 }
 
-impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> Default for L2Heaps<K, V, N> {
+impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> Default
+    for L2Heaps<K, V, N>
+{
     fn default() -> Self {
         Self::new()
     }

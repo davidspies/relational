@@ -54,7 +54,13 @@ impl Vsids {
         let mut queue = PriorityQueue::with_capacity(num_vars as usize);
         // Initialize all variables with 0 activity and random nonces
         for i in 1..=num_vars {
-            queue.push(Var::new(i), Priority { activity: 0.0, nonce: rng.random() });
+            queue.push(
+                Var::new(i),
+                Priority {
+                    activity: 0.0,
+                    nonce: rng.random(),
+                },
+            );
         }
         Self {
             queue,

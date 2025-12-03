@@ -70,6 +70,6 @@ impl WorkingSet {
         self.at_current_level
             .into_iter()
             .map(|(_, lit)| lit)
-            .chain(self.at_other_levels.into_iter())
+            .chain(self.at_other_levels)
     }
 }
