@@ -1,9 +1,9 @@
 //! ConflictsSink - tracks conflicts with deterministic ordering via seeded hash.
 
-use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
 use contiguous_data::Multiset;
+use priority_queue::PriorityQueue;
 use relational::database::Sink;
 
 use super::types::Conflict;
@@ -18,19 +18,22 @@ fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
 
 /// A sink that tracks conflicts with deterministic ordering.
 ///
-/// Uses BTreeMap with seeded hash so that when multiple conflicts exist,
-/// we pick the same one deterministically across runs.
+/// Uses PriorityQueue + Multiset. The priority queue gives O(1) access to the
+/// highest-hash conflict, while the multiset tracks multiplicities.
 #[derive(Clone)]
 pub struct ConflictsSink {
-    /// Maps (hash, conflict) -> multiplicity
-    data: BTreeMap<(u64, Conflict), i64>,
+    /// Priority queue: conflict -> hash for deterministic ordering
+    queue: PriorityQueue<Conflict, (u64, Conflict)>,
+    /// Tracks multiplicities
+    counts: Multiset<Conflict>,
     seed: u64,
 }
 
 impl Default for ConflictsSink {
     fn default() -> Self {
         Self {
-            data: BTreeMap::new(),
+            queue: PriorityQueue::new(),
+            counts: Multiset::new(),
             seed: 0x3e8a1f5d9c2b7046, // arbitrary fixed seed
         }
     }
@@ -39,19 +42,22 @@ impl Default for ConflictsSink {
 impl ConflictsSink {
     /// Get the first conflict (deterministic ordering via seeded hash).
     pub fn first(&self) -> Option<Conflict> {
-        self.data.keys().next().map(|(_, c)| *c)
+        self.queue.peek().map(|(&c, _)| c)
     }
 }
 
 impl Sink<Conflict> for ConflictsSink {
     fn dump_all(&mut self, incoming: &mut Multiset<Conflict>) {
         for (conflict, diff) in incoming.drain() {
-            let hash = seeded_hash(&conflict, self.seed);
-            let key = (hash, conflict);
-            let entry = self.data.entry(key).or_insert(0);
-            *entry += diff;
-            if *entry == 0 {
-                self.data.remove(&key);
+            let was_present = self.counts.contains(&conflict);
+            self.counts.update(conflict, diff);
+            let is_present = self.counts.contains(&conflict);
+
+            if !was_present && is_present {
+                let hash = seeded_hash(&conflict, self.seed);
+                self.queue.push(conflict, (hash, conflict));
+            } else if was_present && !is_present {
+                self.queue.remove(&conflict);
             }
         }
     }

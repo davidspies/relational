@@ -136,12 +136,6 @@ impl Solver {
             remaining_clause_literals.get().fst().consolidate().counts()
         );
 
-        // Count how many clauses each literal appears in (for decision heuristics)
-        assign!(
-            literal_counts,
-            remaining_clause_literals.get().snd().consolidate().counts()
-        );
-
         // Unit clauses: exactly one remaining literal (must be assigned true)
         assign!(
             units,
@@ -194,7 +188,6 @@ impl Solver {
         // Create outputs from relations (need to box them to store in struct)
         let causes_out = causes.output_with_sink();
         let conflicts_out = conflicts.output_with_sink();
-        let literal_counts_out = literal_counts.output_with_sink();
         let this_level_assignments_out = this_level_assignments.output();
 
         // Initialize with Level::TOP so unit propagation works at level 0
@@ -210,7 +203,6 @@ impl Solver {
             outputs: Outputs {
                 causes: causes_out,
                 conflicts: conflicts_out,
-                literal_counts: literal_counts_out,
                 this_level_assignments: this_level_assignments_out,
             },
             state: State {

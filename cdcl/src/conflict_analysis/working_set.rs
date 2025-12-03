@@ -75,15 +75,14 @@ impl WorkingSet {
 
     /// Count of literals at current level.
     pub(super) fn count_at_current(&self) -> usize {
-        self.at_current_level.values().map(|s| s.len()).sum()
+        self.current_level_index.len()
     }
 
     /// Iterate over all literals in the working set.
-    pub(super) fn iter(&self) -> impl Iterator<Item = Lit> + '_ {
+    pub(super) fn into_iter(self) -> impl Iterator<Item = Lit> {
         self.at_current_level
-            .values()
-            .flat_map(|s| s.iter())
-            .copied()
-            .chain(self.at_other_levels.iter().copied())
+            .into_values()
+            .flat_map(|s| s.into_iter())
+            .chain(self.at_other_levels.into_iter())
     }
 }

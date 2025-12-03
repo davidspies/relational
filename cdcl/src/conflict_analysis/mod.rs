@@ -105,7 +105,7 @@ impl Solver {
         // Build the learned clause: negate each literal in working set
         // (working contains literals that are true and led to conflict,
         // learned clause contains their negations to prevent this)
-        let mut learned_clause: Vec<Lit> = working.iter().map(|lit| !lit).collect();
+        let mut learned_clause: Vec<Lit> = working.into_iter().map(|lit| !lit).collect();
         learned_clause.sort();
 
         if learned_clause.is_empty() {

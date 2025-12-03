@@ -1,20 +1,18 @@
 //! CDCL SAT Solver structure and methods.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use relational::database::{CommitId, Database, InputHandle, Output, PersistentInputHandle};
 
 use super::cause_sink::CauseSink;
 use super::clause_deletion::ClauseDeletion;
 use super::conflicts_sink::ConflictsSink;
-use super::literal_counts_sink::LiteralCountsSink;
 use super::restart::RestartStrategy;
 use super::types::{ClauseId, Conflict, Level, Lit, Var};
 use super::vsids::Vsids;
 
 /// Type aliases for outputs with custom sinks.
 type CausesOutput = Output<((Lit, CommitId), (ClauseId, Level)), CauseSink>;
-type LiteralCountsOutput = Output<(Lit, i64), LiteralCountsSink>;
 type ConflictsOutput = Output<Conflict, ConflictsSink>;
 
 /// Input handles for the solver.
@@ -35,8 +33,6 @@ pub(super) struct Outputs {
     pub causes: CausesOutput,
     /// Conflicts detected during propagation
     pub conflicts: ConflictsOutput,
-    /// Count of remaining clauses each literal appears in (for decision heuristics)
-    pub literal_counts: LiteralCountsOutput,
     /// Assignments at the current decision level. Positive counts indicate assigned true,
     /// negative indicate assigned false. Conflict literals are omitted.
     pub this_level_assignments: Output<Lit>,
@@ -119,8 +115,7 @@ impl Solver {
         while self.state.current_level > level {
             // Track which variables we've seen and their polarity.
             // None means conflict (both polarities seen).
-            // BTreeMap for deterministic iteration order.
-            let mut seen: BTreeMap<Var, Option<bool>> = BTreeMap::new();
+            let mut seen: HashMap<Var, Option<bool>> = HashMap::new();
             // Sort literals for deterministic processing order.
             let assignments = self.outputs.this_level_assignments.get();
             let mut lits: Vec<_> = assignments.iter().copied().collect();
@@ -139,6 +134,10 @@ impl Solver {
                     _ => {} // Same polarity again, no change
                 }
             }
+
+            let mut seen = seen.into_iter().collect::<Vec<_>>();
+            // Sort for deterministic order
+            seen.sort();
 
             // Set phases: conflict -> false, otherwise use polarity
             for (var, polarity) in seen {

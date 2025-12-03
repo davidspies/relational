@@ -36,23 +36,8 @@ impl Solver {
         }
     }
 
-    /// Pick the next branching literal using the DLIS heuristic.
-    ///
-    /// Returns the unassigned literal that appears in the most remaining clauses.
-    /// This tends to satisfy more clauses and prune the search space faster.
-    #[allow(dead_code)]
-    pub fn pick_branching_literal_dlis(&self) -> Option<Lit> {
-        let counts = self.outputs.literal_counts.get();
-        let (_, lit) = counts.max_count()?;
-        Some(lit)
-    }
-
     /// Pick the next branching literal using VSIDS heuristic with phase saving.
     pub fn pick_branching_literal(&mut self) -> Option<Lit> {
-        // Use DLIS if USE_DLIS env var is set
-        if std::env::var("USE_DLIS").is_ok() {
-            return self.pick_branching_literal_dlis();
-        }
         let assigned = self.outputs.causes.get();
         let var = self
             .state

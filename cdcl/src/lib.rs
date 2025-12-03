@@ -11,7 +11,6 @@ mod clause_deletion;
 pub mod cnf;
 mod conflict_analysis;
 mod conflicts_sink;
-mod literal_counts_sink;
 pub mod proof;
 mod queries;
 mod restart;
