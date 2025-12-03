@@ -1,10 +1,21 @@
 //! CDCL Solver dataflow setup and constructor.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::ops::Not;
 
 use relational::database::{CommitId, DatabaseBuilder};
 use relational::{assign, assign_saved, create_input, create_persistent_input, create_variable};
+
+/// Seeded hash for deterministic watched literal selection.
+fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    seed.hash(&mut hasher);
+    val.hash(&mut hasher);
+    hasher.finish()
+}
+
+const WATCH_SEED: u64 = 0x7a3b9c1d4e5f6028;
 
 use crate::Conflict;
 use crate::clause_deletion::ClauseDeletion;
@@ -39,7 +50,7 @@ impl Solver {
         // All clauses (original + learned)
         assign_saved!(all_clauses, clauses_rel.union(learned_rel));
 
-        assign!(
+        assign_saved!(
             all_clause_ids,
             all_clauses.get().fst().consolidate().distinct()
         );
@@ -89,64 +100,94 @@ impl Solver {
         // Interrupt early when a direct conflict is detected
         db.interrupt(conflict_vars.get());
 
+        // === Watched Literals ===
+        // For each clause, select 2 literals deterministically using hash-based ordering.
+        // This gives us (clause_id, ArrayVec<(hash, lit), 2>).
+
+        create_variable!(db, satisfied_clause_ids, satisfied_clause_ids_rel, ClauseId);
+        assign_saved!(satisfied_clause_ids_rel, satisfied_clause_ids_rel);
+
+        create_variable!(
+            db,
+            removed_assignments,
+            removed_assignments_rel,
+            (ClauseId, Lit)
+        );
+
+        assign_saved!(
+            grouped_watched_literals,
+            all_clauses
+                .get()
+                .map(|(cid, lit)| {
+                    let hash = seeded_hash(&(cid, lit), WATCH_SEED);
+                    ((cid, lit), hash)
+                })
+                .antijoin(removed_assignments_rel)
+                .map(|((cid, lit), hash)| (cid, (hash, lit)))
+                .group_min_n::<_, _, 2>()
+                .consolidate()
+                .antijoin(satisfied_clause_ids_rel.get())
+        );
+
+        assign_saved!(
+            watched_literals,
+            grouped_watched_literals
+                .get()
+                .flat_map(|(cid, arr)| { arr.into_iter().map(move |(_, lit)| (cid, lit)) })
+                .consolidate()
+        );
+
         // === Compute Units ===
         // Clauses with at least one true literal are satisfied
-        assign!(
+        db.feedback(
             satisfied_clause_ids,
-            all_clauses
+            watched_literals
                 .get()
                 .swap()
                 .semijoin(assigned.get())
-                .snd()
                 .consolidate()
+                .snd()
+                .consolidate(),
         );
-        assign_saved!(
-            unsatisfied_clause_ids,
-            all_clause_ids.difference(satisfied_clause_ids)
-        );
-        // Remaining literals: unassigned literals in unsatisfied clauses.
-        // These are exactly the literals that could still satisfy their clause.
-        // - semijoin with unsatisfied_clauses: only consider clauses not yet satisfied
-        // - antijoin with negated assigned: exclude falsified literals
-        // Since satisfied clauses are excluded, no literal here can be assigned true.
-        assign_saved!(
-            remaining_clause_literals,
-            all_clauses
+        // False literals must be removed to make room for new watched literals
+        db.feedback(
+            removed_assignments,
+            watched_literals
                 .get()
-                .semijoin(unsatisfied_clause_ids.get())
                 .swap()
-                .antijoin(assigned.get().map(Not::not))
-                .swap()
+                .semijoin(assigned.get().map(Not::not))
+                .consolidate()
+                .swap(),
         );
+
         // Empty clauses: unsatisfied clauses with no remaining literals (all falsified)
+        assign!(
+            possibly_unsatisfied_clause_ids,
+            all_clause_ids
+                .get()
+                .difference(satisfied_clause_ids_rel.get())
+        );
+
         assign_saved!(
             empty_clauses,
-            unsatisfied_clause_ids
-                .get()
-                .difference(remaining_clause_literals.get().fst().consolidate())
+            possibly_unsatisfied_clause_ids
+                .difference(grouped_watched_literals.get().fst().consolidate())
                 .consolidate()
         );
 
         // Interrupt early when an empty clause is detected
         db.interrupt(empty_clauses.get());
 
-        // Count remaining literals per clause to find unit clauses
-        assign!(
-            remaining_clause_sizes,
-            remaining_clause_literals.get().fst().consolidate().counts()
-        );
-
         // Unit clauses: exactly one remaining literal (must be assigned true)
         assign!(
             units,
-            remaining_clause_literals
+            grouped_watched_literals
                 .get()
-                .semijoin(
-                    remaining_clause_sizes
-                        .filter(|&(_cid, size)| size == 1)
-                        .map(|(cid, _)| cid)
-                )
-                .consolidate()
+                .filter(|(_, arr)| arr.len() == 1)
+                .map(|(cid, arr)| {
+                    let (_hash, lit) = arr[0];
+                    (cid, lit)
+                })
         );
 
         // === Set up the feedback loop ===
@@ -182,7 +223,9 @@ impl Solver {
                 .get()
                 .swap()
                 .semijoin(current_level_rel.get())
+                .consolidate()
                 .snd()
+                .consolidate()
         );
 
         // Create outputs from relations (need to box them to store in struct)

@@ -17,14 +17,15 @@ fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
 
 /// A sink that accumulates cause information for conflict analysis.
 ///
-/// Uses L2Heaps with seeded hash for deterministic ordering when multiple
-/// causes exist for the same literal.
+/// Uses L2Heaps ordered by (CommitId, hash, ClauseId) so we get the earliest
+/// derivation first, with deterministic tie-breaking via hash.
 pub struct CauseSink {
-    /// Maps lit -> min-heap of (hash, clause_id)
-    data: L2Heaps<Lit, (u64, ClauseId)>,
+    /// Maps lit -> min-heap of (commit_id, hash, clause_id)
+    data: L2Heaps<Lit, (CommitId, u64, ClauseId)>,
     /// Tracks multiplicity for data entries
-    data_counts: Multiset<(Lit, u64, ClauseId)>,
-    assigned_at: L2Multiset<Lit, (CommitId, Level)>,
+    data_counts: Multiset<(Lit, CommitId, u64, ClauseId)>,
+    /// Maps lit -> level (should be singleton per lit)
+    levels: L2Multiset<Lit, Level>,
     seed: u64,
 }
 
@@ -33,32 +34,36 @@ impl Default for CauseSink {
         Self {
             data: L2Heaps::new(),
             data_counts: Multiset::new(),
-            assigned_at: L2Multiset::new(),
+            levels: L2Multiset::new(),
             seed: 0x7a3d9f1e4b2c8a05, // arbitrary fixed seed
         }
     }
 }
 
 impl CauseSink {
-    /// Get the reason clause for a literal.
+    /// Get the reason clause for a literal (from the earliest derivation).
     pub fn get_reason(&self, lit: Lit) -> Option<ClauseId> {
-        let &(_, clause) = self.data.peek(&lit)?;
+        let &(_, _, clause) = self.data.peek(&lit)?;
         (!clause.is_decision()).then_some(clause)
     }
 
     /// Get the earliest commit ID for a literal.
     pub fn get_commit_id(&self, lit: Lit) -> Option<CommitId> {
-        let &(commits, _) = self.assigned_at.get_singleton(&lit)?;
-        Some(commits)
+        let &(commit_id, _, _) = self.data.peek(&lit)?;
+        Some(commit_id)
     }
 
     pub fn get_level(&self, lit: Lit) -> Option<Level> {
-        let &(_, level) = self.assigned_at.get_singleton(&lit)?;
-        Some(level)
+        self.levels.get_singleton(&lit).copied()
     }
 
     pub fn contains_lit(&self, lit: Lit) -> bool {
         !self.data.is_empty(&lit)
+    }
+
+    /// Count how many literals are assigned (debug).
+    pub fn count_assigned(&self) -> usize {
+        self.levels.keys().count()
     }
 }
 
@@ -66,21 +71,21 @@ impl Sink<((Lit, CommitId), (ClauseId, Level))> for CauseSink {
     fn dump_all(&mut self, incoming: &mut Multiset<((Lit, CommitId), (ClauseId, Level))>) {
         for (((lit, commit_id), (clause_id, level)), diff) in incoming.drain() {
             let hash = seeded_hash(&clause_id, self.seed);
-            let count_key = (lit, hash, clause_id);
+            let count_key = (lit, commit_id, hash, clause_id);
             let old_count = self.data_counts.get(&count_key);
             self.data_counts.update(count_key, diff);
             let new_count = self.data_counts.get(&count_key);
 
             // Add to heap when count goes from 0 to non-zero
             if old_count == 0 && new_count != 0 {
-                self.data.push(lit, (hash, clause_id));
+                self.data.push(lit, (commit_id, hash, clause_id));
             }
             // Remove from heap when count goes from non-zero to 0
             if old_count != 0 && new_count == 0 {
-                self.data.remove(&lit, &(hash, clause_id));
+                self.data.remove(&lit, &(commit_id, hash, clause_id));
             }
 
-            self.assigned_at.update(lit, (commit_id, level), diff);
+            self.levels.update(lit, level, diff);
         }
     }
 }
