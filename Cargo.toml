@@ -1,5 +1,5 @@
 [workspace]
-members = ["relational", "cdcl", "index_heap"]
+members = ["relational", "cdcl", "contiguous_data"]
 resolver = "2"
 
 [workspace.package]

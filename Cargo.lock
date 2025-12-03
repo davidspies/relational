@@ -176,6 +176,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d91586aac6b9f9e32032b8ebf58a8eb03f4b58d3e18ea493b8b2083cb7b88e"
 
 [[package]]
+name = "contiguous_data"
+version = "0.1.0"
+dependencies = [
+ "arrayvec",
+ "index_list",
+ "proptest",
+]
+
+[[package]]
 name = "ctrlc"
 version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -248,15 +257,6 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
-
-[[package]]
-name = "index_heap"
-version = "0.1.0"
-dependencies = [
- "arrayvec",
- "index_list",
- "proptest",
-]
 
 [[package]]
 name = "index_list"
@@ -437,8 +437,8 @@ name = "relational"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "contiguous_data",
  "derive-where",
- "index_heap",
  "proptest",
 ]
 

@@ -1,5 +1,5 @@
 [package]
-name = "index_heap"
+name = "contiguous_data"
 edition.workspace = true
 version.workspace = true
 

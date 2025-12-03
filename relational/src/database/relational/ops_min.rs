@@ -2,10 +2,10 @@
 
 use std::hash::Hash;
 
-use index_heap::L2Heaps;
+use contiguous_data::L2Heaps;
 
-use crate::collection::Multiset;
 use crate::Diff;
+use crate::collection::Multiset;
 
 use super::relation::{Op, Relation};
 

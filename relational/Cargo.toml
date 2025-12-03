@@ -9,7 +9,7 @@ consolidate_all = []
 [dependencies]
 derive-where = "*"
 anyhow = "*"
-index_heap = { path = "../index_heap" }
+contiguous_data = { path = "../contiguous_data" }
 
 [dev-dependencies]
 proptest = "*"

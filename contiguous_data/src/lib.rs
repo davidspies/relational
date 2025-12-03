@@ -64,7 +64,11 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone> L2Heaps<K, V> {
             }
             Some(HeapRoot::Small(arr)) if arr.len() < 2 => {
                 let pos = arr.iter().position(|v| &value < v).unwrap_or(arr.len());
-                self.roots.get_mut(&key).unwrap().as_small_mut().insert(pos, value);
+                self.roots
+                    .get_mut(&key)
+                    .unwrap()
+                    .as_small_mut()
+                    .insert(pos, value);
             }
             Some(HeapRoot::Small(_)) => {
                 let arr = std::mem::replace(
