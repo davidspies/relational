@@ -18,10 +18,10 @@ pub(crate) trait AnyFeedback {
     fn send_inverse(&mut self);
     /// Commit the variable's current changes so they can be pulled by downstream.
     fn commit(&mut self);
-    /// Pull changes, update tracked inputs, forward +1 for items not in last checkpoint.
-    fn pull_and_forward_non_checkpoint(&mut self);
-    /// Pop checkpoint, forward +1 for items whose tracked input is still positive.
-    fn pop_and_forward_reachable(&mut self);
+    /// Pop checkpoint, pull changes, and forward reachable items.
+    /// Combines the old pull_and_forward_non_checkpoint + pop_and_forward_reachable,
+    /// but pops first so all mutations go to the new last checkpoint.
+    fn pop_pull_and_forward(&mut self);
     /// Run one step: pull from input relation, add to variable. Returns true if new output.
     fn step(&mut self, recording: bool) -> bool;
 }
@@ -59,20 +59,35 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
         self.variable.borrow_mut().commit();
     }
 
-    fn pull_and_forward_non_checkpoint(&mut self) {
+    fn pop_pull_and_forward(&mut self) {
+        // 1. Pop checkpoint and get its contents
+        let checkpoint_tuples: Vec<T> = {
+            let mut var = self.variable.borrow_mut();
+            var.pop_checkpoint_drain().collect()
+        };
+
+        // 2. Pull changes and update input totals
         let mut changes = Multiset::new();
         self.input.dump_to_multiset(&mut changes);
 
-        let mut var = self.variable.borrow_mut();
-        for (tuple, diff) in changes {
-            var.update_input_total(tuple.clone(), diff);
-            var.forward_if_not_in_checkpoint(&tuple);
-        }
-    }
+        let change_tuples: Vec<_> = changes.drain().collect();
 
-    fn pop_and_forward_reachable(&mut self) {
-        let mut variable = self.variable.borrow_mut();
-        variable.pop_and_forward_reachable();
+        let mut var = self.variable.borrow_mut();
+        for (tuple, diff) in &change_tuples {
+            var.update_input_total(tuple.clone(), *diff);
+        }
+
+        // 3. Forward items from changes that weren't in the popped checkpoint
+        for (tuple, _) in change_tuples {
+            if !checkpoint_tuples.contains(&tuple) {
+                var.forward_reachable(&tuple);
+            }
+        }
+
+        // 4. Forward items from popped checkpoint that are still reachable
+        for tuple in checkpoint_tuples {
+            var.forward_reachable(&tuple);
+        }
     }
 
     fn step(&mut self, _recording: bool) -> bool {

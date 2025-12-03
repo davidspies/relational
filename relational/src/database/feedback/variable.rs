@@ -1,10 +1,9 @@
 //! Variable for tracking iterative computation state.
 
-use contiguous_data::Diff;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-use contiguous_data::Multiset;
+use contiguous_data::{Diff, L2Vec, Multiset};
 
 /// A variable in an iterative computation.
 ///
@@ -28,7 +27,7 @@ pub struct Variable<T> {
     /// Pending changes (committed, ready to be pulled).
     pending: Multiset<T>,
     /// Stack of outputs added at each checkpoint level.
-    outputs_by_checkpoint: Vec<Vec<T>>,
+    outputs_by_checkpoint: L2Vec<T>,
 }
 
 impl<T: Clone + Eq + Hash> Variable<T> {
@@ -39,7 +38,7 @@ impl<T: Clone + Eq + Hash> Variable<T> {
             output_seen: HashSet::new(),
             staged: Multiset::new(),
             pending: Multiset::new(),
-            outputs_by_checkpoint: Vec::new(),
+            outputs_by_checkpoint: L2Vec::new(),
         }
     }
 
@@ -57,8 +56,8 @@ impl<T: Clone + Eq + Hash> Variable<T> {
         if *total > 0 && !self.output_seen.contains(&tuple) {
             self.output_seen.insert(tuple.clone());
             self.staged.update(tuple.clone(), 1);
-            if let Some(level) = self.outputs_by_checkpoint.last_mut() {
-                level.push(tuple);
+            if !self.outputs_by_checkpoint.is_empty() {
+                self.outputs_by_checkpoint.push(tuple);
             }
         }
         // If input_totals <= 0 or already in output_seen, do nothing
@@ -83,7 +82,7 @@ impl<T: Clone + Eq + Hash> Variable<T> {
 
     /// Push a new checkpoint level.
     pub(crate) fn push_checkpoint(&mut self) {
-        self.outputs_by_checkpoint.push(Vec::new());
+        self.outputs_by_checkpoint.push_empty();
     }
 
     /// Send -1 for all outputs in the current checkpoint.
@@ -109,67 +108,20 @@ impl<T: Clone + Eq + Hash> Variable<T> {
         self.input_totals.insert(tuple, value);
     }
 
-    /// Get the last checkpoint's contents without removing it.
-    pub(crate) fn get_last_checkpoint(&self) -> &[T] {
-        self.outputs_by_checkpoint
-            .last()
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
-    /// Pop the checkpoint without forwarding (caller handles reachability).
-    pub(crate) fn pop_checkpoint(&mut self) {
-        self.outputs_by_checkpoint.pop();
+    /// Pop the checkpoint and return an iterator over its contents.
+    pub(crate) fn pop_checkpoint_drain(&mut self) -> impl Iterator<Item = T> + '_ {
+        self.outputs_by_checkpoint.pop().into_iter().flatten()
     }
 
     /// Forward a tuple that is still reachable after pop.
+    /// Only forwards if input_total > 0 and not already in output_seen.
     pub(crate) fn forward_reachable(&mut self, tuple: &T) {
-        if !self.output_seen.contains(tuple) {
+        let input_total = self.input_totals.get(tuple).copied().unwrap_or(0);
+        if input_total > 0 && !self.output_seen.contains(tuple) {
             self.output_seen.insert(tuple.clone());
             self.staged.update(tuple.clone(), 1);
-            if let Some(parent) = self.outputs_by_checkpoint.last_mut() {
-                parent.push(tuple.clone());
-            }
-        }
-    }
-
-    /// Forward +1 for a tuple if it's not in the last checkpoint and is positive in input_totals.
-    pub(crate) fn forward_if_not_in_checkpoint(&mut self, tuple: &T) {
-        let in_checkpoint = self
-            .outputs_by_checkpoint
-            .last()
-            .map(|level| level.contains(tuple))
-            .unwrap_or(false);
-
-        if !in_checkpoint {
-            let input_total = self.input_totals.get(tuple).copied().unwrap_or(0);
-            if input_total > 0 && !self.output_seen.contains(tuple) {
-                // Re-add to output_seen
-                self.output_seen.insert(tuple.clone());
-                self.staged.update(tuple.clone(), 1);
-                // Record in parent checkpoint
-                if self.outputs_by_checkpoint.len() >= 2 {
-                    let parent_idx = self.outputs_by_checkpoint.len() - 2;
-                    self.outputs_by_checkpoint[parent_idx].push(tuple.clone());
-                }
-            }
-        }
-    }
-
-    /// Pop the checkpoint and forward +1 for items whose input_total is still positive.
-    pub(crate) fn pop_and_forward_reachable(&mut self) {
-        if let Some(outputs) = self.outputs_by_checkpoint.pop() {
-            for tuple in outputs {
-                let input_total = self.input_totals.get(&tuple).copied().unwrap_or(0);
-                if input_total > 0 && !self.output_seen.contains(&tuple) {
-                    // Still reachable - re-add to output_seen
-                    self.output_seen.insert(tuple.clone());
-                    self.staged.update(tuple.clone(), 1);
-                    // Record in parent checkpoint
-                    if let Some(parent) = self.outputs_by_checkpoint.last_mut() {
-                        parent.push(tuple);
-                    }
-                }
+            if !self.outputs_by_checkpoint.is_empty() {
+                self.outputs_by_checkpoint.push(tuple.clone());
             }
         }
     }

@@ -64,46 +64,45 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
         self.variable.borrow_mut().commit();
     }
 
-    fn pull_and_forward_non_checkpoint(&mut self) {
+    fn pop_pull_and_forward(&mut self) {
+        // 1. Pop checkpoint and get its contents
+        let checkpoint_tuples: Vec<(T, CommitId)> = {
+            let mut var = self.variable.borrow_mut();
+            var.pop_checkpoint_drain().collect()
+        };
+
+        // 2. Pull changes and update input totals
         let mut changes = Multiset::new();
         self.input.dump_to_multiset(&mut changes);
 
-        // Update input_totals and forward in a single pass
-        let mut var = self.variable.borrow_mut();
-        for (tuple, diff) in changes {
-            // Update our T-keyed input_totals
+        let change_tuples: Vec<_> = changes.drain().collect();
+
+        for (tuple, diff) in &change_tuples {
             let input_total = self.input_totals_by_t.entry(tuple.clone()).or_insert(0);
             *input_total += diff;
+        }
 
-            // Look up the actual (T, CommitId) in our mapping and forward if not in checkpoint
+        // 3. Forward items from changes that weren't in the popped checkpoint
+        let mut var = self.variable.borrow_mut();
+        for (tuple, _) in change_tuples {
             if let Some(&commit_id) = self.t_to_commit_id.get(&tuple) {
-                let full_tuple = (tuple, commit_id);
-                // We need to sync the variable's view - set it to match our tracking
-                var.set_input_total(full_tuple.clone(), *input_total);
-                var.forward_if_not_in_checkpoint(&full_tuple);
+                let full_tuple = (tuple.clone(), commit_id);
+                // Check if this tuple was in the popped checkpoint
+                let in_checkpoint = checkpoint_tuples.iter().any(|(t, _)| t == &tuple);
+                if !in_checkpoint {
+                    let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
+                    var.set_input_total(full_tuple.clone(), input_total);
+                    var.forward_reachable(&full_tuple);
+                }
             }
         }
-    }
 
-    fn pop_and_forward_reachable(&mut self) {
-        // Get the checkpoint contents before popping
-        let checkpoint_tuples: Vec<(T, CommitId)> = {
-            let var = self.variable.borrow();
-            var.get_last_checkpoint().to_vec()
-        };
-
-        // Pop the checkpoint
-        self.variable.borrow_mut().pop_checkpoint();
-
-        // For each tuple in the checkpoint, check if it's still reachable
-        let mut var = self.variable.borrow_mut();
+        // 4. Forward items from popped checkpoint that are still reachable
         for (tuple, commit_id) in checkpoint_tuples {
             let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
             if input_total > 0 {
-                // Still reachable - re-add to output
                 var.forward_reachable(&(tuple, commit_id));
             } else {
-                // No longer reachable - remove from our mapping
                 self.t_to_commit_id.remove(&tuple);
             }
         }

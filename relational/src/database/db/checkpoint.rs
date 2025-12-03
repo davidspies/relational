@@ -24,12 +24,8 @@ impl Database {
     ///    - Don't pop for feedbacks yet
     /// 2. Commit changes
     /// 3. In stratified order of feedbacks, for each feedback:
-    ///    a) Pull all changes and update tracked inputs; forward along anything
-    ///    which is NOT in the last checkpoint with a +1
-    ///    b) Pop the last checkpoint; forward along a +1 for anything in that
-    ///    checkpoint whose tracked input value is still non-zero
-    ///    c) Propagate normally all feedbacks up to and including this one
-    ///    (using nested loop approach where you restart from beginning if changes)
+    ///    a) Pop checkpoint, pull changes, forward reachable items
+    ///    b) Propagate normally all feedbacks up to and including this one
     #[must_use]
     pub fn pop(&mut self) -> bool {
         if self.checkpoint_depth == 0 {
@@ -56,19 +52,12 @@ impl Database {
         self.increment_commit_id();
 
         // Step 3: In stratified order, for each feedback:
-        //   - pull_and_forward_non_checkpoint, pop_and_forward_reachable, commit
-        //   - Then run fixpoint up to this step
-        // If an interrupt fires, continue processing feedbacks
+        //   - pop_pull_and_forward, commit, then run fixpoint up to this step
 
         for i in 0..self.steps.len() {
             if let StratifiedStep::Feedback(feedback) = &mut self.steps[i] {
-                // 3a) Pull all changes and update tracked inputs; forward along anything
-                //     which is NOT in the last checkpoint with a +1
-                feedback.pull_and_forward_non_checkpoint();
-
-                // 3b) Pop the last checkpoint; forward along a +1 for anything in that
-                //     checkpoint whose tracked input value is still non-zero
-                feedback.pop_and_forward_reachable();
+                // 3a) Pop checkpoint, pull changes, forward reachable items
+                feedback.pop_pull_and_forward();
 
                 // Commit the forwarded changes so they can be pulled
                 feedback.commit();
