@@ -1,6 +1,9 @@
 use super::*;
 use proptest::prelude::*;
-use std::collections::{BTreeSet, HashMap};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fmt::Debug,
+};
 
 #[test]
 fn test_default() {
@@ -260,6 +263,104 @@ proptest! {
                     prop_assert_eq!(expected, actual);
                 }
             }
+            l2.sanity_check();
+        }
+    }
+}
+
+impl<K: Hash + Eq + Clone + Debug, V: Ord + Hash + Eq + Clone + Debug, const N: usize>
+    L2Heaps<K, V, N>
+{
+    /// Verify internal invariants hold for all keys.
+    pub fn sanity_check(&self) {
+        // Count expected positions entries per key
+        let mut expected_positions_count: HashMap<K, usize> = HashMap::new();
+
+        for (key, root) in &self.roots {
+            match root {
+                HeapRoot::Small(arr) => {
+                    // Small must be non-empty (empty keys should be removed)
+                    assert!(!arr.is_empty(), "Small variant should not be empty");
+                    // Small must have <= N elements
+                    assert!(
+                        arr.len() <= N,
+                        "Small has {} elements but N={}",
+                        arr.len(),
+                        N
+                    );
+                    // Small should be sorted
+                    for i in 1..arr.len() {
+                        assert!(arr[i - 1] <= arr[i], "Small array not sorted");
+                    }
+                    // No positions should exist for Small keys
+                    for v in arr.iter() {
+                        assert!(
+                            !self.positions.contains_key(&(key.clone(), v.clone())),
+                            "Small element should not be in positions map"
+                        );
+                    }
+                    // Small keys have 0 positions entries
+                    expected_positions_count.insert(key.clone(), 0);
+                }
+                HeapRoot::Large { top, heap_size, .. } => {
+                    // Top must have exactly N elements
+                    assert_eq!(
+                        top.len(),
+                        N,
+                        "Large top has {} elements but N={}",
+                        top.len(),
+                        N
+                    );
+                    // Heap must have at least 1 element
+                    assert!(*heap_size >= 1, "Large heap_size should be >= 1");
+                    // Top should be sorted
+                    for i in 1..top.len() {
+                        assert!(top[i - 1] <= top[i], "Large top array not sorted");
+                    }
+                    // Top elements should not be in positions (only heap elements are)
+                    for v in top.iter() {
+                        assert!(
+                            !self.positions.contains_key(&(key.clone(), v.clone())),
+                            "Top element should not be in positions map"
+                        );
+                    }
+                    // Large keys have heap_size positions entries
+                    expected_positions_count.insert(key.clone(), *heap_size);
+                }
+            }
+        }
+
+        // Verify positions entries match expected counts
+        let mut actual_positions_count: HashMap<K, usize> = HashMap::new();
+        for ((key, value), idx) in &self.positions {
+            *actual_positions_count.entry(key.clone()).or_default() += 1;
+            // Verify the node exists and has the correct value
+            let node = self
+                .nodes
+                .get(*idx)
+                .expect("positions points to invalid node");
+            assert_eq!(
+                &node.value, value,
+                "positions entry value doesn't match node value"
+            );
+        }
+
+        // Check counts match
+        for (key, expected) in &expected_positions_count {
+            let actual = actual_positions_count.get(key).copied().unwrap_or(0);
+            assert_eq!(
+                *expected, actual,
+                "key {:?}: expected {} positions entries, got {}",
+                key, expected, actual
+            );
+        }
+        // Check no extra keys in positions
+        for key in actual_positions_count.keys() {
+            assert!(
+                expected_positions_count.contains_key(key),
+                "positions contains key {:?} not in roots",
+                key
+            );
         }
     }
 }

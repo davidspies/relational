@@ -3,50 +3,35 @@ use arrayvec::ArrayVec;
 use index_list::Index;
 use std::hash::Hash;
 
-impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone> L2Heaps<K, V> {
+impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K, V, N> {
+    /// Promote from Small (N elements) to Large by adding one more element.
+    /// Returns (top N elements sorted, root index of heap with 1 element).
     pub(crate) fn promote_to_large(
         &mut self,
         key: &K,
-        arr: ArrayVec<V, 2>,
+        arr: ArrayVec<V, N>,
         new_value: V,
-    ) -> (Index, usize) {
-        let mut all_values: ArrayVec<V, 3> = arr.into_iter().collect();
+    ) -> (ArrayVec<V, N>, Index) {
+        // Collect all N+1 values and sort
+        let mut all_values: Vec<V> = arr.into_iter().collect();
         all_values.push(new_value);
         all_values.sort();
 
+        // Last element goes to heap, first N stay in top
+        let heap_value = all_values.pop().unwrap();
+        let top: ArrayVec<V, N> = all_values.into_iter().collect();
+
+        // Create single-node heap
         let root_node = HeapNode {
-            value: all_values[0].clone(),
+            value: heap_value.clone(),
             parent: None,
             left: None,
             right: None,
         };
         let root_idx = self.nodes.insert_last(root_node);
-        self.positions
-            .insert((key.clone(), all_values[0].clone()), root_idx);
+        self.positions.insert((key.clone(), heap_value), root_idx);
 
-        let left_node = HeapNode {
-            value: all_values[1].clone(),
-            parent: Some(root_idx),
-            left: None,
-            right: None,
-        };
-        let left_idx = self.nodes.insert_last(left_node);
-        self.positions
-            .insert((key.clone(), all_values[1].clone()), left_idx);
-        self.nodes.get_mut(root_idx).unwrap().left = Some(left_idx);
-
-        let right_node = HeapNode {
-            value: all_values[2].clone(),
-            parent: Some(root_idx),
-            left: None,
-            right: None,
-        };
-        let right_idx = self.nodes.insert_last(right_node);
-        self.positions
-            .insert((key.clone(), all_values[2].clone()), right_idx);
-        self.nodes.get_mut(root_idx).unwrap().right = Some(right_idx);
-
-        (root_idx, 3)
+        (top, root_idx)
     }
 
     pub(crate) fn push_large(&mut self, key: &K, root_idx: Index, value: V) {
@@ -73,52 +58,43 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone> L2Heaps<K, V> {
     pub(crate) fn maybe_demote(&mut self, key: &K) {
         let should_demote = matches!(
             self.roots.get(key),
-            Some(HeapRoot::Large { size, .. }) if *size <= 2
+            Some(HeapRoot::Large { heap_size: 0, .. })
         );
 
-        if should_demote && let Some(HeapRoot::Large { root, size }) = self.roots.remove(key) {
-            let values = self.extract_and_remove_all(key, root, size);
-            let arr: ArrayVec<V, 2> = values.into_iter().collect();
-            // arr is never empty: we only demote when size is 1 or 2
-            self.roots.insert(key.clone(), HeapRoot::Small(arr));
+        if should_demote {
+            if let Some(HeapRoot::Large { top, .. }) = self.roots.remove(key) {
+                self.roots.insert(key.clone(), HeapRoot::Small(top));
+            }
         }
     }
 
-    fn extract_and_remove_all(&mut self, key: &K, root: Index, size: usize) -> Vec<V> {
-        let mut values = Vec::with_capacity(size);
-        let mut queue = vec![root];
-        let mut i = 0;
-        while i < queue.len() {
-            let node = self.nodes.get(queue[i]).unwrap();
-            values.push(node.value.clone());
-            if let Some(left) = node.left {
-                queue.push(left);
-            }
-            if let Some(right) = node.right {
-                queue.push(right);
-            }
-            i += 1;
-        }
-        for idx in queue {
-            let value = &self.nodes.get(idx).unwrap().value;
-            self.positions.remove(&(key.clone(), value.clone()));
-            self.nodes.remove(idx);
-        }
-        values.sort();
-        values
-    }
-
+    /// Remove a node from the heap portion and return its value.
+    /// Decrements heap_size.
     pub(crate) fn remove_at_large(&mut self, key: &K, idx: Index) -> V {
         let root_idx = match self.roots.get(key).unwrap() {
             HeapRoot::Large { root, .. } => *root,
             HeapRoot::Small(_) => panic!("expected Large"),
         };
-        let last_idx = self.find_last_node(root_idx);
 
         match self.roots.get_mut(key).unwrap() {
-            HeapRoot::Large { size, .. } => *size -= 1,
+            HeapRoot::Large { heap_size, .. } => *heap_size -= 1,
             HeapRoot::Small(_) => panic!("expected Large"),
         }
+
+        let heap_size = match self.roots.get(key).unwrap() {
+            HeapRoot::Large { heap_size, .. } => *heap_size,
+            HeapRoot::Small(_) => panic!("expected Large"),
+        };
+
+        // If this was the last node in heap, just remove it
+        if heap_size == 0 {
+            let value = self.nodes.get(idx).unwrap().value.clone();
+            self.positions.remove(&(key.clone(), value.clone()));
+            self.nodes.remove(idx);
+            return value;
+        }
+
+        let last_idx = self.find_last_node(root_idx);
 
         if idx == last_idx {
             return self.remove_leaf_large(key, idx);
@@ -137,8 +113,8 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone> L2Heaps<K, V> {
 
     fn remove_leaf_large(&mut self, key: &K, idx: Index) -> V {
         let node = self.nodes.get(idx).unwrap();
-        // Parent is always Some: we only remove leaves, and Large heaps have size >= 3,
-        // so there's always a parent node.
+        // Parent is always Some: we only call this when heap_size > 0 after decrement,
+        // meaning at least 2 nodes in heap, so the leaf has a parent.
         let parent_idx = node.parent.unwrap();
         let value = node.value.clone();
 
