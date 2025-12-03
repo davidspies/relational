@@ -23,8 +23,6 @@ pub struct L2Multiset<K, V> {
     roots: HashMap<K, Root<V>>,
     positions: HashMap<(K, V), Index>,
     counts: Multiset<(K, V)>,
-    /// Keys that "exist" - created on insert, removed when multiset is empty after delete.
-    existing_keys: std::collections::HashSet<K>,
 }
 
 impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
@@ -34,7 +32,6 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
             roots: HashMap::new(),
             positions: HashMap::new(),
             counts: Multiset::new(),
-            existing_keys: std::collections::HashSet::new(),
         }
     }
 
@@ -55,9 +52,6 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
 
     /// Insert (key, value) - increment count by 1.
     pub fn insert(&mut self, key: K, value: V) {
-        // Mark key as existing
-        self.existing_keys.insert(key.clone());
-
         let kv = (key.clone(), value.clone());
         let was_present = self.counts.contains(&kv);
         self.counts.insert(kv);
@@ -74,7 +68,7 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
     /// Delete (key, value) - decrement count by 1.
     /// No-op if the key doesn't exist (matches HashMap<K, Multiset<V>> semantics).
     pub fn delete(&mut self, key: &K, value: &V) {
-        if !self.existing_keys.contains(key) {
+        if !self.roots.contains_key(key) {
             return;
         }
         let kv = (key.clone(), value.clone());
@@ -82,28 +76,12 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
         self.counts.delete(kv);
         let is_present = self.counts.contains(&(key.clone(), value.clone()));
 
-        // Remove key if multiset is empty (no non-zero counts for this key)
-        if self.key_is_empty_in_counts(key) {
-            self.existing_keys.remove(key);
-        }
-
         // Update structure based on presence change
         if !was_present && is_present {
             self.add_to_structure(key.clone(), value.clone());
         } else if was_present && !is_present {
             self.remove_from_structure(key, value);
         }
-    }
-
-    /// Check if a key has no entries in counts (all counts are zero).
-    fn key_is_empty_in_counts(&self, key: &K) -> bool {
-        // This is O(n) in the number of distinct values, but it's only called
-        // after delete when we need to check if the key should be removed.
-        // A more efficient approach would track this separately.
-        !self
-            .counts
-            .iter_with_multiplicity()
-            .any(|((k, _), _)| k == key)
     }
 
     /// Iterate over values for a key (each value appears once regardless of count).
@@ -127,6 +105,34 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
             Some(Root::Small(arr)) => arr.len(),
             Some(Root::Large { len, .. }) => *len,
         }
+    }
+
+    /// Update (key, value) by an arbitrary diff.
+    pub fn update(&mut self, key: K, value: V, diff: Diff) {
+        if diff == 0 {
+            return;
+        }
+
+        let kv = (key.clone(), value.clone());
+        let was_present = self.counts.contains(&kv);
+        self.counts.update(kv, diff);
+        let is_present = self.counts.contains(&(key.clone(), value.clone()));
+
+        // Update structure based on presence change
+        if !was_present && is_present {
+            self.add_to_structure(key, value);
+        } else if was_present && !is_present {
+            self.remove_from_structure(&key, &value);
+        }
+    }
+
+    /// Iterate over (value, count) pairs for a key.
+    pub fn iter_with_multiplicity<'a>(
+        &'a self,
+        key: &'a K,
+    ) -> impl Iterator<Item = (&'a V, Diff)> + 'a {
+        self.iter_values(key)
+            .map(move |v| (v, self.counts.get(&(key.clone(), v.clone()))))
     }
 }
 

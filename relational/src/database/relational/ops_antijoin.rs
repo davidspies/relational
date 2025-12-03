@@ -1,9 +1,8 @@
 //! Antijoin operator - filters left to tuples whose key is NOT in right.
 
-use std::collections::HashMap;
 use std::hash::Hash;
 
-use contiguous_data::{Diff, Multiset};
+use contiguous_data::{Diff, L2Multiset, Multiset};
 
 use super::relation::{Op, Relation, assert_same_commit_id};
 
@@ -17,9 +16,9 @@ where
 {
     left: Relation<RL>,
     right: Relation<RR>,
-    /// Index of left tuples by key: key -> multiset of values
-    left_index: HashMap<K, Multiset<V>>,
-    /// Count of right keys (positive = key is present, blocks output)
+    /// Index of left tuples by key
+    left_index: L2Multiset<K, V>,
+    /// Count of right keys (non-zero = key is present, blocks output)
     right_counts: Multiset<K>,
 }
 
@@ -39,11 +38,7 @@ where
                 consumer((k.clone(), v.clone()), l_diff);
             }
             // Update left index
-            let entry = self.left_index.entry(k.clone()).or_default();
-            entry.update(v, l_diff);
-            if entry.is_empty() {
-                self.left_index.remove(&k);
-            }
+            self.left_index.update(k, v, l_diff);
         });
 
         // Process right changes - these can block/unblock left tuples
@@ -56,14 +51,10 @@ where
 
             if was_blocked != is_blocked {
                 // Blocking state changed - emit/retract all left tuples with this key
-                if let Some(lefts) = self.left_index.get(&k) {
-                    for (v, l_count) in lefts.iter_with_multiplicity() {
-                        if l_count != 0 {
-                            // If now blocked, retract; if now unblocked, emit
-                            let output_diff = if is_blocked { -l_count } else { l_count };
-                            consumer((k.clone(), v.clone()), output_diff);
-                        }
-                    }
+                for (v, l_count) in self.left_index.iter_with_multiplicity(&k) {
+                    // If now blocked, retract; if now unblocked, emit
+                    let output_diff = if is_blocked { -l_count } else { l_count };
+                    consumer((k.clone(), v.clone()), output_diff);
                 }
             }
 
@@ -92,7 +83,7 @@ impl<RL> Relation<RL> {
             AntijoinOp {
                 left: self,
                 right,
-                left_index: HashMap::new(),
+                left_index: L2Multiset::new(),
                 right_counts: Multiset::new(),
             },
             commit_id,
