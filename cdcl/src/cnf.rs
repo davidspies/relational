@@ -117,7 +117,7 @@ impl Cnf {
     /// Solve the CNF formula.
     pub fn solve(&self) -> SolveResult {
         let mut db_builder = DatabaseBuilder::new();
-        let mut solver = Solver::new(&mut db_builder);
+        let mut solver = Solver::new(&mut db_builder, self.num_vars);
         let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {
@@ -138,7 +138,7 @@ impl Cnf {
     /// Solve and return the database and solver (for access to more detailed results).
     pub fn into_solver(self) -> (Database, Solver) {
         let mut db_builder = DatabaseBuilder::new();
-        let mut solver = Solver::new(&mut db_builder);
+        let mut solver = Solver::new(&mut db_builder, self.num_vars);
         let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {

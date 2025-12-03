@@ -9,4 +9,5 @@ clap = { version = "*", features = ["derive"] }
 consume_on_drop = "*"
 contiguous_data = { path = "../contiguous_data" }
 ctrlc = "*"
+priority-queue = "*"
 relational = { path = "../relational" }

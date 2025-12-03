@@ -1,39 +1,66 @@
 //! VSIDS (Variable State Independent Decaying Sum) decision heuristic.
 //!
-//! Simple implementation: linear scan to find max activity.
+//! Uses a priority queue for O(log n) pick and O(log n) bump.
+
+use std::cmp::Ordering;
+use std::collections::HashMap;
+
+use priority_queue::PriorityQueue;
 
 use super::types::Var;
 
+/// Wrapper for f64 that implements Ord (for use as priority).
+/// Higher values have higher priority.
+#[derive(Clone, Copy, PartialEq)]
+struct Activity(f64);
+
+impl Eq for Activity {}
+
+impl PartialOrd for Activity {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Activity {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
+    }
+}
+
 pub struct Vsids {
-    /// Activity score per variable (indexed by var.raw() - 1)
-    activity: Vec<f64>,
+    /// Priority queue: var -> activity (only unassigned variables)
+    queue: PriorityQueue<Var, Activity>,
+    /// Stashed activities for assigned variables (removed from queue)
+    stashed: HashMap<Var, Activity>,
     /// Bump amount (increases for decay effect)
     bump: f64,
     /// Saved phase per variable
-    phase: Vec<bool>,
+    phase: HashMap<Var, bool>,
 }
 
 impl Vsids {
     pub fn new(num_vars: u32) -> Self {
-        Self {
-            activity: vec![0.0; num_vars as usize],
-            bump: 1.0,
-            phase: vec![false; num_vars as usize],
+        let mut queue = PriorityQueue::with_capacity(num_vars as usize);
+        // Initialize all variables with 0 activity
+        for i in 1..=num_vars {
+            queue.push(Var::new(i), Activity(0.0));
         }
-    }
-
-    pub fn ensure_capacity(&mut self, num_vars: u32) {
-        let n = num_vars as usize;
-        if self.activity.len() < n {
-            self.activity.resize(n, 0.0);
-            self.phase.resize(n, false);
+        Self {
+            queue,
+            stashed: HashMap::new(),
+            bump: 1.0,
+            phase: HashMap::with_capacity(num_vars as usize),
         }
     }
 
     pub fn bump(&mut self, var: Var) {
-        let idx = var.raw() as usize - 1;
-        if idx < self.activity.len() {
-            self.activity[idx] += self.bump;
+        let bump = self.bump;
+        // Try queue first, fall back to stashed
+        if self.queue.get(&var).is_some() {
+            self.queue.change_priority_by(&var, |p| p.0 += bump);
+        } else if let Some(activity) = self.stashed.get_mut(&var) {
+            activity.0 += bump;
         }
     }
 
@@ -42,30 +69,26 @@ impl Vsids {
     }
 
     pub fn set_phase(&mut self, var: Var, positive: bool) {
-        let idx = var.raw() as usize - 1;
-        if idx < self.phase.len() {
-            self.phase[idx] = positive;
+        self.phase.insert(var, positive);
+        // Restore from stash back to queue
+        if let Some(activity) = self.stashed.remove(&var) {
+            self.queue.push(var, activity);
         }
     }
 
     pub fn get_phase(&self, var: Var) -> bool {
-        let idx = var.raw() as usize - 1;
-        self.phase.get(idx).copied().unwrap_or(false)
+        self.phase.get(&var).copied().unwrap_or(false)
     }
 
-    pub fn pick(&self, is_assigned: impl Fn(Var) -> bool) -> Option<Var> {
-        let mut best: Option<(Var, f64)> = None;
-        for (idx, &act) in self.activity.iter().enumerate() {
-            let var = Var::new((idx + 1) as u32);
-            if is_assigned(var) {
-                continue;
+    pub fn pick(&mut self, is_assigned: impl Fn(Var) -> bool) -> Option<Var> {
+        loop {
+            let (&var, _) = self.queue.peek()?;
+            if !is_assigned(var) {
+                return Some(var);
             }
-            match best {
-                None => best = Some((var, act)),
-                Some((_, best_act)) if act > best_act => best = Some((var, act)),
-                _ => {}
-            }
+            // Remove assigned variable and stash it (will be restored via set_phase)
+            let (var, activity) = self.queue.pop().unwrap();
+            self.stashed.insert(var, activity);
         }
-        best.map(|(v, _)| v)
     }
 }

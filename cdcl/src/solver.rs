@@ -1,6 +1,6 @@
 //! CDCL SAT Solver structure and methods.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use relational::database::{CommitId, Database, InputHandle, Output, PersistentInputHandle};
 
@@ -9,7 +9,7 @@ use super::clause_deletion::ClauseDeletion;
 use super::conflicts_sink::ConflictsSink;
 use super::literal_counts_sink::LiteralCountsSink;
 use super::restart::RestartStrategy;
-use super::types::{ClauseId, Conflict, Level, Lit};
+use super::types::{ClauseId, Conflict, Level, Lit, Var};
 use super::vsids::Vsids;
 
 /// Type aliases for outputs with custom sinks.
@@ -37,6 +37,9 @@ pub(super) struct Outputs {
     pub conflicts: ConflictsOutput,
     /// Count of remaining clauses each literal appears in (for decision heuristics)
     pub literal_counts: LiteralCountsOutput,
+    /// Assignments at the current decision level. Positive counts indicate assigned true,
+    /// negative indicate assigned false. Conflict literals are omitted.
+    pub this_level_assignments: Output<Lit>,
 }
 
 /// Solver state that doesn't involve the dataflow.
@@ -55,8 +58,6 @@ pub(super) struct State {
     pub clause_deletion: ClauseDeletion,
     /// VSIDS decision heuristic.
     pub vsids: Vsids,
-    /// Number of variables (for VSIDS initialization).
-    pub num_vars: u32,
 }
 
 /// CDCL SAT Solver.
@@ -71,12 +72,6 @@ impl Solver {
     pub fn add_clause(&mut self, db: &mut Database, clause_id: ClauseId, literals: &[Lit]) {
         for &lit in literals {
             self.inputs.clauses.insert((clause_id, lit));
-            // Track max variable for VSIDS
-            let var_num = lit.var().raw();
-            if var_num > self.state.num_vars {
-                self.state.num_vars = var_num;
-                self.state.vsids.ensure_capacity(var_num);
-            }
         }
         // Cache clause contents for conflict analysis
         self.state.clause_db.insert(clause_id, literals.to_vec());
@@ -95,9 +90,6 @@ impl Solver {
         self.state
             .decision_stack
             .push((self.state.current_level, lit, tried_opposite));
-
-        // Save phase for VSIDS
-        self.state.vsids.set_phase(lit.var(), lit.is_positive());
 
         self.inputs.levels.insert(self.state.current_level);
         self.inputs.decision_assignments.insert((
@@ -125,6 +117,34 @@ impl Solver {
     /// Backtrack to the given level, popping decision stack entries.
     pub fn backtrack_to(&mut self, db: &mut Database, level: Level) {
         while self.state.current_level > level {
+            // Track which variables we've seen and their polarity.
+            // None means conflict (both polarities seen).
+            // BTreeMap for deterministic iteration order.
+            let mut seen: BTreeMap<Var, Option<bool>> = BTreeMap::new();
+            // Sort literals for deterministic processing order.
+            let assignments = self.outputs.this_level_assignments.get();
+            let mut lits: Vec<_> = assignments.iter().copied().collect();
+            lits.sort();
+            for lit in lits {
+                let var = lit.var();
+                let positive = lit.is_positive();
+                match seen.get(&var) {
+                    None => {
+                        seen.insert(var, Some(positive));
+                    }
+                    Some(Some(prev)) if *prev != positive => {
+                        // Conflict: saw both polarities
+                        seen.insert(var, None);
+                    }
+                    _ => {} // Same polarity again, no change
+                }
+            }
+
+            // Set phases: conflict -> false, otherwise use polarity
+            for (var, polarity) in seen {
+                self.state.vsids.set_phase(var, polarity.unwrap_or(false));
+            }
+
             let popped = db.pop();
             assert!(popped, "Tried to backtrack past level 0");
             self.state.decision_stack.pop();

@@ -18,9 +18,10 @@ use super::types::{ClauseId, Level, Lit};
 impl Solver {
     /// Create a new solver using the provided database builder.
     ///
+    /// `num_vars` is the number of variables in the problem.
     /// The caller is responsible for calling `db.build()` after this returns
     /// and passing the resulting `&mut Database` to solver methods.
-    pub fn new(db: &mut DatabaseBuilder) -> Self {
+    pub fn new(db: &mut DatabaseBuilder, num_vars: u32) -> Self {
         // === Input Relations ===
         create_input!(db, clauses, clauses_rel, (ClauseId, Lit));
         create_persistent_input!(db, learned, learned_rel, (ClauseId, Lit));
@@ -33,7 +34,7 @@ impl Solver {
         );
 
         // Current level = max(levels)
-        assign!(current_level_rel, levels_rel.global_max());
+        assign_saved!(current_level_rel, levels_rel.global_max());
 
         // All clauses (original + learned)
         assign_saved!(all_clauses, clauses_rel.union(learned_rel));
@@ -155,7 +156,10 @@ impl Solver {
         );
 
         // === Set up the feedback loop ===
-        assign!(unit_with_level, units.cartesian_product(current_level_rel));
+        assign!(
+            unit_with_level,
+            units.cartesian_product(current_level_rel.get())
+        );
         assign!(
             unit_lit_level_cid,
             unit_with_level.map(|((cid, lit), level)| (lit, level, cid))
@@ -178,10 +182,20 @@ impl Solver {
                 .union(empty_clauses.get().map(Conflict::EmptyClause))
         );
 
+        assign!(
+            this_level_assignments,
+            assignments
+                .get()
+                .swap()
+                .semijoin(current_level_rel.get())
+                .snd()
+        );
+
         // Create outputs from relations (need to box them to store in struct)
         let causes_out = causes.output_with_sink();
         let conflicts_out = conflicts.output_with_sink();
         let literal_counts_out = literal_counts.output_with_sink();
+        let this_level_assignments_out = this_level_assignments.output();
 
         // Initialize with Level::TOP so unit propagation works at level 0
         levels.insert(Level::TOP);
@@ -197,6 +211,7 @@ impl Solver {
                 causes: causes_out,
                 conflicts: conflicts_out,
                 literal_counts: literal_counts_out,
+                this_level_assignments: this_level_assignments_out,
             },
             state: State {
                 current_level: Level::TOP,
@@ -205,8 +220,7 @@ impl Solver {
                 clause_db: HashMap::new(),
                 restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
                 clause_deletion: ClauseDeletion::new(),
-                vsids: Vsids::new(0), // Will be resized as clauses are added
-                num_vars: 0,
+                vsids: Vsids::new(num_vars),
             },
         }
     }

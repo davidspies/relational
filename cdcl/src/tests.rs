@@ -19,7 +19,7 @@ fn test_simple_sat() {
     // (x1 OR x2) AND (x1 OR NOT x2)
     // SAT: x1 = true
     let mut db_builder = DatabaseBuilder::new();
-    let mut solver = Solver::new(&mut db_builder);
+    let mut solver = Solver::new(&mut db_builder, 2);
     let mut db = db_builder.build();
 
     solver.add_clause(&mut db, cid(1), &[lit(1), lit(2)]); // x1 OR x2
@@ -34,7 +34,7 @@ fn test_simple_unsat() {
     // (x1) AND (NOT x1)
     // UNSAT
     let mut db_builder = DatabaseBuilder::new();
-    let mut solver = Solver::new(&mut db_builder);
+    let mut solver = Solver::new(&mut db_builder, 1);
     let mut db = db_builder.build();
 
     solver.add_clause(&mut db, cid(1), &[lit(1)]); // x1
@@ -48,7 +48,7 @@ fn test_unit_propagation() {
     // (x1) AND (NOT x1 OR x2) AND (NOT x2 OR x3)
     // Unit prop: x1=T -> x2=T -> x3=T
     let mut db_builder = DatabaseBuilder::new();
-    let mut solver = Solver::new(&mut db_builder);
+    let mut solver = Solver::new(&mut db_builder, 3);
     let mut db = db_builder.build();
 
     solver.add_clause(&mut db, cid(1), &[lit(1)]); // x1
@@ -66,7 +66,7 @@ fn test_backtracking() {
     // (x1 OR x2) AND (NOT x1 OR x2) AND (x1 OR NOT x2) AND (NOT x1 OR NOT x2)
     // This is UNSAT (pigeon hole for 2 pigeons, 1 hole)
     let mut db_builder = DatabaseBuilder::new();
-    let mut solver = Solver::new(&mut db_builder);
+    let mut solver = Solver::new(&mut db_builder, 2);
     let mut db = db_builder.build();
 
     solver.add_clause(&mut db, cid(1), &[lit(1), lit(2)]); // x1 OR x2

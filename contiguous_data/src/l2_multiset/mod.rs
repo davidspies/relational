@@ -144,6 +144,11 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
         assert!(iter.next().is_none(), "Expected singleton for key");
         Some(output)
     }
+
+    /// Iterate over all keys that have at least one value.
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
+        self.roots.keys()
+    }
 }
 
 impl<V> Root<V> {

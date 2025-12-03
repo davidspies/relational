@@ -48,7 +48,7 @@ impl Solver {
     }
 
     /// Pick the next branching literal using VSIDS heuristic with phase saving.
-    pub fn pick_branching_literal(&self) -> Option<Lit> {
+    pub fn pick_branching_literal(&mut self) -> Option<Lit> {
         // Use DLIS if USE_DLIS env var is set
         if std::env::var("USE_DLIS").is_ok() {
             return self.pick_branching_literal_dlis();
