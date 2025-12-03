@@ -11,7 +11,6 @@ pub struct SolveStats {
     pub decisions: u64,
     pub conflicts: u64,
     pub restarts: u64,
-    pub heap_rebuilds: u64,
 }
 
 impl Solver {
@@ -27,8 +26,8 @@ impl Solver {
     pub fn solve_with_proof(&mut self, db: &mut Database, proof: Option<&mut ProofWriter>) -> bool {
         let (result, stats) = self.solve_internal(db, proof);
         eprintln!(
-            "c stats: decisions={} conflicts={} restarts={} heap_rebuilds={}",
-            stats.decisions, stats.conflicts, stats.restarts, stats.heap_rebuilds
+            "c stats: decisions={} conflicts={} restarts={}",
+            stats.decisions, stats.conflicts, stats.restarts
         );
         result
     }
@@ -44,8 +43,8 @@ impl Solver {
             // Periodic progress report
             if stats.conflicts >= last_report + 10000 {
                 eprintln!(
-                    "c progress: decisions={} conflicts={} restarts={} heap_rebuilds={}",
-                    stats.decisions, stats.conflicts, stats.restarts, stats.heap_rebuilds
+                    "c progress: decisions={} conflicts={} restarts={}",
+                    stats.decisions, stats.conflicts, stats.restarts
                 );
                 last_report = stats.conflicts;
             }
@@ -53,9 +52,7 @@ impl Solver {
             match self.propagate() {
                 Ok(()) => {
                     // No conflict - pick next literal or return SAT
-                    let (var, rebuilds) = self.pick_branching_literal_tracked();
-                    stats.heap_rebuilds += rebuilds;
-                    match var {
+                    match self.pick_branching_literal() {
                         Some(lit) => {
                             stats.decisions += 1;
                             self.decide(db, lit);

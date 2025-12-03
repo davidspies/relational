@@ -43,7 +43,9 @@ impl Default for LiteralCountsSink {
 impl LiteralCountsSink {
     /// Get the literal with highest count (deterministic tie-breaking via seeded hash).
     pub fn max_count(&self) -> Option<(i64, Lit)> {
-        self.data.last_key_value().map(|(&(count, _, lit), _)| (count, lit))
+        self.data
+            .last_key_value()
+            .map(|(&(count, _, lit), _)| (count, lit))
     }
 }
 

@@ -48,28 +48,19 @@ impl Solver {
     }
 
     /// Pick the next branching literal using VSIDS heuristic with phase saving.
-    ///
-    /// Returns the unassigned variable with highest activity, using saved phase.
-    pub fn pick_branching_literal(&mut self) -> Option<Lit> {
-        self.pick_branching_literal_tracked().0
-    }
-
-    /// Pick with tracking info for profiling.
-    /// Returns (literal, heap_rebuilds).
-    pub fn pick_branching_literal_tracked(&mut self) -> (Option<Lit>, u64) {
+    pub fn pick_branching_literal(&self) -> Option<Lit> {
         // Use DLIS if USE_DLIS env var is set
         if std::env::var("USE_DLIS").is_ok() {
-            return (self.pick_branching_literal_dlis(), 0);
+            return self.pick_branching_literal_dlis();
         }
         let assigned = self.outputs.causes.get();
-        let (var, rebuilds) = self
+        let var = self
             .state
             .vsids
             .pick(|v| assigned.contains_lit(Lit::pos(v)) || assigned.contains_lit(Lit::neg(v)));
-        let lit = var.map(|v| {
+        var.map(|v| {
             let phase = self.state.vsids.get_phase(v);
             if phase { Lit::pos(v) } else { Lit::neg(v) }
-        });
-        (lit, rebuilds)
+        })
     }
 }

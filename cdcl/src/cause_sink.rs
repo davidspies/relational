@@ -22,6 +22,8 @@ fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
 pub struct CauseSink {
     /// Maps lit -> min-heap of (hash, clause_id)
     data: L2Heaps<Lit, (u64, ClauseId)>,
+    /// Tracks multiplicity for data entries
+    data_counts: Multiset<(Lit, u64, ClauseId)>,
     assigned_at: L2Multiset<Lit, (CommitId, Level)>,
     seed: u64,
 }
@@ -30,6 +32,7 @@ impl Default for CauseSink {
     fn default() -> Self {
         Self {
             data: L2Heaps::new(),
+            data_counts: Multiset::new(),
             assigned_at: L2Multiset::new(),
             seed: 0x7a3d9f1e4b2c8a05, // arbitrary fixed seed
         }
@@ -63,12 +66,20 @@ impl Sink<((Lit, CommitId), (ClauseId, Level))> for CauseSink {
     fn dump_all(&mut self, incoming: &mut Multiset<((Lit, CommitId), (ClauseId, Level))>) {
         for (((lit, commit_id), (clause_id, level)), diff) in incoming.drain() {
             let hash = seeded_hash(&clause_id, self.seed);
-            let key = (hash, clause_id);
-            if diff > 0 {
-                self.data.push(lit, key);
-            } else if diff < 0 {
-                self.data.remove(&lit, &key);
+            let count_key = (lit, hash, clause_id);
+            let old_count = self.data_counts.get(&count_key);
+            self.data_counts.update(count_key, diff);
+            let new_count = self.data_counts.get(&count_key);
+
+            // Add to heap when count goes from 0 to non-zero
+            if old_count == 0 && new_count != 0 {
+                self.data.push(lit, (hash, clause_id));
             }
+            // Remove from heap when count goes from non-zero to 0
+            if old_count != 0 && new_count == 0 {
+                self.data.remove(&lit, &(hash, clause_id));
+            }
+
             self.assigned_at.update(lit, (commit_id, level), diff);
         }
     }

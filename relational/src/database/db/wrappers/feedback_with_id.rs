@@ -97,7 +97,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
         // 3. Forward items from popped checkpoint that are still reachable
         for (tuple, commit_id) in self.checkpoint_scratch.drain() {
             let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
-            if input_total > 0 {
+            if input_total != 0 {
                 var.forward_reachable(&(tuple, commit_id));
             } else {
                 self.t_to_commit_id.remove(&tuple);

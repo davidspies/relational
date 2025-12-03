@@ -110,7 +110,10 @@ impl DatabaseBuilder {
     }
 
     /// Register an interrupt that stops fixpoint when the relation becomes non-empty.
-    pub fn interrupt<T: 'static, R: Op<T> + 'static>(&mut self, input: Relation<R>) {
+    pub fn interrupt<T: Clone + Eq + Hash + 'static, R: Op<T> + 'static>(
+        &mut self,
+        input: Relation<R>,
+    ) {
         // Add an interrupt node to the graph (no counter for terminal nodes)
         let parent_id = input.node_id;
         if let Some(graph) = input.graph.borrow_mut().as_mut() {

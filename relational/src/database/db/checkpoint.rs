@@ -70,13 +70,6 @@ impl Database {
             }
         }
 
-        // Reset all interrupts so they don't keep firing on subsequent commits
-        for step in &mut self.steps {
-            if let StratifiedStep::Interrupt(interrupt) = step {
-                interrupt.reset();
-            }
-        }
-
         true
     }
 

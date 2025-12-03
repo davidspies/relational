@@ -8,17 +8,17 @@ use contiguous_data::{Diff, L2Vec, Multiset};
 /// A variable in an iterative computation.
 ///
 /// Variables track a "seen set" - tuples are only emitted once when they
-/// first become positive in input_totals. This ensures monotonic growth toward fixpoint.
+/// first become non-zero in input_totals. This ensures monotonic growth toward fixpoint.
 ///
 /// The variable has two separate tracking mechanisms:
 /// - `input_totals`: Tracks cumulative input multiplicities
 /// - `output_seen`: The seen set - tuples we've emitted +1 for
 ///
 /// During normal operation, tuples are added to output_seen when they first become
-/// positive in input_totals. During pop(), we manipulate output_seen directly.
+/// non-zero in input_totals. During pop(), we manipulate output_seen directly.
 pub struct Variable<T> {
     /// Cumulative input multiplicities.
-    /// A tuple is considered "reachable" when this is positive.
+    /// A tuple is considered "reachable" when this is non-zero.
     input_totals: HashMap<T, i64>,
     /// The seen set - tuples we've emitted +1 for.
     output_seen: HashSet<T>,
@@ -43,7 +43,7 @@ impl<T: Clone + Eq + Hash> Variable<T> {
     }
 
     /// Add input to this variable (used during normal fixpoint).
-    /// Only emits +1 if the tuple is not already in output_seen AND input_totals is positive.
+    /// Only emits +1 if the tuple is not already in output_seen AND input_totals is non-zero.
     /// Once a tuple is seen, it stays in output until explicitly removed via pop().
     pub(crate) fn add_input(&mut self, tuple: T, diff: Diff) {
         // Update input_totals
@@ -51,16 +51,16 @@ impl<T: Clone + Eq + Hash> Variable<T> {
         *total += diff;
 
         // Only add to output if:
-        // 1. input_totals is now positive, AND
+        // 1. input_totals is now non-zero, AND
         // 2. not already in output_seen (seen set semantics)
-        if *total > 0 && !self.output_seen.contains(&tuple) {
+        if *total != 0 && !self.output_seen.contains(&tuple) {
             self.output_seen.insert(tuple.clone());
             self.staged.update(tuple.clone(), 1);
             if !self.outputs_by_checkpoint.is_empty() {
                 self.outputs_by_checkpoint.push(tuple);
             }
         }
-        // If input_totals <= 0 or already in output_seen, do nothing
+        // If input_totals == 0 or already in output_seen, do nothing
     }
 
     /// Backwards compatibility alias for add_input.
@@ -114,10 +114,10 @@ impl<T: Clone + Eq + Hash> Variable<T> {
     }
 
     /// Forward a tuple that is still reachable after pop.
-    /// Only forwards if input_total > 0 and not already in output_seen.
+    /// Only forwards if input_total != 0 and not already in output_seen.
     pub(crate) fn forward_reachable(&mut self, tuple: &T) {
         let input_total = self.input_totals.get(tuple).copied().unwrap_or(0);
-        if input_total > 0 && !self.output_seen.contains(tuple) {
+        if input_total != 0 && !self.output_seen.contains(tuple) {
             self.output_seen.insert(tuple.clone());
             self.staged.update(tuple.clone(), 1);
             if !self.outputs_by_checkpoint.is_empty() {

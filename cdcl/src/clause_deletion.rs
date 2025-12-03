@@ -95,7 +95,11 @@ impl ClauseDeletion {
 
         // Delete half of non-protected clauses
         let to_delete = candidates.len() / 2;
-        let deleted: Vec<_> = candidates.into_iter().take(to_delete).map(|(cid, _)| cid).collect();
+        let deleted: Vec<_> = candidates
+            .into_iter()
+            .take(to_delete)
+            .map(|(cid, _)| cid)
+            .collect();
 
         // Remove from our tracking
         for &cid in &deleted {
@@ -142,7 +146,11 @@ mod tests {
 
     #[test]
     fn test_compute_lbd() {
-        let lits = [Lit::pos(Var::new(1)), Lit::pos(Var::new(2)), Lit::pos(Var::new(3))];
+        let lits = [
+            Lit::pos(Var::new(1)),
+            Lit::pos(Var::new(2)),
+            Lit::pos(Var::new(3)),
+        ];
         let levels = [Level::new(1), Level::new(1), Level::new(2)];
         assert_eq!(compute_lbd(&lits, &levels), 2);
 
@@ -165,7 +173,11 @@ mod tests {
         cd.on_learn(ClauseId::new(2), &lits, &[Level::new(1), Level::new(1)]);
 
         // Add some non-glue clauses (LBD > 2)
-        let lits3 = [Lit::pos(Var::new(1)), Lit::pos(Var::new(2)), Lit::pos(Var::new(3))];
+        let lits3 = [
+            Lit::pos(Var::new(1)),
+            Lit::pos(Var::new(2)),
+            Lit::pos(Var::new(3)),
+        ];
         cd.on_learn(
             ClauseId::new(3),
             &lits3,
