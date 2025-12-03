@@ -26,7 +26,7 @@ fn test_stratified_two_feedbacks() {
     let reach_rel = reach_var_rel.save();
 
     let new_reach = reach_rel.get().swap().join_values(edges.get());
-    let all_reach = edges.get().union(new_reach);
+    let all_reach = edges.get().concat(new_reach);
 
     // Second feedback: triples (a, b, c) where reach(a, b) and reach(b, c)
     let (extended_var, extended_var_rel) = db.create_variable::<(i32, i32, i32)>();
@@ -34,7 +34,7 @@ fn test_stratified_two_feedbacks() {
     let triples = reach_join.map(|(b, (a, c))| (a, b, c));
 
     // Set up first feedback (reach)
-    let reach_input = edges.get().union(all_reach);
+    let reach_input = edges.get().concat(all_reach);
     db.feedback(reach_var, reach_input);
 
     // Set up second feedback (extended)
@@ -87,9 +87,9 @@ fn test_incremental_after_feedback() {
     let path_rel = path_var_rel.save();
 
     let new_paths = path_rel.get().swap().join_values(edges.get());
-    let all_paths = edges.get().union(new_paths);
+    let all_paths = edges.get().concat(new_paths);
 
-    let path_input = edges.get().union(all_paths);
+    let path_input = edges.get().concat(all_paths);
     db.feedback(path_var, path_input);
 
     let path_out = path_rel.get().boxed().output();
@@ -134,7 +134,7 @@ fn test_feedback_order_independence() {
     let path_rel = path_var_rel.save();
 
     let new_paths = path_rel.get().swap().join_values(edges.get());
-    let all_paths = edges.get().union(new_paths);
+    let all_paths = edges.get().concat(new_paths);
 
     db.feedback(path_var, all_paths);
 
@@ -316,18 +316,18 @@ fn test_a_reaches_fixpoint_between_b_applications() {
     let b = v_max_for_b.map(|x| if x < 200 { x + 31 } else { x });
 
     // a_new = a.difference(v) - only the NEW values from A
-    let a_new = a.difference(v_rel.get());
+    let a_new = a.set_minus(v_rel.get());
 
     // b_new = b.difference(v) - only the NEW values from B
-    let b_new = b.difference(v_rel.get());
+    let b_new = b.set_minus(v_rel.get());
 
     // For feedback, we need: v = v ∪ a_new  and  v = v ∪ b_new
-    let v_with_a = v_rel.get().union(a_new);
-    let v_with_b = v_rel.get().union(b_new);
+    let v_with_a = v_rel.get().concat(a_new);
+    let v_with_b = v_rel.get().concat(b_new);
 
     // First feedback (A): v = v ∪ a_new
     let seeds_saved = seeds_rel.save();
-    let a_input = seeds_saved.get().union(v_with_a);
+    let a_input = seeds_saved.get().concat(v_with_a);
     db.feedback(v_var.clone(), a_input);
 
     // Second feedback (B): v = v ∪ b_new
@@ -401,8 +401,8 @@ fn test_interleaved_mutual_fixpoint() {
     // Union B back into A's input (so A grows from B's output too)
     let b_rel = b_var_rel.save();
     let input_saved = input_rel.save();
-    let a_combined = input_saved.get().union(b_rel.get());
-    let a_recursive = a_combined.union(a_filtered);
+    let a_combined = input_saved.get().concat(b_rel.get());
+    let a_recursive = a_combined.concat(a_filtered);
 
     // Set up feedbacks first
     db.feedback(a_var, a_recursive);
@@ -473,7 +473,7 @@ fn test_diamond_dependency() {
     let c = input_saved.get().map(|x| x + 5);
 
     // D = B union C
-    let d = b.union(c);
+    let d = b.concat(c);
 
     // Use a feedback to test that the diamond is computed correctly
     let (d_var, d_var_rel) = db.create_variable::<i32>();
@@ -603,7 +603,7 @@ fn test_push_pop_with_feedback() {
     let path_rel = path_var_rel.save();
 
     let new_paths = path_rel.get().swap().join_values(edges.get());
-    let all_paths = edges.get().union(new_paths);
+    let all_paths = edges.get().concat(new_paths);
 
     db.feedback(path_var, all_paths);
 
@@ -816,7 +816,7 @@ fn test_persistent_with_derived() {
     let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     // Derived: union of regular and persistent
-    let combined = regular_rel.union(persistent_rel);
+    let combined = regular_rel.concat(persistent_rel);
     let combined_out = combined.boxed().output();
 
     regular_h.insert(1);
@@ -913,7 +913,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     // path(a, c) :- path(a, b), edges(b, c)
     let edges_saved = edges_rel.save();
     let new_paths = path_tuples.swap().join_values(edges_saved.get());
-    let all_paths = edges_saved.get().union(new_paths);
+    let all_paths = edges_saved.get().concat(new_paths);
 
     // Wire up timestamped feedback
     db.feedback_with_id(path_var, all_paths);
@@ -1028,7 +1028,7 @@ fn test_push_insert_pop_minimal() {
 
     let edges_saved = edges_rel.save();
     let new_paths = path_rel.get().swap().join_values(edges_saved.get());
-    let all_paths = edges_saved.get().union(new_paths);
+    let all_paths = edges_saved.get().concat(new_paths);
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
@@ -1071,7 +1071,7 @@ fn test_push_insert_pop() {
 
     let edges_saved = edges_rel.save();
     let new_paths = path_rel.get().swap().join_values(edges_saved.get());
-    let all_paths = edges_saved.get().union(new_paths);
+    let all_paths = edges_saved.get().concat(new_paths);
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
@@ -1109,7 +1109,7 @@ fn test_push_no_changes_pop() {
 
     let edges_saved = edges_rel.save();
     let new_paths = path_rel.get().swap().join_values(edges_saved.get());
-    let all_paths = edges_saved.get().union(new_paths);
+    let all_paths = edges_saved.get().concat(new_paths);
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
@@ -1156,7 +1156,7 @@ fn test_regular_feedback_with_persistent_input_and_pop() {
     // path(a, c) :- path(a, b), edges(b, c)
     let edges_saved = edges_rel.save();
     let new_paths = path_rel.get().swap().join_values(edges_saved.get());
-    let all_paths = edges_saved.get().union(new_paths);
+    let all_paths = edges_saved.get().concat(new_paths);
 
     db.feedback(path_var, all_paths);
 

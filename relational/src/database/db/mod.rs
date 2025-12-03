@@ -35,7 +35,7 @@ pub struct DatabaseG<G> {
     /// Current checkpoint stack depth.
     checkpoint_depth: usize,
     /// Maximum iterations for fixpoint.
-    max_iterations: usize,
+    pub max_iterations: Option<usize>,
     /// Shared commit ID counter for feedback_with_id.
     commit_id: Rc<Cell<CommitId>>,
     /// Graph storage - either mutable builder or immutable finalized graph.
@@ -61,7 +61,7 @@ impl DatabaseBuilder {
             inputs: Vec::new(),
             steps: Vec::new(),
             checkpoint_depth: 0,
-            max_iterations: 1000,
+            max_iterations: Some(1000),
             commit_id: Rc::new(Cell::new(CommitId::new(0))),
             graph: new_graph_builder(),
         }

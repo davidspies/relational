@@ -28,7 +28,7 @@
 //! let new_paths = path_rel.get().swap().join_values(edges.get());
 //!
 //! // path = edges ∪ new_paths
-//! let all_paths = edges.get().union(new_paths);
+//! let all_paths = edges.get().concat(new_paths);
 //!
 //! // Wire up the feedback loop
 //! db.feedback(path_var, all_paths);
@@ -97,7 +97,7 @@ pub use database::{CommitId, Database, DatabaseBuilder};
 #[macro_export]
 macro_rules! assign {
     ($var:ident, $expr:expr) => {
-        let $var = $expr.named(stringify!($var)).boxed();
+        let $var = $expr.named(stringify!($var));
     };
 }
 

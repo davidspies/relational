@@ -6,8 +6,8 @@ use contiguous_data::Diff;
 
 use super::relation::{Op, Relation, assert_same_commit_id};
 
-/// A union operator - combines changes from both inputs.
-pub struct UnionOp<T, L, R>
+/// A concat operator - combines changes from both inputs.
+pub struct ConcatOp<T, L, R>
 where
     L: Op<T>,
     R: Op<T>,
@@ -17,7 +17,7 @@ where
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, L, R> Op<T> for UnionOp<T, L, R>
+impl<T, L, R> Op<T> for ConcatOp<T, L, R>
 where
     L: Op<T>,
     R: Op<T>,
@@ -30,7 +30,7 @@ where
 
 impl<L> Relation<L> {
     /// Combine two relations (without consolidation).
-    pub fn union_<T, R>(self, right: Relation<R>) -> Relation<impl Op<T>>
+    pub fn concat_<T, R>(self, right: Relation<R>) -> Relation<impl Op<T>>
     where
         L: Op<T>,
         R: Op<T>,
@@ -42,26 +42,26 @@ impl<L> Relation<L> {
         let commit_id = self.commit_id.clone();
         let graph = self.graph.clone();
         Relation::new(
-            UnionOp {
+            ConcatOp {
                 left: self,
                 right,
                 _phantom: std::marker::PhantomData,
             },
             commit_id,
             graph,
-            "union",
+            "concat",
             vec![left_node, right_node],
         )
     }
 
     /// Combine two relations.
-    pub fn union<T, R>(self, right: Relation<R>) -> Relation<impl Op<T>>
+    pub fn concat<T, R>(self, right: Relation<R>) -> Relation<impl Op<T>>
     where
         L: Op<T>,
         R: Op<T>,
         T: Eq + Hash,
     {
-        let result = self.union_(right);
+        let result = self.concat_(right);
         #[cfg(feature = "consolidate_all")]
         let result = result.consolidate_passthrough_();
         result

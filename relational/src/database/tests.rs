@@ -97,7 +97,7 @@ fn test_transitive_closure() {
     let new_paths = path_rel.get().swap().join_values(edges_for_join);
 
     // Combine base (edges) and recursive (new_paths)
-    let all_paths = edges_for_union.union(new_paths);
+    let all_paths = edges_for_union.concat(new_paths);
 
     // Wire up the feedback
     db.feedback(path_var, all_paths);
@@ -221,7 +221,7 @@ fn test_commit_id_advances_with_feedback() {
 
     // path(a, c) :- path(a, b), edge(b, c)
     let new_paths = path_rel.get().swap().join_values(edges_for_join);
-    let all_paths = edges_for_union.union(new_paths);
+    let all_paths = edges_for_union.concat(new_paths);
 
     db.feedback(path_var, all_paths);
 
@@ -331,7 +331,7 @@ fn test_commit_id_advances_per_feedback_iteration() {
 
     // path(a, c) :- path(a, b), edges(b, c)
     let new_paths = path_rel.get().swap().join_values(edges_for_join);
-    let all_paths = edges_for_union.union(new_paths);
+    let all_paths = edges_for_union.concat(new_paths);
 
     // Wire up the feedback
     db.feedback(path_var, all_paths);
@@ -396,7 +396,7 @@ fn test_feedback_with_id_discovery_order() {
 
     // path(a, c) :- path(a, b), edges(b, c)
     let new_paths = path_tuples.swap().join_values(saved_edges.get());
-    let all_paths = saved_edges.get().union(new_paths);
+    let all_paths = saved_edges.get().concat(new_paths);
 
     // Wire up the timestamped feedback
     db.feedback_with_id(path_var, all_paths);
@@ -523,7 +523,7 @@ fn test_union() {
     let mut db = DatabaseBuilder::new();
     let (mut handle_a, rel_a) = db.create_input::<i32>();
     let (mut handle_b, rel_b) = db.create_input::<i32>();
-    let mut unioned = rel_a.union(rel_b);
+    let mut unioned = rel_a.concat(rel_b);
 
     handle_a.insert(1);
     handle_a.insert(2);
@@ -561,7 +561,7 @@ fn test_distinct_on_union() {
     let mut db = DatabaseBuilder::new();
     let (mut handle_a, rel_a) = db.create_input::<i32>();
     let (mut handle_b, rel_b) = db.create_input::<i32>();
-    let unioned = rel_a.union(rel_b);
+    let unioned = rel_a.concat(rel_b);
     let mut distinct_rel = unioned.distinct();
 
     // Both inputs have 1, union produces duplicates
@@ -610,7 +610,7 @@ fn test_difference() {
     let mut db = DatabaseBuilder::new();
     let (mut handle_a, rel_a) = db.create_input::<i32>();
     let (mut handle_b, rel_b) = db.create_input::<i32>();
-    let mut diff = rel_a.difference(rel_b);
+    let mut diff = rel_a.set_minus(rel_b);
 
     handle_a.insert(1);
     handle_a.insert(2);
@@ -916,7 +916,7 @@ fn test_consolidate() {
     let (mut handle_a, rel_a) = db.create_input::<i32>();
     let (mut handle_b, rel_b) = db.create_input::<i32>();
     // Union produces: 1 (+1), 2 (+1), 1 (+1), 3 (+1) = 1 with mult 2
-    let unioned = rel_a.union(rel_b);
+    let unioned = rel_a.concat(rel_b);
     let mut consolidated = unioned.consolidate_();
 
     // Create a union that will have duplicates
@@ -941,7 +941,7 @@ fn test_consolidate_cancellation() {
     let (mut handle_b, rel_b) = db.create_input::<i32>();
     // a has +1 for 1, b.negate has -1 for 1 -> they cancel
     let negated_b = rel_b.negate();
-    let combined = rel_a.union(negated_b);
+    let combined = rel_a.concat(negated_b);
     // This would panic if consolidate forwarded any tuples (since they should all cancel)
     let mut panicking = combined.consolidate_().map(|x| {
         panic!("consolidate should not forward cancelled tuple: {}", x);
@@ -961,7 +961,7 @@ fn test_consolidate_incremental() {
     let mut db = DatabaseBuilder::new();
     let (mut handle_a, rel_a) = db.create_input::<i32>();
     let (mut handle_b, rel_b) = db.create_input::<i32>();
-    let unioned = rel_a.union(rel_b);
+    let unioned = rel_a.concat(rel_b);
     let mut consolidated = unioned.consolidate_();
 
     // First batch: a has 1, b has 1 -> union has 1 with mult 2

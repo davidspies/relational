@@ -49,7 +49,7 @@ fn test_pop_transitive_closure() {
     // path: (a, b), edges: (b, c) -> join on b
     // Swap path to (b, a), join_values with edges (b, c) -> (a, c)
     let new_paths = path_rel.get().swap().join_values(edges_saved.get());
-    let all_paths = edges_saved.get().union(new_paths);
+    let all_paths = edges_saved.get().concat(new_paths);
     builder.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();

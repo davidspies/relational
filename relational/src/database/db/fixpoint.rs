@@ -29,10 +29,11 @@ impl Database {
         let mut iterations = 0;
 
         'outer: loop {
-            if iterations >= self.max_iterations {
+            if let Some(max_iter) = self.max_iterations
+                && iterations >= max_iter
+            {
                 panic!(
-                    "Stratified fixpoint exceeded max_iterations ({}) - possible infinite loop",
-                    self.max_iterations
+                    "Stratified fixpoint exceeded max_iterations ({max_iter}) - possible infinite loop"
                 );
             }
 

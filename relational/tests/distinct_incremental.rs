@@ -166,7 +166,7 @@ fn test_cdcl_pattern() {
     let all_clause_ids_distinct = all_clause_ids.distinct();
 
     // Clauses that are NOT satisfied
-    let unsatisfied = all_clause_ids_distinct.difference(satisfied_distinct);
+    let unsatisfied = all_clause_ids_distinct.set_minus(satisfied_distinct);
     let unsatisfied_out = unsatisfied.boxed().output();
 
     // Add clauses: (x1) AND (NOT x1) - unsatisfiable

@@ -111,7 +111,7 @@ impl<R> Relation<R> {
 
     /// Set difference (self - right).
     /// Implemented via antijoin: treat tuples as (T, ()) pairs.
-    pub fn difference<T, RR>(self, right: Relation<RR>) -> Relation<impl Op<T>>
+    pub fn set_minus<T, RR>(self, right: Relation<RR>) -> Relation<impl Op<T>>
     where
         T: Clone + Eq + Hash,
         R: Op<T>,
@@ -119,7 +119,7 @@ impl<R> Relation<R> {
     {
         self.map_h(|t: T| (t, ()))
             .antijoin(right)
-            .with_op_type("difference")
+            .with_op_type("set_minus")
             .map_h(|(t, ())| t)
     }
 

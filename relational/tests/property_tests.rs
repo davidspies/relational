@@ -41,7 +41,7 @@ fn apply_ops_with_pop(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     // path_rel: (a, b), edges: (b, c) -> need to join on b
     // Swap path to (b, a), join_values with edges (b, c) -> (a, c)
     let new_paths = path_rel.get().swap().join_values(edges_saved.get());
-    let all_paths = edges_saved.get().union(new_paths);
+    let all_paths = edges_saved.get().concat(new_paths);
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
@@ -110,7 +110,7 @@ fn apply_ops_replay_model(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     // path_rel: (a, b), edges: (b, c) -> need to join on b
     // Swap path to (b, a), join_values with edges (b, c) -> (a, c)
     let new_paths = path_rel.get().swap().join_values(edges_saved.get());
-    let all_paths = edges_saved.get().union(new_paths);
+    let all_paths = edges_saved.get().concat(new_paths);
     db.feedback(path_var, all_paths);
 
     let path_out = path_rel.get().boxed().output();
@@ -300,7 +300,7 @@ fn test_multiple_feedbacks_with_pop() {
     // reach: (a, b), edges: (b, c) -> need to join on b
     // Swap reach to (b, a), join_values with edges (b, c) -> (a, c)
     let new_reach = reach_rel.get().swap().join_values(edges_saved.get());
-    let all_reach = edges_saved.get().union(new_reach);
+    let all_reach = edges_saved.get().concat(new_reach);
 
     // Second feedback: count reachable pairs (self-join on reach)
     let (pairs_var, pairs_var_rel) = db.create_variable::<(i32, i32, i32)>();
