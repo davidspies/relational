@@ -3,6 +3,12 @@ use proptest::prelude::*;
 use std::collections::{BTreeSet, HashMap};
 
 #[test]
+fn test_default() {
+    let heaps: L2Heaps<&str, i32> = L2Heaps::default();
+    assert!(heaps.is_empty(&"a"));
+}
+
+#[test]
 fn test_push_pop_single_heap() {
     let mut heaps: L2Heaps<&str, i32> = L2Heaps::new();
     heaps.push("a", 3);
@@ -113,6 +119,44 @@ fn test_is_empty() {
 
     heaps.pop(&"a");
     assert!(heaps.is_empty(&"a"));
+}
+
+#[test]
+fn test_remove_triggers_bubble_up() {
+    // When removing a node, if the replacement value is smaller than parent,
+    // bubble_up should be called in reheapify.
+    //
+    // Build this heap (no bubble-ups during construction):
+    //            1
+    //          /   \
+    //         2     1000
+    //        / \    /  \
+    //       3   4  1001 1002
+    //      /
+    //     5
+    //
+    // When we remove 1001, the last leaf (5) replaces it.
+    // Parent of 1001's position is 1000. Since 5 < 1000, bubble_up triggers.
+    let mut heaps: L2Heaps<&str, i32> = L2Heaps::new();
+    heaps.push("a", 1);
+    heaps.push("a", 1000);
+    heaps.push("a", 2);
+    heaps.push("a", 3);
+    heaps.push("a", 4);
+    heaps.push("a", 1001);
+    heaps.push("a", 1002);
+    heaps.push("a", 5);
+
+    heaps.remove(&"a", &1001);
+
+    // Verify heap property still holds
+    assert_eq!(heaps.pop(&"a"), Some(1));
+    assert_eq!(heaps.pop(&"a"), Some(2));
+    assert_eq!(heaps.pop(&"a"), Some(3));
+    assert_eq!(heaps.pop(&"a"), Some(4));
+    assert_eq!(heaps.pop(&"a"), Some(5));
+    assert_eq!(heaps.pop(&"a"), Some(1000));
+    assert_eq!(heaps.pop(&"a"), Some(1002));
 }
 
 #[test]

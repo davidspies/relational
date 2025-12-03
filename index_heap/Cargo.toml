@@ -5,6 +5,7 @@ version.workspace = true
 
 [dependencies]
 index_list = { version = "*", features = ["iter_mut"] }
+arrayvec = "*"
 
 [dev-dependencies]
 proptest = "*"

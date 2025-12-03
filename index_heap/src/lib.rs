@@ -1,3 +1,4 @@
+use arrayvec::ArrayVec;
 use index_list::{Index, IndexList};
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -9,9 +10,14 @@ struct HeapNode<V> {
     right: Option<Index>,
 }
 
+enum HeapRoot<V> {
+    Small(ArrayVec<V, 2>),
+    Large { root: Index, size: usize },
+}
+
 pub struct L2Heaps<K, V> {
     nodes: IndexList<HeapNode<V>>,
-    roots: HashMap<K, Index>,
+    roots: HashMap<K, HeapRoot<V>>,
     positions: HashMap<(K, V), Index>,
 }
 
@@ -25,197 +31,121 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone> L2Heaps<K, V> {
     }
 
     pub fn is_empty(&self, key: &K) -> bool {
-        !self.roots.contains_key(key)
+        match self.roots.get(key) {
+            None => true,
+            Some(HeapRoot::Small(arr)) => arr.is_empty(),
+            Some(HeapRoot::Large { .. }) => false,
+        }
     }
 
     pub fn contains(&self, key: &K, value: &V) -> bool {
-        self.positions.contains_key(&(key.clone(), value.clone()))
+        match self.roots.get(key) {
+            None => false,
+            Some(HeapRoot::Small(arr)) => arr.contains(value),
+            Some(HeapRoot::Large { .. }) => {
+                self.positions.contains_key(&(key.clone(), value.clone()))
+            }
+        }
     }
 
     pub fn peek(&self, key: &K) -> Option<&V> {
-        let root_idx = *self.roots.get(key)?;
-        Some(&self.nodes.get(root_idx)?.value)
+        match self.roots.get(key)? {
+            HeapRoot::Small(arr) => arr.first(),
+            HeapRoot::Large { root, .. } => Some(&self.nodes.get(*root).unwrap().value),
+        }
     }
 
-    pub fn push(&mut self, key: K, value: V) -> Index {
-        let node = HeapNode {
-            value: value.clone(),
-            parent: None,
-            left: None,
-            right: None,
-        };
-        let idx = self.nodes.insert_last(node);
-        self.positions.insert((key.clone(), value), idx);
-
-        if let Some(&root_idx) = self.roots.get(&key) {
-            let parent_idx = self.find_insertion_parent(root_idx);
-            self.nodes.get_mut(idx).unwrap().parent = Some(parent_idx);
-            let parent = self.nodes.get_mut(parent_idx).unwrap();
-            if parent.left.is_none() {
-                parent.left = Some(idx);
-            } else {
-                parent.right = Some(idx);
+    pub fn push(&mut self, key: K, value: V) {
+        match self.roots.get(&key) {
+            None => {
+                let mut arr = ArrayVec::new();
+                arr.push(value);
+                self.roots.insert(key, HeapRoot::Small(arr));
             }
-            self.bubble_up(&key, idx);
-        } else {
-            self.roots.insert(key, idx);
+            Some(HeapRoot::Small(arr)) if arr.len() < 2 => {
+                let pos = arr.iter().position(|v| &value < v).unwrap_or(arr.len());
+                self.roots.get_mut(&key).unwrap().as_small_mut().insert(pos, value);
+            }
+            Some(HeapRoot::Small(_)) => {
+                let arr = std::mem::replace(
+                    self.roots.get_mut(&key).unwrap().as_small_mut(),
+                    ArrayVec::new(),
+                );
+                let (root, size) = self.promote_to_large(&key, arr, value);
+                *self.roots.get_mut(&key).unwrap() = HeapRoot::Large { root, size };
+            }
+            Some(HeapRoot::Large { root, .. }) => {
+                let root = *root;
+                self.push_large(&key, root, value);
+                self.roots.get_mut(&key).unwrap().inc_size();
+            }
         }
-        idx
     }
 
     pub fn pop(&mut self, key: &K) -> Option<V> {
-        let root_idx = *self.roots.get(key)?;
-        Some(self.remove_at(key, root_idx))
+        match self.roots.get(key)? {
+            HeapRoot::Small(_) => {
+                let value = self.roots.get_mut(key).unwrap().as_small_mut().remove(0);
+                if self.roots.get(key).unwrap().as_small().is_empty() {
+                    self.roots.remove(key);
+                }
+                Some(value)
+            }
+            HeapRoot::Large { root, .. } => {
+                let root_idx = *root;
+                let value = self.remove_at_large(key, root_idx);
+                self.maybe_demote(key);
+                Some(value)
+            }
+        }
     }
 
     pub fn remove(&mut self, key: &K, value: &V) -> bool {
-        let Some(&idx) = self.positions.get(&(key.clone(), value.clone())) else {
-            return false;
-        };
-        self.remove_at(key, idx);
-        true
-    }
-
-    fn remove_at(&mut self, key: &K, idx: Index) -> V {
-        let last_idx = self.find_last_node(*self.roots.get(key).unwrap());
-
-        if idx == last_idx {
-            return self.remove_leaf(key, idx);
-        }
-
-        // Swap values between idx and last
-        let last_value = self.remove_leaf(key, last_idx);
-        let node = self.nodes.get_mut(idx).unwrap();
-        let old_value = std::mem::replace(&mut node.value, last_value.clone());
-
-        self.positions.remove(&(key.clone(), old_value.clone()));
-        self.positions.insert((key.clone(), last_value), idx);
-
-        self.reheapify(key, idx);
-        old_value
-    }
-
-    fn remove_leaf(&mut self, key: &K, idx: Index) -> V {
-        let node = self.nodes.get(idx).unwrap();
-        let parent_idx = node.parent;
-        let value = node.value.clone();
-
-        if let Some(parent_idx) = parent_idx {
-            let parent = self.nodes.get_mut(parent_idx).unwrap();
-            if parent.left == Some(idx) {
-                parent.left = None;
-            } else {
-                parent.right = None;
-            }
-        } else {
-            self.roots.remove(key);
-        }
-
-        self.positions.remove(&(key.clone(), value.clone()));
-        self.nodes.remove(idx);
-        value
-    }
-
-    fn find_insertion_parent(&self, root_idx: Index) -> Index {
-        // BFS to find first node with missing child
-        let mut queue = vec![root_idx];
-        let mut i = 0;
-        while i < queue.len() {
-            let node = self.nodes.get(queue[i]).unwrap();
-            if node.left.is_none() || node.right.is_none() {
-                return queue[i];
-            }
-            if let Some(left) = node.left {
-                queue.push(left);
-            }
-            if let Some(right) = node.right {
-                queue.push(right);
-            }
-            i += 1;
-        }
-        queue[i]
-    }
-
-    fn find_last_node(&self, root_idx: Index) -> Index {
-        // BFS to find last node in level order
-        let mut queue = vec![root_idx];
-        let mut i = 0;
-        while i < queue.len() {
-            let node = self.nodes.get(queue[i]).unwrap();
-            if let Some(left) = node.left {
-                queue.push(left);
-            }
-            if let Some(right) = node.right {
-                queue.push(right);
-            }
-            i += 1;
-        }
-        queue[queue.len() - 1]
-    }
-
-    fn reheapify(&mut self, key: &K, idx: Index) {
-        let node = self.nodes.get(idx).unwrap();
-        if let Some(parent_idx) = node.parent {
-            let parent = self.nodes.get(parent_idx).unwrap();
-            if node.value < parent.value {
-                self.bubble_up(key, idx);
-                return;
-            }
-        }
-        self.bubble_down(key, idx);
-    }
-
-    fn bubble_up(&mut self, key: &K, mut idx: Index) {
-        while let Some(parent_idx) = self.nodes.get(idx).unwrap().parent {
-            let node_val = &self.nodes.get(idx).unwrap().value;
-            let parent_val = &self.nodes.get(parent_idx).unwrap().value;
-            if node_val >= parent_val {
-                break;
-            }
-            self.swap_values(key, idx, parent_idx);
-            idx = parent_idx;
-        }
-    }
-
-    fn bubble_down(&mut self, key: &K, mut idx: Index) {
-        loop {
-            let node = self.nodes.get(idx).unwrap();
-            let mut smallest = idx;
-            let mut smallest_val = &node.value;
-
-            if let Some(left_idx) = node.left {
-                let left_val = &self.nodes.get(left_idx).unwrap().value;
-                if left_val < smallest_val {
-                    smallest = left_idx;
-                    smallest_val = left_val;
+        match self.roots.get(key) {
+            None => false,
+            Some(HeapRoot::Small(arr)) => {
+                if let Some(pos) = arr.iter().position(|v| v == value) {
+                    self.roots.get_mut(key).unwrap().as_small_mut().remove(pos);
+                    if self.roots.get(key).unwrap().as_small().is_empty() {
+                        self.roots.remove(key);
+                    }
+                    true
+                } else {
+                    false
                 }
             }
-
-            let node = self.nodes.get(idx).unwrap();
-            if let Some(right_idx) = node.right {
-                let right_val = &self.nodes.get(right_idx).unwrap().value;
-                if right_val < smallest_val {
-                    smallest = right_idx;
-                }
+            Some(HeapRoot::Large { .. }) => {
+                let Some(&idx) = self.positions.get(&(key.clone(), value.clone())) else {
+                    return false;
+                };
+                self.remove_at_large(key, idx);
+                self.maybe_demote(key);
+                true
             }
+        }
+    }
+}
 
-            if smallest == idx {
-                break;
-            }
-            self.swap_values(key, idx, smallest);
-            idx = smallest;
+impl<V> HeapRoot<V> {
+    fn as_small(&self) -> &ArrayVec<V, 2> {
+        match self {
+            HeapRoot::Small(arr) => arr,
+            HeapRoot::Large { .. } => panic!("expected Small"),
         }
     }
 
-    fn swap_values(&mut self, key: &K, i: Index, j: Index) {
-        let val_i = self.nodes.get(i).unwrap().value.clone();
-        let val_j = self.nodes.get(j).unwrap().value.clone();
+    fn as_small_mut(&mut self) -> &mut ArrayVec<V, 2> {
+        match self {
+            HeapRoot::Small(arr) => arr,
+            HeapRoot::Large { .. } => panic!("expected Small"),
+        }
+    }
 
-        self.nodes.get_mut(i).unwrap().value = val_j.clone();
-        self.nodes.get_mut(j).unwrap().value = val_i.clone();
-
-        self.positions.insert((key.clone(), val_i), j);
-        self.positions.insert((key.clone(), val_j), i);
+    fn inc_size(&mut self) {
+        match self {
+            HeapRoot::Large { size, .. } => *size += 1,
+            HeapRoot::Small(_) => panic!("expected Large"),
+        }
     }
 }
 
@@ -227,3 +157,5 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone> Default for L2Heaps<K, V>
 
 #[cfg(test)]
 mod tests;
+
+mod heap_ops;
