@@ -7,11 +7,13 @@
 //! - Persistent inputs for learned clauses
 
 mod cause_sink;
+mod clause_deletion;
 pub mod cnf;
 mod conflict_analysis;
 mod literal_counts_sink;
 pub mod proof;
 mod queries;
+mod restart;
 mod solve;
 mod solver;
 mod solver_setup;

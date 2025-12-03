@@ -7,6 +7,8 @@ use relational::database::{CommitId, DatabaseBuilder};
 use relational::{assign, assign_saved, create_input, create_persistent_input, create_variable};
 
 use crate::Conflict;
+use crate::clause_deletion::ClauseDeletion;
+use crate::restart::RestartStrategy;
 use crate::types::var;
 
 use super::solver::{Inputs, Outputs, Solver, State};
@@ -204,6 +206,8 @@ impl Solver {
                 next_learned_id: ClauseId::new(1),
                 decision_stack: Vec::new(),
                 clause_db: HashMap::new(),
+                restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
+                clause_deletion: ClauseDeletion::new(),
             },
         }
     }

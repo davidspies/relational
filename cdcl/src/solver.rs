@@ -8,7 +8,9 @@ use relational::database::{
 
 use super::AssignmentsSink;
 use super::cause_sink::CauseSink;
+use super::clause_deletion::ClauseDeletion;
 use super::literal_counts_sink::LiteralCountsSink;
+use super::restart::RestartStrategy;
 use super::types::{ClauseId, Conflict, Level, Lit};
 
 /// Type alias for the causes output (complex due to nested structure).
@@ -52,6 +54,10 @@ pub(super) struct State {
     pub decision_stack: Vec<(Level, Lit, bool)>,
     /// Cache of clause contents: clause_id -> list of literals
     pub clause_db: HashMap<ClauseId, Vec<Lit>>,
+    /// Restart strategy.
+    pub restart: RestartStrategy,
+    /// Clause deletion manager.
+    pub clause_deletion: ClauseDeletion,
 }
 
 /// CDCL SAT Solver.
@@ -122,6 +128,16 @@ impl Solver {
 
     /// Learn a clause (adds to persistent learned relation).
     pub fn learn_clause(&mut self, db: &mut Database, literals: &[Lit]) -> ClauseId {
+        self.learn_clause_with_levels(db, literals, &[])
+    }
+
+    /// Learn a clause with level information for LBD tracking.
+    pub fn learn_clause_with_levels(
+        &mut self,
+        db: &mut Database,
+        literals: &[Lit],
+        levels: &[Level],
+    ) -> ClauseId {
         let cid = self.state.next_learned_id;
         self.state.next_learned_id = ClauseId::new(self.state.next_learned_id.raw() + 1);
         for &lit in literals {
@@ -129,6 +145,10 @@ impl Solver {
         }
         // Cache clause contents for conflict analysis
         self.state.clause_db.insert(cid, literals.to_vec());
+        // Track for clause deletion if we have levels
+        if !levels.is_empty() {
+            self.state.clause_deletion.on_learn(cid, literals, levels);
+        }
         db.commit();
         cid
     }
@@ -144,5 +164,37 @@ impl Solver {
     /// (e.g., for a ctrl-C handler to dump the graph).
     pub fn graph(db: &Database) -> relational::database::GraphHandle {
         db.graph()
+    }
+
+    /// Restart: backtrack to level 0, clearing all decisions.
+    pub fn restart(&mut self, db: &mut Database) {
+        self.backtrack_to(db, Level::TOP);
+        self.state.restart.on_restart();
+    }
+
+    /// Delete a learned clause from the solver.
+    pub fn delete_clause(&mut self, db: &mut Database, clause_id: ClauseId) {
+        if let Some(literals) = self.state.clause_db.remove(&clause_id) {
+            for lit in literals {
+                self.inputs.learned.delete((clause_id, lit));
+            }
+            self.state.clause_deletion.remove(clause_id);
+            db.commit();
+        }
+    }
+
+    /// Perform clause deletion if the learned clause database is too large.
+    pub fn maybe_delete_clauses(&mut self, db: &mut Database) {
+        if self.state.clause_deletion.should_delete() {
+            let to_delete = self.state.clause_deletion.select_for_deletion();
+            for clause_id in to_delete {
+                if let Some(literals) = self.state.clause_db.remove(&clause_id) {
+                    for lit in literals {
+                        self.inputs.learned.delete((clause_id, lit));
+                    }
+                }
+            }
+            db.commit();
+        }
     }
 }

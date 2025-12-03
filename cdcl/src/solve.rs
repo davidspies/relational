@@ -55,8 +55,22 @@ impl Solver {
                             // Non-chronological backtrack to the computed level FIRST
                             self.backtrack_to(db, analysis.backtrack_level);
 
-                            // Then learn the clause (it should now be unit/asserting)
-                            self.learn_clause(db, &analysis.learned_clause);
+                            // Then learn the clause with LBD tracking
+                            self.learn_clause_with_levels(
+                                db,
+                                &analysis.learned_clause,
+                                &analysis.learned_clause_levels,
+                            );
+
+                            // Decay clause activities
+                            self.state.clause_deletion.decay_activities();
+
+                            // Check if we should restart
+                            if self.state.restart.on_conflict() {
+                                self.restart(db);
+                                // Good time to clean up learned clauses
+                                self.maybe_delete_clauses(db);
+                            }
 
                             // The learned clause is now unit (asserting), so propagation
                             // will assign the UIP literal on the next iteration

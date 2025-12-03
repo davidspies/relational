@@ -20,6 +20,8 @@ use crate::types::{Conflict, Level, Lit};
 pub struct AnalysisResult {
     /// The learned clause (negations of the literals that led to conflict).
     pub learned_clause: Vec<Lit>,
+    /// The decision levels of each literal in the learned clause (for LBD).
+    pub learned_clause_levels: Vec<Level>,
     /// The level to backtrack to (second-highest level in learned clause).
     pub backtrack_level: Level,
 }
@@ -110,22 +112,26 @@ impl Solver {
             return None;
         }
 
-        // Find backtrack level: second-highest level among learned clause literals
-        let mut levels: Vec<Level> = learned_clause
+        // Get levels for each literal (for LBD computation)
+        let learned_clause_levels: Vec<Level> = learned_clause
             .iter()
             .map(|&lit| *assignments.get_singleton(&(!lit)))
             .collect();
-        levels.sort();
-        levels.dedup();
 
-        let backtrack_level = if levels.len() <= 1 {
+        // Find backtrack level: second-highest level among learned clause literals
+        let mut sorted_levels = learned_clause_levels.clone();
+        sorted_levels.sort();
+        sorted_levels.dedup();
+
+        let backtrack_level = if sorted_levels.len() <= 1 {
             Level::TOP
         } else {
-            levels[levels.len() - 2]
+            sorted_levels[sorted_levels.len() - 2]
         };
 
         Some(AnalysisResult {
             learned_clause,
+            learned_clause_levels,
             backtrack_level,
         })
     }
