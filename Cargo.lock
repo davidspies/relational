@@ -110,6 +110,8 @@ dependencies = [
  "contiguous_data",
  "ctrlc",
  "priority-queue",
+ "rand",
+ "rand_chacha",
  "relational",
 ]
 

@@ -6,51 +6,62 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use priority_queue::PriorityQueue;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 use super::types::Var;
 
-/// Wrapper for f64 that implements Ord (for use as priority).
-/// Higher values have higher priority.
+/// Priority: (activity, nonce). Higher activity wins; nonce breaks ties randomly.
 #[derive(Clone, Copy, PartialEq)]
-struct Activity(f64);
+struct Priority {
+    activity: f64,
+    nonce: u64,
+}
 
-impl Eq for Activity {}
+impl Eq for Priority {}
 
-impl PartialOrd for Activity {
+impl PartialOrd for Priority {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Activity {
+impl Ord for Priority {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
+        match self.activity.partial_cmp(&other.activity) {
+            Some(Ordering::Equal) | None => self.nonce.cmp(&other.nonce),
+            Some(ord) => ord,
+        }
     }
 }
 
 pub struct Vsids {
-    /// Priority queue: var -> activity (only unassigned variables)
-    queue: PriorityQueue<Var, Activity>,
-    /// Stashed activities for assigned variables (removed from queue)
-    stashed: HashMap<Var, Activity>,
+    /// Priority queue: var -> priority (only unassigned variables)
+    queue: PriorityQueue<Var, Priority>,
+    /// Stashed priorities for assigned variables (removed from queue)
+    stashed: HashMap<Var, Priority>,
     /// Bump amount (increases for decay effect)
     bump: f64,
     /// Saved phase per variable
     phase: HashMap<Var, bool>,
+    /// RNG for generating tie-breaking nonces
+    rng: ChaCha8Rng,
 }
 
 impl Vsids {
     pub fn new(num_vars: u32) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(0x5a7d3e1f9c2b8a04);
         let mut queue = PriorityQueue::with_capacity(num_vars as usize);
-        // Initialize all variables with 0 activity
+        // Initialize all variables with 0 activity and random nonces
         for i in 1..=num_vars {
-            queue.push(Var::new(i), Activity(0.0));
+            queue.push(Var::new(i), Priority { activity: 0.0, nonce: rng.random() });
         }
         Self {
             queue,
             stashed: HashMap::new(),
             bump: 1.0,
             phase: HashMap::with_capacity(num_vars as usize),
+            rng,
         }
     }
 
@@ -58,9 +69,9 @@ impl Vsids {
         let bump = self.bump;
         // Try queue first, fall back to stashed
         if self.queue.get(&var).is_some() {
-            self.queue.change_priority_by(&var, |p| p.0 += bump);
-        } else if let Some(activity) = self.stashed.get_mut(&var) {
-            activity.0 += bump;
+            self.queue.change_priority_by(&var, |p| p.activity += bump);
+        } else if let Some(priority) = self.stashed.get_mut(&var) {
+            priority.activity += bump;
         }
     }
 
@@ -70,9 +81,10 @@ impl Vsids {
 
     pub fn set_phase(&mut self, var: Var, positive: bool) {
         self.phase.insert(var, positive);
-        // Restore from stash back to queue
-        if let Some(activity) = self.stashed.remove(&var) {
-            self.queue.push(var, activity);
+        // Restore from stash back to queue with a fresh nonce
+        if let Some(mut priority) = self.stashed.remove(&var) {
+            priority.nonce = self.rng.random();
+            self.queue.push(var, priority);
         }
     }
 
@@ -87,8 +99,8 @@ impl Vsids {
                 return Some(var);
             }
             // Remove assigned variable and stash it (will be restored via set_phase)
-            let (var, activity) = self.queue.pop().unwrap();
-            self.stashed.insert(var, activity);
+            let (var, priority) = self.queue.pop().unwrap();
+            self.stashed.insert(var, priority);
         }
     }
 }
