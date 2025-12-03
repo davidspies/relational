@@ -1,6 +1,6 @@
 //! CauseSink - accumulates causes with deterministic ordering via seeded hash.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 
 use contiguous_data::{L2Multiset, Multiset};
@@ -22,7 +22,7 @@ fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
 /// causes exist for the same literal/commit.
 pub struct CauseSink {
     /// Maps lit -> (hash, clause_id) -> multiplicity
-    data: BTreeMap<Lit, BTreeMap<(u64, ClauseId), i64>>,
+    data: HashMap<Lit, BTreeMap<(u64, ClauseId), i64>>,
     assigned_at: L2Multiset<Lit, (CommitId, Level)>,
     seed: u64,
 }
@@ -30,7 +30,7 @@ pub struct CauseSink {
 impl Default for CauseSink {
     fn default() -> Self {
         Self {
-            data: BTreeMap::new(),
+            data: HashMap::new(),
             assigned_at: L2Multiset::new(),
             seed: 0x7a3d9f1e4b2c8a05, // arbitrary fixed seed
         }
