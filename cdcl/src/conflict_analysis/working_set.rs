@@ -1,6 +1,6 @@
 //! Working set for conflict analysis, tracking literals split by decision level.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BinaryHeap, HashSet};
 
 use relational::database::CommitId;
 
@@ -9,11 +9,9 @@ use crate::types::{Level, Lit};
 
 /// Working set for conflict analysis, split by level for efficient access.
 pub(super) struct WorkingSet {
-    /// Literals at the current decision level, ordered by commit ID (most recent last).
-    /// Multiple literals can share the same commit ID, so we use a set per commit.
-    /// BTreeSet for deterministic iteration order.
-    at_current_level: BTreeMap<CommitId, BTreeSet<Lit>>,
-    /// Index of all literals in at_current_level for O(log n) membership check.
+    /// Literals at the current decision level, ordered by commit ID (highest first).
+    at_current_level: BinaryHeap<(CommitId, Lit)>,
+    /// Index of all literals in at_current_level for O(1) membership check.
     current_level_index: HashSet<Lit>,
     /// Literals at other levels.
     at_other_levels: HashSet<Lit>,
@@ -22,7 +20,7 @@ pub(super) struct WorkingSet {
 impl WorkingSet {
     pub(super) fn new() -> Self {
         Self {
-            at_current_level: BTreeMap::new(),
+            at_current_level: BinaryHeap::new(),
             current_level_index: HashSet::new(),
             at_other_levels: HashSet::new(),
         }
@@ -48,10 +46,7 @@ impl WorkingSet {
 
         if at_current {
             let commit_id = causes.get_commit_id(lit).unwrap();
-            self.at_current_level
-                .entry(commit_id)
-                .or_default()
-                .insert(lit);
+            self.at_current_level.push((commit_id, lit));
             self.current_level_index.insert(lit);
         } else {
             self.at_other_levels.insert(lit);
@@ -59,17 +54,9 @@ impl WorkingSet {
     }
 
     /// Get the most recently assigned literal at current level (highest commit ID).
-    /// Returns one literal from the most recent commit.
     pub(super) fn pop_most_recent(&mut self) -> Option<(CommitId, Lit)> {
-        let (&commit_id, lits) = self.at_current_level.last_key_value()?;
-        let lit = *lits.iter().next()?;
-        // Remove this literal from the set and index
-        let lits = self.at_current_level.get_mut(&commit_id).unwrap();
-        lits.remove(&lit);
+        let (commit_id, lit) = self.at_current_level.pop()?;
         self.current_level_index.remove(&lit);
-        if lits.is_empty() {
-            self.at_current_level.remove(&commit_id);
-        }
         Some((commit_id, lit))
     }
 
@@ -81,8 +68,8 @@ impl WorkingSet {
     /// Iterate over all literals in the working set.
     pub(super) fn into_iter(self) -> impl Iterator<Item = Lit> {
         self.at_current_level
-            .into_values()
-            .flat_map(|s| s.into_iter())
+            .into_iter()
+            .map(|(_, lit)| lit)
             .chain(self.at_other_levels.into_iter())
     }
 }
