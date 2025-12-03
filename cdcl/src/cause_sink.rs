@@ -1,48 +1,63 @@
-//! CauseSink - accumulates causes into a nested HashMap structure.
+//! CauseSink - accumulates causes with deterministic ordering via seeded hash.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 
-use contiguous_data::Multiset;
+use contiguous_data::{L2Multiset, Multiset};
 use relational::database::{CommitId, Sink};
 
 use super::types::{ClauseId, Level, Lit};
 
-/// A single cause entry: which clause at which level caused a propagation.
-type CauseEntry = (ClauseId, Level);
-
-/// Causes grouped by commit ID.
-type CommitCauses = BTreeMap<CommitId, Multiset<CauseEntry>>;
-
-/// The full cause data: for each literal, its causes by commit.
-type CauseData = HashMap<Lit, CommitCauses>;
+/// Seeded hash for deterministic ordering.
+fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    seed.hash(&mut hasher);
+    val.hash(&mut hasher);
+    hasher.finish()
+}
 
 /// A sink that accumulates cause information for conflict analysis.
 ///
-/// For each literal, tracks when it was derived (by CommitId) and what
-/// clause/level caused each derivation.
-#[derive(Default, Clone)]
+/// Uses BTreeMap with seeded hash for deterministic ordering when multiple
+/// causes exist for the same literal/commit.
 pub struct CauseSink {
-    data: CauseData,
+    /// Maps lit -> (hash, clause_id) -> multiplicity
+    data: BTreeMap<Lit, BTreeMap<(u64, ClauseId), i64>>,
+    assigned_at: L2Multiset<Lit, (CommitId, Level)>,
+    seed: u64,
+}
+
+impl Default for CauseSink {
+    fn default() -> Self {
+        Self {
+            data: BTreeMap::new(),
+            assigned_at: L2Multiset::new(),
+            seed: 0x7a3d9f1e4b2c8a05, // arbitrary fixed seed
+        }
+    }
 }
 
 impl CauseSink {
-    /// Get the reason clause for a literal (the clause from the earliest commit).
+    /// Get the reason clause for a literal.
     pub fn get_reason(&self, lit: Lit) -> Option<ClauseId> {
-        self.data.get(&lit).and_then(|commits| {
-            commits.values().next().and_then(|multiset| {
-                multiset
-                    .iter()
-                    .find(|(cid, _)| !cid.is_decision())
-                    .map(|(cid, _)| *cid)
-            })
-        })
+        let commits = self.data.get(&lit)?;
+        let &(_, clause) = commits.keys().next().unwrap();
+        (!clause.is_decision()).then_some(clause)
     }
 
     /// Get the earliest commit ID for a literal.
     pub fn get_commit_id(&self, lit: Lit) -> Option<CommitId> {
-        self.data
-            .get(&lit)
-            .and_then(|commits| commits.keys().next().copied())
+        let &(commits, _) = self.assigned_at.get_singleton(&lit)?;
+        Some(commits)
+    }
+
+    pub fn get_level(&self, lit: Lit) -> Option<Level> {
+        let &(_, level) = self.assigned_at.get_singleton(&lit)?;
+        Some(level)
+    }
+
+    pub fn contains_lit(&self, lit: Lit) -> bool {
+        self.data.contains_key(&lit)
     }
 }
 
@@ -50,14 +65,17 @@ impl Sink<((Lit, CommitId), (ClauseId, Level))> for CauseSink {
     fn dump_all(&mut self, incoming: &mut Multiset<((Lit, CommitId), (ClauseId, Level))>) {
         for (((lit, commit_id), (clause_id, level)), diff) in incoming.drain() {
             let commits = self.data.entry(lit).or_default();
-            let multiset = commits.entry(commit_id).or_default();
-            multiset.update((clause_id, level), diff);
-            if multiset.is_empty() {
-                commits.remove(&commit_id);
+            let hash = seeded_hash(&clause_id, self.seed);
+            let key = (hash, clause_id);
+            let entry = commits.entry(key).or_insert(0);
+            *entry += diff;
+            if *entry == 0 {
+                commits.remove(&key);
                 if commits.is_empty() {
                     self.data.remove(&lit);
                 }
             }
+            self.assigned_at.update(lit, (commit_id, level), diff);
         }
     }
 }

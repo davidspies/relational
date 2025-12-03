@@ -41,7 +41,6 @@ impl Solver {
 
         // Get the implication graph and assignments
         let causes = self.outputs.causes.get();
-        let assignments = self.outputs.assignments.get();
 
         // Initialize the working set (nogood): the true assignments that caused conflict
         let initial_lits: Vec<Lit> = match conflict {
@@ -62,7 +61,7 @@ impl Solver {
         // Use the minimum of current level and max level in conflict literals
         let max_conflict_level = initial_lits
             .iter()
-            .map(|lit| *assignments.get_singleton(lit))
+            .map(|&lit| causes.get_level(lit).unwrap())
             .max()
             .unwrap_or(Level::TOP);
         let current_level = self.state.current_level.min(max_conflict_level);
@@ -73,7 +72,7 @@ impl Solver {
 
         let mut working = WorkingSet::new();
         for lit in initial_lits {
-            working.insert(lit, current_level, &assignments, &causes);
+            working.insert(lit, current_level, &causes);
         }
 
         // Resolution loop: resolve until we have exactly 1 literal at current level (1-UIP)
@@ -98,7 +97,7 @@ impl Solver {
                 // Skip the literal we're resolving on
                 if clause_lit != lit {
                     // Add the negated literal (the true assignment that made this false)
-                    working.insert(!clause_lit, current_level, &assignments, &causes);
+                    working.insert(!clause_lit, current_level, &causes);
                 }
             }
         }
@@ -115,7 +114,7 @@ impl Solver {
         // Get levels for each literal (for LBD computation)
         let learned_clause_levels: Vec<Level> = learned_clause
             .iter()
-            .map(|&lit| *assignments.get_singleton(&(!lit)))
+            .map(|&lit| causes.get_level(!lit).unwrap())
             .collect();
 
         // Find backtrack level: second-highest level among learned clause literals

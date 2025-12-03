@@ -2,13 +2,15 @@
 
 use std::cell::Ref;
 
+use crate::cause_sink::CauseSink;
+
+use super::Solver;
 use super::types::{Level, Lit, Var};
-use super::{AssignmentsSink, Solver};
 
 impl Solver {
     /// Get a reference to the assignments sink.
-    pub fn assignments(&self) -> Ref<'_, AssignmentsSink> {
-        self.outputs.assignments.get()
+    pub fn assignments(&self) -> Ref<'_, CauseSink> {
+        self.outputs.causes.get()
     }
 
     /// Get the current decision level.
@@ -18,16 +20,16 @@ impl Solver {
 
     /// Check if a variable is assigned.
     pub fn is_assigned(&self, v: Var) -> bool {
-        let assigned = self.outputs.assigned.get();
-        assigned.contains(&Lit::pos(v)) || assigned.contains(&Lit::neg(v))
+        let assigned = self.outputs.causes.get();
+        assigned.contains_lit(Lit::pos(v)) || assigned.contains_lit(Lit::neg(v))
     }
 
     /// Get the truth value of a variable, if assigned.
     pub fn value(&self, v: Var) -> Option<bool> {
-        let assigned = self.outputs.assigned.get();
-        if assigned.contains(&Lit::pos(v)) {
+        let assigned = self.outputs.causes.get();
+        if assigned.contains_lit(Lit::pos(v)) {
             Some(true)
-        } else if assigned.contains(&Lit::neg(v)) {
+        } else if assigned.contains_lit(Lit::neg(v)) {
             Some(false)
         } else {
             None
@@ -38,9 +40,36 @@ impl Solver {
     ///
     /// Returns the unassigned literal that appears in the most remaining clauses.
     /// This tends to satisfy more clauses and prune the search space faster.
-    pub fn pick_branching_literal(&self) -> Option<Lit> {
+    #[allow(dead_code)]
+    pub fn pick_branching_literal_dlis(&self) -> Option<Lit> {
         let counts = self.outputs.literal_counts.get();
-        let (_, lits) = counts.max_count()?;
-        Some(lits.iter().next().copied().unwrap())
+        let (_, lit) = counts.max_count()?;
+        Some(lit)
+    }
+
+    /// Pick the next branching literal using VSIDS heuristic with phase saving.
+    ///
+    /// Returns the unassigned variable with highest activity, using saved phase.
+    pub fn pick_branching_literal(&mut self) -> Option<Lit> {
+        self.pick_branching_literal_tracked().0
+    }
+
+    /// Pick with tracking info for profiling.
+    /// Returns (literal, heap_rebuilds).
+    pub fn pick_branching_literal_tracked(&mut self) -> (Option<Lit>, u64) {
+        // Use DLIS if USE_DLIS env var is set
+        if std::env::var("USE_DLIS").is_ok() {
+            return (self.pick_branching_literal_dlis(), 0);
+        }
+        let assigned = self.outputs.causes.get();
+        let (var, rebuilds) = self
+            .state
+            .vsids
+            .pick(|v| assigned.contains_lit(Lit::pos(v)) || assigned.contains_lit(Lit::neg(v)));
+        let lit = var.map(|v| {
+            let phase = self.state.vsids.get_phase(v);
+            if phase { Lit::pos(v) } else { Lit::neg(v) }
+        });
+        (lit, rebuilds)
     }
 }

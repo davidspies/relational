@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, HashSet};
 
 use relational::database::CommitId;
 
-use crate::AssignmentsSink;
 use crate::cause_sink::CauseSink;
 use crate::types::{Level, Lit};
 
@@ -26,14 +25,8 @@ impl WorkingSet {
     }
 
     /// Insert a literal into the appropriate collection based on its level.
-    pub(super) fn insert(
-        &mut self,
-        lit: Lit,
-        current_level: Level,
-        assignments: &AssignmentsSink,
-        causes: &CauseSink,
-    ) {
-        let at_current = *assignments.get_singleton(&lit) == current_level;
+    pub(super) fn insert(&mut self, lit: Lit, current_level: Level, causes: &CauseSink) {
+        let at_current = causes.get_level(lit).unwrap() == current_level;
         let in_current = self
             .at_current_level
             .values()
@@ -53,15 +46,11 @@ impl WorkingSet {
         }
 
         if at_current {
-            if let Some(commit_id) = causes.get_commit_id(lit) {
-                self.at_current_level
-                    .entry(commit_id)
-                    .or_default()
-                    .insert(lit);
-            } else {
-                // Decision literal at current level - treat as other level for simplicity
-                self.at_other_levels.insert(lit);
-            }
+            let commit_id = causes.get_commit_id(lit).unwrap();
+            self.at_current_level
+                .entry(commit_id)
+                .or_default()
+                .insert(lit);
         } else {
             self.at_other_levels.insert(lit);
         }

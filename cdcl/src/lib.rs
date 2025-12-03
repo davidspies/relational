@@ -10,6 +10,7 @@ mod cause_sink;
 mod clause_deletion;
 pub mod cnf;
 mod conflict_analysis;
+mod conflicts_sink;
 mod literal_counts_sink;
 pub mod proof;
 mod queries;
@@ -18,6 +19,7 @@ mod solve;
 mod solver;
 mod solver_setup;
 mod types;
+mod vsids;
 
 #[cfg(test)]
 mod tests;
@@ -25,8 +27,3 @@ mod tests;
 pub use cnf::{Cnf, SolveResult};
 pub use solver::Solver;
 pub use types::{ClauseId, Conflict, Level, Lit, Var};
-
-use contiguous_data::L2Multiset;
-
-/// A sink that tracks assignments with efficient lookup by literal.
-pub type AssignmentsSink = L2Multiset<Lit, Level>;

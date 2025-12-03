@@ -112,11 +112,6 @@ impl ClauseDeletion {
     pub fn remove(&mut self, clause_id: ClauseId) {
         self.clause_info.remove(&clause_id);
     }
-
-    /// Get the number of tracked learned clauses.
-    pub fn num_clauses(&self) -> usize {
-        self.clause_info.len()
-    }
 }
 
 impl Default for ClauseDeletion {

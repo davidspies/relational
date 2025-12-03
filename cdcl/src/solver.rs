@@ -2,21 +2,20 @@
 
 use std::collections::HashMap;
 
-use relational::database::{
-    CommitId, Database, InputHandle, Output, PersistentInputHandle, SavedOutput,
-};
+use relational::database::{CommitId, Database, InputHandle, Output, PersistentInputHandle};
 
-use super::AssignmentsSink;
 use super::cause_sink::CauseSink;
 use super::clause_deletion::ClauseDeletion;
+use super::conflicts_sink::ConflictsSink;
 use super::literal_counts_sink::LiteralCountsSink;
 use super::restart::RestartStrategy;
 use super::types::{ClauseId, Conflict, Level, Lit};
+use super::vsids::Vsids;
 
-/// Type alias for the causes output (complex due to nested structure).
+/// Type aliases for outputs with custom sinks.
 type CausesOutput = Output<((Lit, CommitId), (ClauseId, Level)), CauseSink>;
-type AssignmentsOutput = SavedOutput<(Lit, Level), AssignmentsSink>;
 type LiteralCountsOutput = Output<(Lit, i64), LiteralCountsSink>;
+type ConflictsOutput = Output<Conflict, ConflictsSink>;
 
 /// Input handles for the solver.
 pub(super) struct Inputs {
@@ -32,14 +31,10 @@ pub(super) struct Inputs {
 
 /// Output relations from the dataflow.
 pub(super) struct Outputs {
-    /// Final assignments: (lit, level) - derived by taking min commit_id per lit
-    pub assignments: AssignmentsOutput,
     /// Causes: ((lit, commit_id), (clause_id, level)) with CauseSink for efficient lookup
     pub causes: CausesOutput,
-    /// The "assigned" relation - just tracks which literals are assigned true
-    pub assigned: SavedOutput<Lit>,
     /// Conflicts detected during propagation
-    pub conflicts: Output<Conflict>,
+    pub conflicts: ConflictsOutput,
     /// Count of remaining clauses each literal appears in (for decision heuristics)
     pub literal_counts: LiteralCountsOutput,
 }
@@ -58,6 +53,10 @@ pub(super) struct State {
     pub restart: RestartStrategy,
     /// Clause deletion manager.
     pub clause_deletion: ClauseDeletion,
+    /// VSIDS decision heuristic.
+    pub vsids: Vsids,
+    /// Number of variables (for VSIDS initialization).
+    pub num_vars: u32,
 }
 
 /// CDCL SAT Solver.
@@ -72,6 +71,12 @@ impl Solver {
     pub fn add_clause(&mut self, db: &mut Database, clause_id: ClauseId, literals: &[Lit]) {
         for &lit in literals {
             self.inputs.clauses.insert((clause_id, lit));
+            // Track max variable for VSIDS
+            let var_num = lit.var().raw();
+            if var_num > self.state.num_vars {
+                self.state.num_vars = var_num;
+                self.state.vsids.ensure_capacity(var_num);
+            }
         }
         // Cache clause contents for conflict analysis
         self.state.clause_db.insert(clause_id, literals.to_vec());
@@ -91,6 +96,9 @@ impl Solver {
             .decision_stack
             .push((self.state.current_level, lit, tried_opposite));
 
+        // Save phase for VSIDS
+        self.state.vsids.set_phase(lit.var(), lit.is_positive());
+
         self.inputs.levels.insert(self.state.current_level);
         self.inputs.decision_assignments.insert((
             lit,
@@ -108,7 +116,7 @@ impl Solver {
     /// Propagate units until fixpoint or conflict.
     /// Returns Ok(()) if no conflict, Err(conflict) if conflict found.
     pub fn propagate(&mut self) -> Result<(), Conflict> {
-        if let Some(&conflict) = self.outputs.conflicts.get().iter().next() {
+        if let Some(conflict) = self.outputs.conflicts.get().first() {
             return Err(conflict);
         }
         Ok(())

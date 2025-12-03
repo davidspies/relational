@@ -135,13 +135,14 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
             .map(move |v| (v, self.counts.get(&(key.clone(), v.clone()))))
     }
 
-    /// Get the value for the key if there is exactly one value. Otherwise panic.
+    /// Get the value for the key if there is at most one value.
+    /// Panic if there is more than one.
     #[track_caller]
-    pub fn get_singleton(&self, key: &K) -> &V {
+    pub fn get_singleton(&self, key: &K) -> Option<&V> {
         let mut iter = self.iter_values(key);
-        let output = iter.next().unwrap();
+        let output = iter.next()?;
         assert!(iter.next().is_none(), "Expected singleton for key");
-        output
+        Some(output)
     }
 }
 

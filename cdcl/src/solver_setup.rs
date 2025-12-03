@@ -10,6 +10,7 @@ use crate::Conflict;
 use crate::clause_deletion::ClauseDeletion;
 use crate::restart::RestartStrategy;
 use crate::types::var;
+use crate::vsids::Vsids;
 
 use super::solver::{Inputs, Outputs, Solver, State};
 use super::types::{ClauseId, Level, Lit};
@@ -178,10 +179,8 @@ impl Solver {
         );
 
         // Create outputs from relations (need to box them to store in struct)
-        let assignments_out = assignments.get().output_with_sink();
         let causes_out = causes.output_with_sink();
-        let assigned_out = assigned.get().output();
-        let conflicts_out = conflicts.output();
+        let conflicts_out = conflicts.output_with_sink();
         let literal_counts_out = literal_counts.output_with_sink();
 
         // Initialize with Level::TOP so unit propagation works at level 0
@@ -195,9 +194,7 @@ impl Solver {
                 decision_assignments,
             },
             outputs: Outputs {
-                assignments: assignments_out,
                 causes: causes_out,
-                assigned: assigned_out,
                 conflicts: conflicts_out,
                 literal_counts: literal_counts_out,
             },
@@ -208,6 +205,8 @@ impl Solver {
                 clause_db: HashMap::new(),
                 restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
                 clause_deletion: ClauseDeletion::new(),
+                vsids: Vsids::new(0), // Will be resized as clauses are added
+                num_vars: 0,
             },
         }
     }
