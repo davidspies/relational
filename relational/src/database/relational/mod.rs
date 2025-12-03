@@ -15,7 +15,7 @@ mod ops_distinct;
 mod ops_flat_map;
 mod ops_join;
 mod ops_map;
-mod ops_max;
+mod ops_min;
 mod ops_negate;
 mod ops_sum;
 mod ops_union;

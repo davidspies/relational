@@ -146,17 +146,17 @@ impl<R> Relation<R> {
         self.map_h(|t| (t, 1i64)).group_sum().with_op_type("counts")
     }
 
-    /// Minimum value by key.
+    /// Maximum value by key.
     /// Input must be (K, V) tuples where K is the key and V is the value.
-    pub fn group_min<K, V>(self) -> Relation<impl Op<(K, V)>>
+    pub fn group_max<K, V>(self) -> Relation<impl Op<(K, V)>>
     where
         R: Op<(K, V)>,
         K: Clone + Eq + Hash,
         V: Clone + Eq + Hash + Ord,
     {
         self.map_h(|(k, v)| (k, Reverse(v)))
-            .group_max()
-            .with_op_type("group_min")
+            .group_min()
+            .with_op_type("group_max")
             .map_h(|(k, Reverse(v))| (k, v))
     }
 

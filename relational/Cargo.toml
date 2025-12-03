@@ -9,6 +9,7 @@ consolidate_all = []
 [dependencies]
 derive-where = "*"
 anyhow = "*"
+index_heap = { path = "../index_heap" }
 
 [dev-dependencies]
 proptest = "*"
