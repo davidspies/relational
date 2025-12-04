@@ -111,12 +111,18 @@ impl Solver {
         );
 
         assign_saved!(
-            grouped_watched_literals,
+            grouped_watched_literals_satisfiable,
             hashed_clause_literals
                 .antijoin(removed_assignments)
                 .map(|((cid, lit), hash)| (cid, (hash, lit)))
                 .group_min_n::<_, _, 2>()
                 .consolidate()
+        );
+
+        assign_saved!(
+            grouped_watched_literals,
+            grouped_watched_literals_satisfiable
+                .get()
                 .antijoin(satisfied_clause_ids.get())
         );
 
@@ -124,9 +130,29 @@ impl Solver {
             watched_literals,
             grouped_watched_literals
                 .get()
-                .flat_map(|(cid, arr)| { arr.into_iter().map(move |(_, lit)| (cid, lit)) })
+                .flat_map(|(cid, arr)| arr.into_iter().map(move |(_, lit)| (cid, lit)))
                 .consolidate()
         );
+
+        // A clause is satisfiable if it is satisfied or has at least one watched literal unassigned
+        assign!(
+            satisfiable_clause_ids,
+            grouped_watched_literals_satisfiable
+                .get()
+                .fst()
+                .consolidate()
+        );
+
+        // Empty clauses: Clauses which are no longer satisfiable
+        assign_saved!(
+            empty_clauses,
+            all_clause_ids
+                .set_minus(satisfiable_clause_ids)
+                .consolidate()
+        );
+
+        // Interrupt early when an empty clause is detected
+        db.interrupt(empty_clauses.get());
 
         // === Compute Units ===
         // Clauses with at least one true literal are satisfied
@@ -149,23 +175,6 @@ impl Solver {
                 .consolidate()
                 .swap(),
         );
-
-        // A clause is satisfiable if it has at least one watched literal unassigned
-        assign!(
-            satisfiable_clause_ids,
-            grouped_watched_literals.get().fst().consolidate()
-        );
-
-        // Empty clauses: Clauses which are neither satisfied nor satisfiable
-        assign_saved!(
-            empty_clauses,
-            all_clause_ids
-                .set_minus(satisfied_clause_ids.get().concat(satisfiable_clause_ids))
-                .consolidate()
-        );
-
-        // Interrupt early when an empty clause is detected
-        db.interrupt(empty_clauses.get());
 
         // Unit clauses: exactly one remaining literal (must be assigned true)
         assign!(
