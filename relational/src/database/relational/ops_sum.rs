@@ -1,9 +1,9 @@
 //! Sum operator - sum values by key.
 
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::{Add, Mul, Sub};
 
+use ahash::AHashMap;
 use contiguous_data::Diff;
 
 use super::relation::{Op, Relation};
@@ -18,7 +18,7 @@ where
 {
     inner: Relation<R>,
     /// Track sum per key
-    sums: HashMap<K, V>,
+    sums: AHashMap<K, V>,
 }
 
 impl<K, V, R> Op<(K, V)> for SumOp<K, V, R>
@@ -76,7 +76,7 @@ impl<R> Relation<R> {
         Relation::new(
             SumOp {
                 inner: self,
-                sums: HashMap::new(),
+                sums: AHashMap::new(),
             },
             commit_id,
             graph,

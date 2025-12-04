@@ -7,6 +7,7 @@ version.workspace = true
 consolidate_all = []
 
 [dependencies]
+ahash = "*"
 anyhow = "*"
 contiguous_data = { path = "../contiguous_data" }
 derive-where = "*"

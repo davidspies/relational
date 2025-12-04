@@ -1,10 +1,10 @@
 //! FeedbackWithId wrapper - stamps tuples with CommitId when first seen.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 
+use ahash::AHashMap;
 use contiguous_data::Multiset;
 
 use crate::database::Relation;
@@ -24,13 +24,13 @@ pub(crate) struct FeedbackWithIdWrapper<T, R: Op<T>> {
     /// The input relation produces T.
     input: Relation<R>,
     /// Track input totals by T alone (not (T, CommitId)) for pop() handling.
-    input_totals_by_t: HashMap<T, i64>,
+    input_totals_by_t: AHashMap<T, i64>,
     /// Maps T -> CommitId for tuples currently in output.
-    t_to_commit_id: HashMap<T, CommitId>,
+    t_to_commit_id: AHashMap<T, CommitId>,
     /// Scratch space for collecting changes.
     change_scratch: Multiset<T>,
     /// Scratch space for checkpoint tuples during pop (T -> CommitId).
-    checkpoint_scratch: HashMap<T, CommitId>,
+    checkpoint_scratch: AHashMap<T, CommitId>,
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
@@ -43,10 +43,10 @@ impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
             variable,
             commit_id,
             input,
-            input_totals_by_t: HashMap::new(),
-            t_to_commit_id: HashMap::new(),
+            input_totals_by_t: AHashMap::new(),
+            t_to_commit_id: AHashMap::new(),
             change_scratch: Multiset::new(),
-            checkpoint_scratch: HashMap::new(),
+            checkpoint_scratch: AHashMap::new(),
         }
     }
 

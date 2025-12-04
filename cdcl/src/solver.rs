@@ -1,7 +1,6 @@
 //! CDCL SAT Solver structure and methods.
 
-use std::collections::HashMap;
-
+use ahash::AHashMap;
 use relational::database::{CommitId, Database, InputHandle, Output, PersistentInputHandle};
 
 use super::cause_sink::CauseSink;
@@ -47,7 +46,7 @@ pub(super) struct State {
     /// Stack of decisions: (level, literal, tried_both)
     pub decision_stack: Vec<(Level, Lit, bool)>,
     /// Cache of clause contents: clause_id -> list of literals
-    pub clause_db: HashMap<ClauseId, Vec<Lit>>,
+    pub clause_db: AHashMap<ClauseId, Vec<Lit>>,
     /// Restart strategy.
     pub restart: RestartStrategy,
     /// Clause deletion manager.
@@ -117,7 +116,7 @@ impl Solver {
         while self.state.current_level > level {
             // Track which variables we've seen and their polarity.
             // None means conflict (both polarities seen).
-            let mut seen: HashMap<Var, Option<bool>> = HashMap::new();
+            let mut seen: AHashMap<Var, Option<bool>> = AHashMap::new();
             // Sort literals for deterministic processing order.
             let assignments = self.outputs.this_level_assignments.get();
             let mut lits: Vec<_> = assignments.iter().copied().collect();

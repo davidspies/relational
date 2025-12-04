@@ -1,8 +1,9 @@
 //! Variable for tracking iterative computation state.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::hash::Hash;
 
+use ahash::AHashMap;
 use contiguous_data::{Diff, L2Vec, Multiset};
 
 /// A variable in an iterative computation.
@@ -19,7 +20,7 @@ use contiguous_data::{Diff, L2Vec, Multiset};
 pub struct Variable<T> {
     /// Cumulative input multiplicities.
     /// A tuple is considered "reachable" when this is non-zero.
-    input_totals: HashMap<T, i64>,
+    input_totals: AHashMap<T, i64>,
     /// The seen set - tuples we've emitted +1 for.
     output_seen: HashSet<T>,
     /// Staged changes (not yet committed).
@@ -34,7 +35,7 @@ impl<T: Clone + Eq + Hash> Variable<T> {
     /// Create a new empty variable.
     pub fn new() -> Self {
         Variable {
-            input_totals: HashMap::new(),
+            input_totals: AHashMap::new(),
             output_seen: HashSet::new(),
             staged: Multiset::new(),
             pending: Multiset::new(),

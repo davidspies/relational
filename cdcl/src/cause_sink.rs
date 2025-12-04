@@ -1,7 +1,8 @@
 //! CauseSink - accumulates causes with deterministic ordering via seeded hash.
 
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
+use ahash::RandomState;
 use contiguous_data::{L2Heaps, L2Multiset, Multiset};
 use relational::database::{CommitId, Sink};
 
@@ -9,10 +10,8 @@ use super::types::{ClauseId, Level, Lit};
 
 /// Seeded hash for deterministic ordering.
 fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
-    let mut hasher = std::hash::DefaultHasher::new();
-    seed.hash(&mut hasher);
-    val.hash(&mut hasher);
-    hasher.finish()
+    let build_hasher = RandomState::with_seeds(seed, 0, 0, 0);
+    build_hasher.hash_one(val)
 }
 
 /// A sink that accumulates cause information for conflict analysis.
@@ -68,7 +67,10 @@ impl CauseSink {
 
     /// Count literals assigned at a specific level.
     pub fn count_at_level(&self, level: Level) -> usize {
-        self.levels.keys().filter(|&lit| self.levels.get_singleton(lit) == Some(&level)).count()
+        self.levels
+            .keys()
+            .filter(|&lit| self.levels.get_singleton(lit) == Some(&level))
+            .count()
     }
 
     /// Count literals not assigned at level 0 (non-fixed assignments).

@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+ahash = "*"
 arrayvec = "*"
 index_list = { version = "*" }
 

@@ -1,18 +1,16 @@
 //! CDCL Solver dataflow setup and constructor.
 
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::ops::Not;
 
+use ahash::{AHashMap, RandomState};
 use relational::database::{CommitId, DatabaseBuilder};
 use relational::{assign, assign_saved, create_input, create_persistent_input, create_variable};
 
 /// Seeded hash for deterministic watched literal selection.
 fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
-    let mut hasher = std::hash::DefaultHasher::new();
-    seed.hash(&mut hasher);
-    val.hash(&mut hasher);
-    hasher.finish()
+    let build_hasher = RandomState::with_seeds(seed, 0, 0, 0);
+    build_hasher.hash_one(val)
 }
 
 const WATCH_SEED: u64 = 0x7a3b9c1d4e5f6028;
@@ -242,7 +240,7 @@ impl Solver {
                 current_level: Level::TOP,
                 next_learned_id: ClauseId::new(1),
                 decision_stack: Vec::new(),
-                clause_db: HashMap::new(),
+                clause_db: AHashMap::new(),
                 restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
                 clause_deletion: ClauseDeletion::new(),
                 vsids: Vsids::new(num_vars),

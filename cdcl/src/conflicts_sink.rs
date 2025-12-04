@@ -1,7 +1,8 @@
 //! ConflictsSink - tracks conflicts with deterministic ordering via seeded hash.
 
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
+use ahash::RandomState;
 use contiguous_data::Multiset;
 use priority_queue::PriorityQueue;
 use relational::database::Sink;
@@ -10,10 +11,8 @@ use super::types::Conflict;
 
 /// Seeded hash for deterministic ordering.
 fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
-    let mut hasher = std::hash::DefaultHasher::new();
-    seed.hash(&mut hasher);
-    val.hash(&mut hasher);
-    hasher.finish()
+    let build_hasher = RandomState::with_seeds(seed, 0, 0, 0);
+    build_hasher.hash_one(val)
 }
 
 /// A sink that tracks conflicts with deterministic ordering.

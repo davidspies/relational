@@ -1,7 +1,8 @@
 use arrayvec::ArrayVec;
 use index_list::{Index, IndexList};
-use std::collections::HashMap;
 use std::hash::Hash;
+
+use ahash::AHashMap;
 
 struct HeapNode<V> {
     value: V,
@@ -23,16 +24,16 @@ enum HeapRoot<V, const N: usize> {
 
 pub struct L2Heaps<K, V, const N: usize = 2> {
     nodes: IndexList<HeapNode<V>>,
-    roots: HashMap<K, HeapRoot<V, N>>,
-    positions: HashMap<(K, V), Index>,
+    roots: AHashMap<K, HeapRoot<V, N>>,
+    positions: AHashMap<(K, V), Index>,
 }
 
 impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K, V, N> {
     pub fn new() -> Self {
         Self {
             nodes: IndexList::new(),
-            roots: HashMap::new(),
-            positions: HashMap::new(),
+            roots: AHashMap::new(),
+            positions: AHashMap::new(),
         }
     }
 

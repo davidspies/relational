@@ -1,9 +1,11 @@
-//! L2Multiset - a HashMap<K, Multiset<V>> with shared contiguous storage.
+//! L2Multiset - a AHashMap<K, Multiset<V>> with shared contiguous storage.
+
+use std::hash::Hash;
 
 use arrayvec::ArrayVec;
 use index_list::{Index, IndexList};
-use std::collections::HashMap;
-use std::hash::Hash;
+
+use ahash::AHashMap;
 
 use crate::{Diff, Multiset};
 
@@ -20,8 +22,8 @@ enum Root<V> {
 
 pub struct L2Multiset<K, V> {
     nodes: IndexList<ListNode<V>>,
-    roots: HashMap<K, Root<V>>,
-    positions: HashMap<(K, V), Index>,
+    roots: AHashMap<K, Root<V>>,
+    positions: AHashMap<(K, V), Index>,
     counts: Multiset<(K, V)>,
 }
 
@@ -29,8 +31,8 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
     pub fn new() -> Self {
         Self {
             nodes: IndexList::new(),
-            roots: HashMap::new(),
-            positions: HashMap::new(),
+            roots: AHashMap::new(),
+            positions: AHashMap::new(),
             counts: Multiset::new(),
         }
     }
@@ -66,7 +68,7 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
     }
 
     /// Delete (key, value) - decrement count by 1.
-    /// No-op if the key doesn't exist (matches HashMap<K, Multiset<V>> semantics).
+    /// No-op if the key doesn't exist (matches AHashMap<K, Multiset<V>> semantics).
     pub fn delete(&mut self, key: &K, value: &V) {
         if !self.roots.contains_key(key) {
             return;

@@ -1,7 +1,8 @@
 //! Differential collections - multisets that track changes.
 
-use std::collections::HashMap;
 use std::hash::Hash;
+
+use ahash::AHashMap;
 
 use crate::Diff;
 
@@ -13,7 +14,7 @@ use crate::Diff;
 #[derive(Debug, Clone)]
 pub struct Multiset<T> {
     /// The current state: tuple -> multiplicity
-    data: HashMap<T, Diff>,
+    data: AHashMap<T, Diff>,
 }
 
 impl<T: Eq + Hash> Default for Multiset<T> {
@@ -26,7 +27,7 @@ impl<T: Eq + Hash> Multiset<T> {
     /// Create an empty collection.
     pub fn new() -> Self {
         Multiset {
-            data: HashMap::new(),
+            data: AHashMap::new(),
         }
     }
 
