@@ -54,6 +54,8 @@ pub(super) struct State {
     pub clause_deletion: ClauseDeletion,
     /// VSIDS decision heuristic.
     pub vsids: Vsids,
+    /// Total number of variables.
+    pub num_vars: u32,
 }
 
 /// CDCL SAT Solver.

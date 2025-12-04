@@ -6,6 +6,7 @@ use relational::database::Database;
 
 use super::Solver;
 use super::proof::ProofWriter;
+use super::types::Level;
 
 /// Statistics for debugging/profiling.
 #[derive(Default)]
@@ -50,12 +51,21 @@ impl Solver {
             // Periodic progress report every 5 seconds
             let now = Instant::now();
             if now.duration_since(last_report).as_secs() >= 5 {
+                let causes = self.outputs.causes.get();
+                let level = self.state.current_level.raw();
+                let fixed = causes.count_at_level(Level::TOP);
+                let total_non_fixed = self.state.num_vars as usize - fixed;
+                let assigned_non_fixed = causes.count_non_fixed();
+                let learned = self.state.clause_deletion.len();
+                let elapsed = start.elapsed().as_secs_f64();
+                let SolveStats {
+                    decisions,
+                    conflicts,
+                    restarts,
+                } = stats;
                 eprintln!(
-                    "c progress: {:.1}s decisions={} conflicts={} restarts={}",
-                    start.elapsed().as_secs_f64(),
-                    stats.decisions,
-                    stats.conflicts,
-                    stats.restarts
+                    "c progress: {elapsed:.1}s decisions={decisions} conflicts={conflicts} restarts={restarts} \
+                    learned={learned} level={level} assigned={assigned_non_fixed}/{total_non_fixed}",
                 );
                 last_report = now;
             }

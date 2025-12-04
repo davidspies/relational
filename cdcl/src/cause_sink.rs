@@ -65,6 +65,19 @@ impl CauseSink {
     pub fn count_assigned(&self) -> usize {
         self.levels.keys().count()
     }
+
+    /// Count literals assigned at a specific level.
+    pub fn count_at_level(&self, level: Level) -> usize {
+        self.levels.keys().filter(|&lit| self.levels.get_singleton(lit) == Some(&level)).count()
+    }
+
+    /// Count literals not assigned at level 0 (non-fixed assignments).
+    pub fn count_non_fixed(&self) -> usize {
+        self.levels
+            .keys()
+            .filter(|&lit| self.levels.get_singleton(lit) != Some(&Level::TOP))
+            .count()
+    }
 }
 
 impl Sink<((Lit, CommitId), (ClauseId, Level))> for CauseSink {
