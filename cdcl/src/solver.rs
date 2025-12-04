@@ -28,6 +28,12 @@ pub(super) struct Inputs {
 
 /// Output relations from the dataflow.
 pub(super) struct Outputs {
+    /// Level 0 contradictions: clause IDs that become empty due to unary clause propagation
+    pub l0_contradiction: Output<()>,
+    /// Unary literals detected at level 0 (must be assigned in any solution)
+    pub unary_lits: Output<Lit>,
+    /// Unary literals derived from binary clause contradictions (e.g., a->b and a->!b implies !a)
+    pub unary_from_binary_contradiction: Output<Lit>,
     /// Causes: ((lit, commit_id), (clause_id, level)) with CauseSink for efficient lookup
     pub causes: CausesOutput,
     /// Conflicts detected during propagation
@@ -55,6 +61,8 @@ pub(super) struct State {
     pub vsids: Vsids,
     /// Total number of variables.
     pub num_vars: u32,
+    /// Count of unary clauses learned from binary contradictions.
+    pub binary_unary_count: usize,
 }
 
 /// CDCL SAT Solver.

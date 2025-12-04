@@ -109,4 +109,10 @@ impl Vsids {
             self.stashed.insert(var, priority);
         }
     }
+
+    /// Permanently remove a variable from VSIDS (for unary literals that are fixed at level 0).
+    pub fn remove(&mut self, var: Var) {
+        self.queue.remove(&var);
+        self.stashed.remove(&var);
+    }
 }

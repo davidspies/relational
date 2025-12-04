@@ -48,7 +48,71 @@ impl Solver {
         // All clauses (original + learned)
         assign_saved!(all_clauses, clauses.concat(learned));
 
-        assign!(all_clause_ids, all_clauses.get().fst().consolidate());
+        // Accumulate all unary literals via feedback (closure of all waves)
+        create_variable!(db, unary_lits_var, unary_lits, Lit);
+        assign_saved!(unary_lits, unary_lits);
+
+        assign_saved!(
+            l0_lit_contradiction,
+            unary_lits
+                .get()
+                .intersection(unary_lits.get().map(Not::not))
+        );
+
+        db.interrupt(l0_lit_contradiction.get());
+
+        // Mark clauses as satisfied if they contain a unary literal that makes them true
+        assign!(
+            unary_satisfied_clause_ids,
+            all_clauses.get().swap().semijoin(unary_lits.get()).snd()
+        );
+
+        assign_saved!(
+            simplified_unsatisfied,
+            all_clauses.get().antijoin(unary_satisfied_clause_ids)
+        );
+
+        // Remove literals from clauses if they're the negation of a unary literal
+        assign_saved!(
+            simplified_clauses,
+            simplified_unsatisfied
+                .get()
+                .swap()
+                .antijoin(unary_lits.get().map(Not::not))
+                .swap()
+        );
+
+        assign_saved!(
+            l0_clause_contradiction,
+            simplified_unsatisfied
+                .get()
+                .fst()
+                .set_minus(simplified_clauses.get().fst())
+        );
+
+        db.interrupt(l0_clause_contradiction.get());
+
+        assign_saved!(clause_sizes, simplified_clauses.get().fst().counts());
+        assign!(
+            unary_clause_ids,
+            clause_sizes.get().filter(|&(_cid, size)| size == 1).fst()
+        );
+        assign!(
+            new_unary_lits,
+            simplified_clauses.get().semijoin(unary_clause_ids).snd()
+        );
+
+        db.feedback(unary_lits_var, new_unary_lits);
+
+        assign!(
+            l0_contradiction,
+            l0_clause_contradiction
+                .get()
+                .map(|_| ())
+                .concat(l0_lit_contradiction.get().map(|_| ()))
+        );
+
+        assign!(all_clause_ids, simplified_clauses.get().fst().consolidate());
 
         // === Feedback-based Unit Propagation ===
         // prep accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
@@ -94,7 +158,7 @@ impl Solver {
 
         assign!(
             hashed_clause_literals,
-            all_clauses.get().map(|entry| {
+            simplified_clauses.get().map(|entry| {
                 let hash = seeded_hash(&entry, WATCH_SEED);
                 (entry, hash)
             })
@@ -205,6 +269,49 @@ impl Solver {
 
         db.feedback_with_id(prep_var, all_new_assignments);
 
+        assign!(
+            binary_clause_ids,
+            clause_sizes.get().filter(|&(_cid, size)| size == 2).fst()
+        );
+        assign_saved!(
+            base_implication,
+            simplified_clauses
+                .get()
+                .semijoin(binary_clause_ids)
+                .group_min_n::<_, _, 2>()
+                .filter(|(_, lits)| lits.len() == 2)
+                .flat_map(|(_, lits)| {
+                    let mut iter = lits.into_iter();
+                    let a = iter.next().unwrap();
+                    let b = iter.next().unwrap();
+                    assert!(iter.next().is_none());
+                    [((!a, b), 1), ((!b, a), 1)]
+                })
+        );
+
+        create_variable!(db, implication_var, implication, ((Lit, Lit), u8));
+        assign_saved!(implication, implication);
+        db.feedback(implication_var.clone(), base_implication.get());
+
+        assign_saved!(
+            limited_implication,
+            implication.get().filter(|&(_pair, step)| step <= 1)
+        );
+        assign!(
+            closure_step,
+            limited_implication
+                .get()
+                .map(|((a, b), dist)| (b, (a, dist)))
+                .join_values(
+                    limited_implication
+                        .get()
+                        .map(|((b, c), dist)| (b, (c, dist)))
+                )
+                .map(|((a, dist_ab), (c, dist_bc))| ((a, c), dist_ab + dist_bc))
+        );
+
+        db.feedback(implication_var, closure_step);
+
         // Combine both conflict types: direct conflicts (x and !x assigned)
         // and empty clauses (all literals in a clause falsified)
         assign!(
@@ -225,7 +332,18 @@ impl Solver {
                 .consolidate()
         );
 
+        assign!(
+            unit_from_binary_contradiction,
+            implication
+                .get()
+                .filter(|&((a, b), _)| a == !b)
+                .map(|((_, b), _)| b)
+        );
+
         // Create outputs from relations (need to box them to store in struct)
+        let l0_contradiction_out = l0_contradiction.boxed().output();
+        let unary_lits_out = unary_lits.get().boxed().output();
+        let unary_from_binary_contradiction_out = unit_from_binary_contradiction.boxed().output();
         let causes_out = causes.boxed().output_with_sink();
         let conflicts_out = conflicts.boxed().output_with_sink();
         let this_level_assignments_out = this_level_assignments.boxed().output();
@@ -241,6 +359,9 @@ impl Solver {
                 decision_assignments: decision_assignments_inp,
             },
             outputs: Outputs {
+                l0_contradiction: l0_contradiction_out,
+                unary_lits: unary_lits_out,
+                unary_from_binary_contradiction: unary_from_binary_contradiction_out,
                 causes: causes_out,
                 conflicts: conflicts_out,
                 this_level_assignments: this_level_assignments_out,
@@ -254,6 +375,7 @@ impl Solver {
                 clause_deletion: ClauseDeletion::new(),
                 vsids: Vsids::new(num_vars),
                 num_vars,
+                binary_unary_count: 0,
             },
         }
     }
