@@ -107,7 +107,7 @@ macro_rules! assign {
 #[macro_export]
 macro_rules! assign_saved {
     ($var:ident, $expr:expr) => {
-        let $var = $expr.named(stringify!($var)).boxed().save();
+        let $var = $expr.named(stringify!($var)).save();
     };
 }
 
