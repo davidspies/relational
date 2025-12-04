@@ -13,13 +13,14 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K
         new_value: V,
     ) -> (ArrayVec<V, N>, Index) {
         // Collect all N+1 values and sort
-        let mut all_values: Vec<V> = arr.into_iter().collect();
-        all_values.push(new_value);
-        all_values.sort();
+        assert!(self.scratch_values.is_empty());
+        self.scratch_values.extend(arr);
+        self.scratch_values.push(new_value);
+        self.scratch_values.sort();
 
         // Last element goes to heap, first N stay in top
-        let heap_value = all_values.pop().unwrap();
-        let top: ArrayVec<V, N> = all_values.into_iter().collect();
+        let heap_value = self.scratch_values.pop().unwrap();
+        let top: ArrayVec<V, N> = self.scratch_values.drain(..).collect();
 
         // Create single-node heap
         let root_node = HeapNode {
@@ -128,35 +129,41 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K
         value
     }
 
-    fn find_insertion_parent(&self, root_idx: Index) -> Index {
-        let mut queue = vec![root_idx];
+    fn find_insertion_parent(&mut self, root_idx: Index) -> Index {
+        assert!(self.scratch.is_empty());
+        self.scratch.push(root_idx);
         let mut i = 0;
-        while i < queue.len() {
-            let node = self.nodes.get(queue[i]).unwrap();
+        while i < self.scratch.len() {
+            let node = self.nodes.get(self.scratch[i]).unwrap();
             if node.left.is_none() || node.right.is_none() {
-                return queue[i];
+                let result = self.scratch[i];
+                self.scratch.clear();
+                return result;
             }
-            queue.push(node.left.unwrap());
-            queue.push(node.right.unwrap());
+            self.scratch.push(node.left.unwrap());
+            self.scratch.push(node.right.unwrap());
             i += 1;
         }
         unreachable!("heap always has a node with missing child")
     }
 
-    fn find_last_node(&self, root_idx: Index) -> Index {
-        let mut queue = vec![root_idx];
+    fn find_last_node(&mut self, root_idx: Index) -> Index {
+        assert!(self.scratch.is_empty());
+        self.scratch.push(root_idx);
         let mut i = 0;
-        while i < queue.len() {
-            let node = self.nodes.get(queue[i]).unwrap();
+        while i < self.scratch.len() {
+            let node = self.nodes.get(self.scratch[i]).unwrap();
             if let Some(left) = node.left {
-                queue.push(left);
+                self.scratch.push(left);
             }
             if let Some(right) = node.right {
-                queue.push(right);
+                self.scratch.push(right);
             }
             i += 1;
         }
-        queue[queue.len() - 1]
+        let result = self.scratch.last().cloned().unwrap();
+        self.scratch.clear();
+        result
     }
 
     fn reheapify(&mut self, key: &K, idx: Index) {

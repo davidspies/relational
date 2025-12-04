@@ -26,6 +26,8 @@ pub struct L2Heaps<K, V, const N: usize = 2> {
     nodes: IndexList<HeapNode<V>>,
     roots: AHashMap<K, HeapRoot<V, N>>,
     positions: AHashMap<(K, V), Index>,
+    scratch: Vec<Index>,
+    scratch_values: Vec<V>,
 }
 
 impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K, V, N> {
@@ -34,6 +36,8 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K
             nodes: IndexList::new(),
             roots: AHashMap::new(),
             positions: AHashMap::new(),
+            scratch: Vec::new(),
+            scratch_values: Vec::new(),
         }
     }
 
