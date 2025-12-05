@@ -3,6 +3,7 @@
 use std::{cmp::Reverse, hash::Hash};
 
 use arrayvec::ArrayVec;
+use either::Either;
 
 use super::op::Op;
 use super::relation::Relation;
@@ -202,5 +203,41 @@ impl<R> Relation<R> {
     {
         self.flat_map(move |t| if pred(&t) { Some(t) } else { None })
             .with_op_type("filter")
+    }
+
+    pub fn filter_map<T, U, F>(self, f: F) -> Relation<impl Op<U>>
+    where
+        R: Op<T>,
+        F: Fn(T) -> Option<U>,
+        U: Eq + Hash,
+    {
+        self.flat_map(f).with_op_type("filter_map")
+    }
+
+    pub fn filter_map_h<T, U, F>(self, f: F) -> Relation<impl Op<U>>
+    where
+        R: Op<T>,
+        F: Fn(T) -> Option<U>,
+    {
+        self.flat_map_h(f)
+    }
+
+    pub fn partition<A, B>(self) -> (Relation<impl Op<A>>, Relation<impl Op<B>>)
+    where
+        R: Op<Either<A, B>>,
+        A: Eq + Hash,
+        B: Eq + Hash,
+    {
+        let (l, r) = self
+            .map_h(|e| match e {
+                Either::Left(a) => (Some(a), None),
+                Either::Right(b) => (None, Some(b)),
+            })
+            .split();
+        (
+            l.with_op_type("partition_left").filter_map_h(|opt_a| opt_a),
+            r.with_op_type("partition_right")
+                .filter_map_h(|opt_b| opt_b),
+        )
     }
 }

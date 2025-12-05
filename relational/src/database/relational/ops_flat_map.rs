@@ -1,6 +1,7 @@
 //! FlatMap operator - stateless, transforms each tuple into zero or more tuples.
 
 use std::hash::Hash;
+use std::marker::PhantomData;
 
 use contiguous_data::Diff;
 
@@ -14,9 +15,9 @@ where
     F: Fn(T) -> I,
     R: Op<T>,
 {
-    inner: Relation<R>,
+    inner: R,
     f: F,
-    _phantom: std::marker::PhantomData<(T, I)>,
+    _phantom: PhantomData<(T, I)>,
 }
 
 impl<T, U, I, F, R> Op<U> for FlatMapOp<T, U, I, F, R>
@@ -50,13 +51,26 @@ impl<R> Relation<R> {
             FlatMapOp {
                 inner: self,
                 f,
-                _phantom: std::marker::PhantomData,
+                _phantom: PhantomData,
             },
             commit_id,
             graph,
             "flat_map",
             vec![node_id],
         )
+    }
+
+    pub fn flat_map_h<T, U, I, F>(self, f: F) -> Relation<impl Op<U>>
+    where
+        R: Op<T>,
+        I: IntoIterator<Item = U>,
+        F: Fn(T) -> I,
+    {
+        self.modify_inner(|inner| FlatMapOp {
+            inner,
+            f,
+            _phantom: PhantomData,
+        })
     }
 
     /// Transform each tuple into zero or more tuples.

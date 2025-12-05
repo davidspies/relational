@@ -12,6 +12,7 @@ anyhow = "*"
 arrayvec = "*"
 contiguous_data = { path = "../contiguous_data" }
 derive-where = "*"
+either = "*"
 
 [dev-dependencies]
 proptest = "*"
