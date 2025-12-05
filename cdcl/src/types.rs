@@ -139,8 +139,3 @@ pub(crate) enum Conflict {
     /// The variable is stored (the literal that was assigned both ways).
     DirectConflict(Var),
 }
-
-/// Helper function to get the variable of a literal.
-pub(super) fn var(lit: Lit) -> Var {
-    lit.var()
-}

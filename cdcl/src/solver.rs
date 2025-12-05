@@ -23,7 +23,7 @@ pub(super) struct Inputs {
     /// Decision levels - we insert the current level here
     pub(crate) levels: InputHandle<Level>,
     /// Decision assignments (lit, level, clause_id) - inserted directly for decisions
-    pub(crate) decision_assignments: InputHandle<(Lit, Level, ClauseId)>,
+    pub(crate) decision_assignments: InputHandle<(Lit, Level)>,
 }
 
 /// Output relations from the dataflow.
@@ -89,11 +89,9 @@ impl Solver {
             .push((self.state.current_level, lit, tried_opposite));
 
         self.inputs.levels.insert(self.state.current_level);
-        self.inputs.decision_assignments.insert((
-            lit,
-            self.state.current_level,
-            ClauseId::DECISION,
-        ));
+        self.inputs
+            .decision_assignments
+            .insert((lit, self.state.current_level));
         db.commit();
     }
 

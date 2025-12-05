@@ -96,8 +96,19 @@ pub use database::{CommitId, Database, DatabaseBuilder};
 /// `assign!(x, expr)` expands to `let x = expr.named("x");`
 #[macro_export]
 macro_rules! assign {
-    ($var:ident, $expr:expr) => {
+    ($var:ident = $expr:expr) => {
         let $var = $expr.named(stringify!($var));
+    };
+}
+
+#[macro_export]
+macro_rules! assign_and_interrupt {
+    ($db:expr, $var:ident = $expr:expr) => {
+        let $var = {
+            let (rel, detector) = $expr.named(stringify!($var)).map_h(|x| (x, ())).split();
+            $db.interrupt(detector);
+            rel
+        };
     };
 }
 
@@ -106,7 +117,7 @@ macro_rules! assign {
 /// `assign_saved!(x, expr)` expands to `let x = expr.named("x").save();`
 #[macro_export]
 macro_rules! assign_saved {
-    ($var:ident, $expr:expr) => {
+    ($var:ident = $expr:expr) => {
         let $var = $expr.named(stringify!($var)).save();
     };
 }

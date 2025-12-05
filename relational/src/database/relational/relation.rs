@@ -100,6 +100,7 @@ impl<R> Relation<R> {
         self
     }
 
+    #[cfg(feature = "consolidate_all")]
     pub(crate) fn with_starred_op_type<T>(self) -> Self
     where
         R: Op<T>,
@@ -116,6 +117,7 @@ impl<R> Relation<R> {
             .set_op_type(self.node_id, op_type);
     }
 
+    #[cfg(feature = "consolidate_all")]
     pub(crate) fn star_op_type(&self) {
         self.graph
             .borrow_mut()

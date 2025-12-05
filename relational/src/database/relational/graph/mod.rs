@@ -91,6 +91,7 @@ impl Graph {
     }
 
     /// Mark the op_type of a node as starred (for consolidation).
+    #[cfg(feature = "consolidate_all")]
     pub(crate) fn star_op_type(&mut self, id: NodeId) {
         if let Some(node) = self.nodes.get_mut(id.index()) {
             node.op_type = format!("*{}", node.op_type);
