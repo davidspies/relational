@@ -98,6 +98,8 @@ pub struct Relation<R> {
     pub(crate) counter: Arc<AtomicUsize>,
 }
 
+pub type BoxedRelation<T> = Relation<Box<dyn DynOp<T>>>;
+
 impl<R> Relation<R> {
     /// Create a new relation with graph tracking.
     /// Panics if the graph has already been finalized.
