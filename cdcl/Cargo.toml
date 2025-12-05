@@ -3,8 +3,12 @@ name = "cdcl"
 edition.workspace = true
 version.workspace = true
 
+[features]
+dhat-heap = ["dep:dhat"]
+
 [dependencies]
 ahash = "*"
+dhat = { version = "*", optional = true }
 anyhow = "*"
 clap = { version = "*", features = ["derive"] }
 consume_on_drop = "*"

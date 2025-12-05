@@ -1,5 +1,9 @@
 //! CDCL SAT Solver - reads DIMACS CNF files.
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
@@ -54,6 +58,9 @@ struct Args {
 }
 
 fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let args = Args::parse();
 
     let cnf = Cnf::from_file(&args.cnf_file).unwrap();
