@@ -4,7 +4,8 @@ use std::hash::Hash;
 
 use contiguous_data::Diff;
 
-use super::relation::{Op, Relation};
+use super::op::Op;
+use super::relation::Relation;
 
 /// A flat_map operator - transforms each tuple into zero or more tuples.
 pub struct FlatMapOp<T, U, I, F, R>

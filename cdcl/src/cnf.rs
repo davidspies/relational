@@ -6,15 +6,16 @@ use std::io::{BufRead, BufReader, Read};
 use anyhow::{Context, Result, bail};
 use relational::database::{Database, DatabaseBuilder};
 
-use crate::{ClauseId, Lit, Solver, Var};
+use crate::types::{ClauseId, Lit};
+use crate::{Solver, Var};
 
 /// A parsed CNF formula.
 #[derive(Debug, Clone)]
 pub struct Cnf {
     /// Number of variables declared in the header.
-    pub num_vars: u32,
+    pub(crate) num_vars: u32,
     /// The clauses (each is a list of literals).
-    pub clauses: Vec<Vec<Lit>>,
+    pub(crate) clauses: Vec<Vec<Lit>>,
 }
 
 /// Result of solving a CNF formula.
@@ -28,6 +29,14 @@ pub enum SolveResult {
 }
 
 impl Cnf {
+    pub fn num_vars(&self) -> u32 {
+        self.num_vars
+    }
+
+    pub fn num_clauses(&self) -> usize {
+        self.clauses.len()
+    }
+
     /// Parse a CNF formula from a DIMACS format string.
     pub fn parse(input: &str) -> Result<Self> {
         Self::parse_reader(input.as_bytes())
@@ -40,7 +49,7 @@ impl Cnf {
     }
 
     /// Parse a CNF formula from any reader.
-    pub fn parse_reader<R: Read>(reader: R) -> Result<Self> {
+    pub(crate) fn parse_reader<R: Read>(reader: R) -> Result<Self> {
         let reader = BufReader::new(reader);
 
         let mut num_vars = 0;

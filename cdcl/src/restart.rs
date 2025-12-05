@@ -37,7 +37,7 @@ fn luby(mut i: u64) -> u64 {
 }
 
 /// Restart strategy state.
-pub struct RestartStrategy {
+pub(crate) struct RestartStrategy {
     /// Base number of conflicts between restarts.
     base_interval: u64,
     /// Current position in the Luby sequence.
@@ -45,7 +45,7 @@ pub struct RestartStrategy {
     /// Conflicts since last restart.
     conflicts_since_restart: u64,
     /// Total number of restarts performed.
-    pub restarts: u64,
+    pub(crate) restarts: u64,
 }
 
 impl RestartStrategy {
@@ -53,7 +53,7 @@ impl RestartStrategy {
     ///
     /// The actual restart interval is `base_interval * luby(i)` where `i`
     /// is the current position in the Luby sequence.
-    pub fn new(base_interval: u64) -> Self {
+    pub(crate) fn new(base_interval: u64) -> Self {
         Self {
             base_interval,
             luby_index: 1,
@@ -63,14 +63,14 @@ impl RestartStrategy {
     }
 
     /// Record a conflict. Returns true if a restart should be triggered.
-    pub fn on_conflict(&mut self) -> bool {
+    pub(crate) fn on_conflict(&mut self) -> bool {
         self.conflicts_since_restart += 1;
         let limit = self.base_interval * luby(self.luby_index);
         self.conflicts_since_restart >= limit
     }
 
     /// Acknowledge that a restart was performed.
-    pub fn on_restart(&mut self) {
+    pub(crate) fn on_restart(&mut self) {
         self.conflicts_since_restart = 0;
         self.luby_index += 1;
         self.restarts += 1;

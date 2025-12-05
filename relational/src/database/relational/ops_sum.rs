@@ -6,7 +6,8 @@ use std::ops::{Add, Mul, Sub};
 use ahash::AHashMap;
 use contiguous_data::Diff;
 
-use super::relation::{Op, Relation};
+use super::op::Op;
+use super::relation::Relation;
 
 /// A sum operator - sums values by key.
 /// Input is (key, value) pairs, output is (key, sum) pairs.

@@ -1,23 +1,21 @@
 //! L2Multiset - a AHashMap<K, Multiset<V>> with shared contiguous storage.
+mod list_ops;
+mod root;
 
 use std::hash::Hash;
 
-use arrayvec::ArrayVec;
 use index_list::{Index, IndexList};
 
 use ahash::AHashMap;
 
 use crate::{Diff, Multiset};
 
+use self::root::Root;
+
 struct ListNode<V> {
     value: V,
     next: Option<Index>,
     prev: Option<Index>,
-}
-
-enum Root<V> {
-    Small(ArrayVec<V, 2>),
-    Large { head: Index, len: usize },
 }
 
 pub struct L2Multiset<K, V> {
@@ -153,36 +151,6 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
     }
 }
 
-impl<V> Root<V> {
-    fn as_small(&self) -> &ArrayVec<V, 2> {
-        match self {
-            Root::Small(arr) => arr,
-            Root::Large { .. } => panic!("expected Small"),
-        }
-    }
-
-    fn as_small_mut(&mut self) -> &mut ArrayVec<V, 2> {
-        match self {
-            Root::Small(arr) => arr,
-            Root::Large { .. } => panic!("expected Small"),
-        }
-    }
-
-    fn inc_len(&mut self) {
-        match self {
-            Root::Large { len, .. } => *len += 1,
-            Root::Small(_) => panic!("expected Large"),
-        }
-    }
-
-    fn dec_len(&mut self) {
-        match self {
-            Root::Large { len, .. } => *len -= 1,
-            Root::Small(_) => panic!("expected Large"),
-        }
-    }
-}
-
 impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> Default for L2Multiset<K, V> {
     fn default() -> Self {
         Self::new()
@@ -216,8 +184,6 @@ impl<'a, V> Iterator for L2MultisetIter<'a, V> {
         }
     }
 }
-
-mod list_ops;
 
 #[cfg(test)]
 mod tests;

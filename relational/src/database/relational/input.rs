@@ -11,7 +11,7 @@ use std::rc::Rc;
 use contiguous_data::{Diff, Multiset};
 use derive_where::derive_where;
 
-use super::relation::Op;
+use super::op::Op;
 
 /// The internal state of an input relation (seen-set semantics).
 pub(crate) struct InputState<T> {

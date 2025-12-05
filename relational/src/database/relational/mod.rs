@@ -8,6 +8,7 @@
 
 pub(crate) mod graph;
 pub(crate) mod input;
+mod op;
 mod ops_antijoin;
 mod ops_concat;
 mod ops_consolidate;
@@ -27,7 +28,8 @@ mod variable_relation;
 
 // Core types - InputHandle and InputRelation are created via Database2::create_input()
 pub use input::{InputHandle, PersistentInputHandle};
-pub use relation::{BoxedRelation, Op, Relation};
+pub use op::Op;
+pub use relation::{BoxedRelation, Relation};
 pub use saved::SavedRelation;
 pub use variable_relation::{Variable, VariableRelation};
 

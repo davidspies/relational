@@ -490,6 +490,7 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "anyhow",
+ "arrayvec",
  "contiguous_data",
  "derive-where",
  "proptest",

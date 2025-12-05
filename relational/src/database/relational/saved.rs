@@ -9,7 +9,8 @@ use contiguous_data::{Diff, Multiset};
 use crate::database::commit_id::CommitId;
 
 use super::graph::{GraphBuilder, NodeId};
-use super::relation::{Op, Relation};
+use super::op::Op;
+use super::relation::Relation;
 
 /// Shared state for a saved relation.
 struct SavedState<T, R: Op<T>> {

@@ -8,10 +8,9 @@
 
 mod cause_sink;
 mod clause_deletion;
-pub mod cnf;
+mod cnf;
 mod conflict_analysis;
 mod conflicts_sink;
-pub mod proof;
 mod queries;
 mod restart;
 mod solve;
@@ -20,9 +19,11 @@ mod solver_setup;
 mod types;
 mod vsids;
 
+pub mod proof;
+
 #[cfg(test)]
 mod tests;
 
-pub use cnf::{Cnf, SolveResult};
+pub use cnf::Cnf;
 pub use solver::Solver;
-pub use types::{ClauseId, Conflict, Level, Lit, Var};
+pub use types::Var;

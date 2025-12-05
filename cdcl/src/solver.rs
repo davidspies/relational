@@ -17,44 +17,44 @@ type ConflictsOutput = Output<Conflict, ConflictsSink>;
 /// Input handles for the solver.
 pub(super) struct Inputs {
     /// Original clauses: (clause_id, literal)
-    pub clauses: InputHandle<(ClauseId, Lit)>,
+    pub(crate) clauses: InputHandle<(ClauseId, Lit)>,
     /// Learned clauses (persistent - survive backtracking)
-    pub learned: PersistentInputHandle<(ClauseId, Lit)>,
+    pub(crate) learned: PersistentInputHandle<(ClauseId, Lit)>,
     /// Decision levels - we insert the current level here
-    pub levels: InputHandle<Level>,
+    pub(crate) levels: InputHandle<Level>,
     /// Decision assignments (lit, level, clause_id) - inserted directly for decisions
-    pub decision_assignments: InputHandle<(Lit, Level, ClauseId)>,
+    pub(crate) decision_assignments: InputHandle<(Lit, Level, ClauseId)>,
 }
 
 /// Output relations from the dataflow.
 pub(super) struct Outputs {
     /// Causes: ((lit, commit_id), (clause_id, level)) with CauseSink for efficient lookup
-    pub causes: CausesOutput,
+    pub(crate) causes: CausesOutput,
     /// Conflicts detected during propagation
-    pub conflicts: ConflictsOutput,
+    pub(crate) conflicts: ConflictsOutput,
     /// Assignments at the current decision level. Positive counts indicate assigned true,
     /// negative indicate assigned false. Conflict literals are omitted.
-    pub this_level_assignments: Output<Lit>,
+    pub(crate) this_level_assignments: Output<Lit>,
 }
 
 /// Solver state that doesn't involve the dataflow.
 pub(super) struct State {
     /// Current decision level (local copy for convenience).
-    pub current_level: Level,
+    pub(crate) current_level: Level,
     /// Next clause ID for learned clauses.
-    pub next_learned_id: ClauseId,
+    pub(crate) next_learned_id: ClauseId,
     /// Stack of decisions: (level, literal, tried_both)
-    pub decision_stack: Vec<(Level, Lit, bool)>,
+    pub(crate) decision_stack: Vec<(Level, Lit, bool)>,
     /// Cache of clause contents: clause_id -> list of literals
-    pub clause_db: AHashMap<ClauseId, Vec<Lit>>,
+    pub(crate) clause_db: AHashMap<ClauseId, Vec<Lit>>,
     /// Restart strategy.
-    pub restart: RestartStrategy,
+    pub(crate) restart: RestartStrategy,
     /// Clause deletion manager.
-    pub clause_deletion: ClauseDeletion,
+    pub(crate) clause_deletion: ClauseDeletion,
     /// VSIDS decision heuristic.
-    pub vsids: Vsids,
+    pub(crate) vsids: Vsids,
     /// Total number of variables.
-    pub num_vars: u32,
+    pub(crate) num_vars: u32,
 }
 
 /// CDCL SAT Solver.
@@ -66,7 +66,7 @@ pub struct Solver {
 
 impl Solver {
     /// Add an original clause to the solver.
-    pub fn add_clause(&mut self, db: &mut Database, clause_id: ClauseId, literals: &[Lit]) {
+    pub(crate) fn add_clause(&mut self, db: &mut Database, clause_id: ClauseId, literals: &[Lit]) {
         for &lit in literals {
             self.inputs.clauses.insert((clause_id, lit));
         }
@@ -98,13 +98,13 @@ impl Solver {
     }
 
     /// Make a decision: assign a literal at a new decision level.
-    pub fn decide(&mut self, db: &mut Database, lit: Lit) {
+    pub(crate) fn decide(&mut self, db: &mut Database, lit: Lit) {
         self.decide_internal(db, lit, false);
     }
 
     /// Propagate units until fixpoint or conflict.
     /// Returns Ok(()) if no conflict, Err(conflict) if conflict found.
-    pub fn propagate(&mut self) -> Result<(), Conflict> {
+    pub(crate) fn propagate(&mut self) -> Result<(), Conflict> {
         if let Some(conflict) = self.outputs.conflicts.get().first() {
             return Err(conflict);
         }
@@ -112,7 +112,7 @@ impl Solver {
     }
 
     /// Backtrack to the given level, popping decision stack entries.
-    pub fn backtrack_to(&mut self, db: &mut Database, level: Level) {
+    pub(crate) fn backtrack_to(&mut self, db: &mut Database, level: Level) {
         while self.state.current_level > level {
             // Track which variables we've seen and their polarity.
             // None means conflict (both polarities seen).
@@ -154,13 +154,8 @@ impl Solver {
         db.commit();
     }
 
-    /// Learn a clause (adds to persistent learned relation).
-    pub fn learn_clause(&mut self, db: &mut Database, literals: &[Lit]) -> ClauseId {
-        self.learn_clause_with_levels(db, literals, &[])
-    }
-
     /// Learn a clause with level information for LBD tracking.
-    pub fn learn_clause_with_levels(
+    pub(crate) fn learn_clause_with_levels(
         &mut self,
         db: &mut Database,
         literals: &[Lit],
@@ -182,37 +177,18 @@ impl Solver {
     }
 
     /// Get the literals in a clause.
-    pub fn get_clause(&self, clause_id: ClauseId) -> Option<&[Lit]> {
+    pub(crate) fn get_clause(&self, clause_id: ClauseId) -> Option<&[Lit]> {
         self.state.clause_db.get(&clause_id).map(|v| v.as_slice())
     }
 
-    /// Get a handle to the dataflow graph for debugging/visualization.
-    ///
-    /// The returned handle is thread-safe and can be sent to another thread
-    /// (e.g., for a ctrl-C handler to dump the graph).
-    pub fn graph(db: &Database) -> relational::database::GraphHandle {
-        db.graph()
-    }
-
     /// Restart: backtrack to level 0, clearing all decisions.
-    pub fn restart(&mut self, db: &mut Database) {
+    pub(crate) fn restart(&mut self, db: &mut Database) {
         self.backtrack_to(db, Level::TOP);
         self.state.restart.on_restart();
     }
 
-    /// Delete a learned clause from the solver.
-    pub fn delete_clause(&mut self, db: &mut Database, clause_id: ClauseId) {
-        if let Some(literals) = self.state.clause_db.remove(&clause_id) {
-            for lit in literals {
-                self.inputs.learned.delete((clause_id, lit));
-            }
-            self.state.clause_deletion.remove(clause_id);
-            db.commit();
-        }
-    }
-
     /// Perform clause deletion if the learned clause database is too large.
-    pub fn maybe_delete_clauses(&mut self, db: &mut Database) {
+    pub(crate) fn maybe_delete_clauses(&mut self, db: &mut Database) {
         if self.state.clause_deletion.should_delete() {
             let to_delete = self.state.clause_deletion.select_for_deletion();
             for clause_id in to_delete {

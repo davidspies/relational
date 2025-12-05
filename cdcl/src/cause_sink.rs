@@ -18,7 +18,7 @@ fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
 ///
 /// Uses L2Heaps ordered by (CommitId, hash, ClauseId) so we get the earliest
 /// derivation first, with deterministic tie-breaking via hash.
-pub struct CauseSink {
+pub(crate) struct CauseSink {
     /// Maps lit -> min-heap of (commit_id, hash, clause_id)
     data: L2Heaps<Lit, (CommitId, u64, ClauseId)>,
     /// Tracks multiplicity for data entries
@@ -41,32 +41,27 @@ impl Default for CauseSink {
 
 impl CauseSink {
     /// Get the reason clause for a literal (from the earliest derivation).
-    pub fn get_reason(&self, lit: Lit) -> Option<ClauseId> {
+    pub(crate) fn get_reason(&self, lit: Lit) -> Option<ClauseId> {
         let &(_, _, clause) = self.data.peek(&lit)?;
         (!clause.is_decision()).then_some(clause)
     }
 
     /// Get the earliest commit ID for a literal.
-    pub fn get_commit_id(&self, lit: Lit) -> Option<CommitId> {
+    pub(crate) fn get_commit_id(&self, lit: Lit) -> Option<CommitId> {
         let &(commit_id, _, _) = self.data.peek(&lit)?;
         Some(commit_id)
     }
 
-    pub fn get_level(&self, lit: Lit) -> Option<Level> {
+    pub(crate) fn get_level(&self, lit: Lit) -> Option<Level> {
         self.levels.get_singleton(&lit).copied()
     }
 
-    pub fn contains_lit(&self, lit: Lit) -> bool {
+    pub(crate) fn contains_lit(&self, lit: Lit) -> bool {
         !self.data.is_empty(&lit)
     }
 
-    /// Count how many literals are assigned (debug).
-    pub fn count_assigned(&self) -> usize {
-        self.levels.keys().count()
-    }
-
     /// Count literals assigned at a specific level.
-    pub fn count_at_level(&self, level: Level) -> usize {
+    pub(crate) fn count_at_level(&self, level: Level) -> usize {
         self.levels
             .keys()
             .filter(|&lit| self.levels.get_singleton(lit) == Some(&level))
@@ -74,7 +69,7 @@ impl CauseSink {
     }
 
     /// Count literals not assigned at level 0 (non-fixed assignments).
-    pub fn count_non_fixed(&self) -> usize {
+    pub(crate) fn count_non_fixed(&self) -> usize {
         self.levels
             .keys()
             .filter(|&lit| self.levels.get_singleton(lit) != Some(&Level::TOP))

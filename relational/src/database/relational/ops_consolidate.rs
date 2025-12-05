@@ -4,7 +4,8 @@ use std::hash::Hash;
 
 use contiguous_data::{Diff, Multiset};
 
-use super::relation::{Op, Relation};
+use super::op::Op;
+use super::relation::Relation;
 
 /// Consolidate operator that merges duplicate changes.
 pub struct ConsolidateOp<T, R: Op<T>> {

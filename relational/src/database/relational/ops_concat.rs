@@ -4,7 +4,8 @@ use std::hash::Hash;
 
 use contiguous_data::Diff;
 
-use super::relation::{Op, Relation, assert_same_commit_id};
+use super::op::Op;
+use super::relation::{Relation, assert_same_commit_id};
 
 /// A concat operator - combines changes from both inputs.
 pub struct ConcatOp<T, L, R>

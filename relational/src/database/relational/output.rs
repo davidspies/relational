@@ -8,7 +8,8 @@ use contiguous_data::Multiset;
 
 use crate::database::saved::SavedGetter;
 
-use super::relation::{DynOp, Op, Relation};
+use super::op::{DynOp, Op};
+use super::relation::Relation;
 use super::sink::Sink;
 
 /// An output that accumulates changes from a relation into a Sink.

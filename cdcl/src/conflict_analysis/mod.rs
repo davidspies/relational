@@ -33,7 +33,7 @@ impl Solver {
     /// - Start from conflict clause/literals
     /// - Resolve backward until exactly one literal at current level remains
     /// - That literal is the UIP - it's the "decision" that forced this conflict
-    pub fn analyze_conflict(&self, conflict: Conflict) -> Option<AnalysisResult> {
+    pub(crate) fn analyze_conflict(&self, conflict: Conflict) -> Option<AnalysisResult> {
         if self.state.current_level == Level::TOP {
             // Conflict at level 0 means UNSAT - nothing to learn
             return None;

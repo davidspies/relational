@@ -9,7 +9,7 @@ use contiguous_data::Diff;
 use crate::database::feedback::Variable as InternalVariable;
 
 use super::graph::NodeId;
-use super::relation::Op;
+use super::op::Op;
 
 /// A handle for a feedback variable.
 ///

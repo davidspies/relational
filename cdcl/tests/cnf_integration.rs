@@ -12,8 +12,8 @@ fn load_cnf(name: &str) -> Cnf {
 #[test]
 fn test_simple_sat() {
     let cnf = load_cnf("simple_sat.cnf");
-    assert_eq!(cnf.num_vars, 2);
-    assert_eq!(cnf.clauses.len(), 2);
+    assert_eq!(cnf.num_vars(), 2);
+    assert_eq!(cnf.num_clauses(), 2);
 
     let result = cnf.solve();
     assert!(result.is_sat());
@@ -27,8 +27,8 @@ fn test_simple_sat() {
 #[test]
 fn test_simple_unsat() {
     let cnf = load_cnf("simple_unsat.cnf");
-    assert_eq!(cnf.num_vars, 1);
-    assert_eq!(cnf.clauses.len(), 2);
+    assert_eq!(cnf.num_vars(), 1);
+    assert_eq!(cnf.num_clauses(), 2);
 
     let result = cnf.solve();
     assert!(result.is_unsat());
@@ -37,8 +37,8 @@ fn test_simple_unsat() {
 #[test]
 fn test_unit_propagation() {
     let cnf = load_cnf("unit_propagation.cnf");
-    assert_eq!(cnf.num_vars, 3);
-    assert_eq!(cnf.clauses.len(), 3);
+    assert_eq!(cnf.num_vars(), 3);
+    assert_eq!(cnf.num_clauses(), 3);
 
     let result = cnf.solve();
     assert!(result.is_sat());
@@ -59,8 +59,8 @@ fn test_pigeonhole_unsat() {
 #[test]
 fn test_three_coloring_sat() {
     let cnf = load_cnf("three_coloring.cnf");
-    assert_eq!(cnf.num_vars, 9);
-    assert_eq!(cnf.clauses.len(), 21);
+    assert_eq!(cnf.num_vars(), 9);
+    assert_eq!(cnf.num_clauses(), 21);
 
     let result = cnf.solve();
     assert!(result.is_sat());
@@ -98,8 +98,8 @@ fn test_three_coloring_sat() {
 #[test]
 fn test_empty_formula() {
     let cnf = load_cnf("empty.cnf");
-    assert_eq!(cnf.num_vars, 0);
-    assert_eq!(cnf.clauses.len(), 0);
+    assert_eq!(cnf.num_vars(), 0);
+    assert_eq!(cnf.num_clauses(), 0);
 
     let result = cnf.solve();
     assert!(result.is_sat());
@@ -109,8 +109,8 @@ fn test_empty_formula() {
 fn test_parse_from_string() {
     let input = "c comment\np cnf 2 1\n1 -2 0\n";
     let cnf = Cnf::parse(input).unwrap();
-    assert_eq!(cnf.num_vars, 2);
-    assert_eq!(cnf.clauses.len(), 1);
+    assert_eq!(cnf.num_vars(), 2);
+    assert_eq!(cnf.num_clauses(), 1);
 }
 
 #[test]

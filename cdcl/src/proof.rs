@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::Lit;
+use crate::types::Lit;
 
 /// A proof writer that logs learned clauses in DRAT format.
 pub struct ProofWriter {
@@ -27,7 +27,7 @@ impl ProofWriter {
     }
 
     /// Log a learned clause (addition).
-    pub fn add_clause(&mut self, literals: &[Lit]) -> std::io::Result<()> {
+    pub(crate) fn add_clause(&mut self, literals: &[Lit]) -> std::io::Result<()> {
         for lit in literals {
             write!(self.writer, "{} ", lit.raw())?;
         }
@@ -36,13 +36,13 @@ impl ProofWriter {
     }
 
     /// Log the empty clause (final proof of UNSAT).
-    pub fn add_empty_clause(&mut self) -> std::io::Result<()> {
+    pub(crate) fn add_empty_clause(&mut self) -> std::io::Result<()> {
         writeln!(self.writer, "0")?;
         Ok(())
     }
 
     /// Flush the writer to ensure all data is written.
-    pub fn flush(&mut self) -> std::io::Result<()> {
+    pub(crate) fn flush(&mut self) -> std::io::Result<()> {
         self.writer.flush()
     }
 }

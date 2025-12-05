@@ -9,6 +9,7 @@ consolidate_all = []
 [dependencies]
 ahash = "*"
 anyhow = "*"
+arrayvec = "*"
 contiguous_data = { path = "../contiguous_data" }
 derive-where = "*"
 

@@ -35,7 +35,7 @@ impl Ord for Priority {
     }
 }
 
-pub struct Vsids {
+pub(crate) struct Vsids {
     /// Priority queue: var -> priority (only unassigned variables)
     queue: PriorityQueue<Var, Priority>,
     /// Stashed priorities for assigned variables (removed from queue)
@@ -49,7 +49,7 @@ pub struct Vsids {
 }
 
 impl Vsids {
-    pub fn new(num_vars: u32) -> Self {
+    pub(crate) fn new(num_vars: u32) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(0x5a7d3e1f9c2b8a04);
         let mut queue = PriorityQueue::with_capacity(num_vars as usize);
         // Initialize all variables with 0 activity and random nonces
@@ -71,7 +71,7 @@ impl Vsids {
         }
     }
 
-    pub fn bump(&mut self, var: Var) {
+    pub(crate) fn bump(&mut self, var: Var) {
         let bump = self.bump;
         // Try queue first, fall back to stashed
         if self.queue.get(&var).is_some() {
@@ -81,11 +81,11 @@ impl Vsids {
         }
     }
 
-    pub fn decay(&mut self) {
+    pub(crate) fn decay(&mut self) {
         self.bump *= 1.05;
     }
 
-    pub fn set_phase(&mut self, var: Var, positive: bool) {
+    pub(crate) fn set_phase(&mut self, var: Var, positive: bool) {
         self.phase.insert(var, positive);
         // Restore from stash back to queue with a fresh nonce
         if let Some(mut priority) = self.stashed.remove(&var) {
@@ -94,11 +94,11 @@ impl Vsids {
         }
     }
 
-    pub fn get_phase(&self, var: Var) -> bool {
+    pub(crate) fn get_phase(&self, var: Var) -> bool {
         self.phase.get(&var).copied().unwrap_or(false)
     }
 
-    pub fn pick(&mut self, is_assigned: impl Fn(Var) -> bool) -> Option<Var> {
+    pub(crate) fn pick(&mut self, is_assigned: impl Fn(Var) -> bool) -> Option<Var> {
         loop {
             let (&var, _) = self.queue.peek()?;
             if !is_assigned(var) {

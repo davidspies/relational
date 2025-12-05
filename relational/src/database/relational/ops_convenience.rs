@@ -2,9 +2,10 @@
 
 use std::{cmp::Reverse, hash::Hash};
 
-use contiguous_data::ArrayVec;
+use arrayvec::ArrayVec;
 
-use super::relation::{Op, Relation};
+use super::op::Op;
+use super::relation::Relation;
 
 impl<R> Relation<R> {
     /// Extract the first element of a tuple relation.

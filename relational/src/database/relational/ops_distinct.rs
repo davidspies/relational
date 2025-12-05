@@ -4,7 +4,8 @@ use std::hash::Hash;
 
 use contiguous_data::{Diff, Multiset};
 
-use super::relation::{Op, Relation};
+use super::op::Op;
+use super::relation::Relation;
 
 /// A distinct operator - outputs each tuple at most once.
 /// Tracks input multiplicities to emit +1 when count goes from 0 to non-zero,

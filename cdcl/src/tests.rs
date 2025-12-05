@@ -2,6 +2,7 @@
 
 use relational::database::DatabaseBuilder;
 
+use super::types::{ClauseId, Lit, Var};
 use super::*;
 
 // Helper to create literals from raw i32

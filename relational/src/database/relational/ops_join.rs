@@ -4,7 +4,8 @@ use std::hash::Hash;
 
 use contiguous_data::{Diff, L2Multiset};
 
-use super::relation::{Op, Relation, assert_same_commit_id};
+use super::op::Op;
+use super::relation::{Relation, assert_same_commit_id};
 
 /// A join operator - joins left and right on matching keys.
 /// Input is (K, V) tuples on both sides, output is (K, (V1, V2)) tuples.

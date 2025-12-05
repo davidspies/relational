@@ -4,7 +4,8 @@ use std::{hash::Hash, marker::PhantomData};
 
 use contiguous_data::Diff;
 
-use super::relation::{Op, Relation};
+use super::op::Op;
+use super::relation::Relation;
 
 /// A map operator - transforms each tuple into exactly one tuple.
 pub struct MapOp<T, U, F, R>

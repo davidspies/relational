@@ -4,7 +4,8 @@ use std::hash::Hash;
 
 use contiguous_data::Diff;
 
-use super::relation::{Op, Relation};
+use super::op::Op;
+use super::relation::Relation;
 
 /// A negate operator - negates all diffs.
 pub struct NegateOp<T, R>

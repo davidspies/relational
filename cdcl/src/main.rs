@@ -58,7 +58,7 @@ fn main() {
 
     let cnf = Cnf::from_file(&args.cnf_file).unwrap();
 
-    let num_vars = cnf.num_vars;
+    let num_vars = cnf.num_vars();
     let (mut db, mut solver) = cnf.into_solver();
 
     let mut proof_writer = args

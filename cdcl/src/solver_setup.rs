@@ -15,9 +15,9 @@ fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
 
 const WATCH_SEED: u64 = 0x7a3b9c1d4e5f6028;
 
-use crate::Conflict;
 use crate::clause_deletion::ClauseDeletion;
 use crate::restart::RestartStrategy;
+use crate::types::Conflict;
 use crate::types::var;
 use crate::vsids::Vsids;
 

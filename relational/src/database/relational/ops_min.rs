@@ -2,9 +2,11 @@
 
 use std::hash::Hash;
 
-use contiguous_data::{ArrayVec, Diff, L2Heaps, Multiset};
+use arrayvec::ArrayVec;
+use contiguous_data::{Diff, L2Heaps, Multiset};
 
-use super::relation::{Op, Relation};
+use super::op::Op;
+use super::relation::Relation;
 
 /// A min-N operator - tracks the N smallest values by key.
 /// Input is (key, value) pairs, output is (key, ArrayVec<value, N>) pairs.

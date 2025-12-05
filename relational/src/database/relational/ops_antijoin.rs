@@ -4,7 +4,8 @@ use std::hash::Hash;
 
 use contiguous_data::{Diff, L2Multiset, Multiset};
 
-use super::relation::{Op, Relation, assert_same_commit_id};
+use super::op::Op;
+use super::relation::{Relation, assert_same_commit_id};
 
 /// Antijoin operator - keeps (K, V) tuples from left where K is NOT in right.
 /// Tracks both inputs to compute correct output deltas.

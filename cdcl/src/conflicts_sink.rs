@@ -20,7 +20,7 @@ fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
 /// Uses PriorityQueue + Multiset. The priority queue gives O(1) access to the
 /// highest-hash conflict, while the multiset tracks multiplicities.
 #[derive(Clone)]
-pub struct ConflictsSink {
+pub(crate) struct ConflictsSink {
     /// Priority queue: conflict -> hash for deterministic ordering
     queue: PriorityQueue<Conflict, (u64, Conflict)>,
     /// Tracks multiplicities
@@ -40,7 +40,7 @@ impl Default for ConflictsSink {
 
 impl ConflictsSink {
     /// Get the first conflict (deterministic ordering via seeded hash).
-    pub fn first(&self) -> Option<Conflict> {
+    pub(crate) fn first(&self) -> Option<Conflict> {
         self.queue.peek().map(|(&c, _)| c)
     }
 }
