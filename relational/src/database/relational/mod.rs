@@ -23,8 +23,8 @@ mod ops_sum;
 mod output;
 mod relation;
 pub(crate) mod saved;
-mod split;
 mod sink;
+mod split;
 mod variable_relation;
 
 // Core types - InputHandle and InputRelation are created via Database2::create_input()

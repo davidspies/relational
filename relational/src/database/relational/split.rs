@@ -66,7 +66,7 @@ impl<R> Relation<R> {
     /// Split a relation of pairs into two separate relations.
     ///
     /// Unlike `save()`, this doesn't require Clone - it decomposes the tuple.
-    pub fn split<A, B>(self) -> (Relation<SplitLeft<A, B, R>>, Relation<SplitRight<A, B, R>>)
+    pub fn split<A, B>(self) -> (Relation<impl Op<A>>, Relation<impl Op<B>>)
     where
         A: Eq + Hash,
         B: Eq + Hash,
