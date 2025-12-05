@@ -42,7 +42,6 @@ impl<R> Relation<R> {
         R: Op<T>,
         I: IntoIterator<Item = U>,
         F: Fn(T) -> I,
-        U: Eq + Hash,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();

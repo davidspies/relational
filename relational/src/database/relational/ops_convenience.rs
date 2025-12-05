@@ -36,7 +36,7 @@ impl<R> Relation<R> {
         A: Eq + Hash,
         B: Eq + Hash,
     {
-        self.map(|(a, b)| (b, a)).with_op_type("swap")
+        self.map_(|(a, b)| (b, a)).with_op_type("swap")
     }
 
     /// Global maximum - finds the max value across all tuples.

@@ -100,7 +100,6 @@ impl<R> Relation<R> {
     /// Save this relation for use in multiple places.
     pub fn save<T>(self) -> SavedRelation<T, R>
     where
-        T: Eq + Hash,
         R: Op<T>,
     {
         let upstream_node_id = self.node_id;

@@ -32,7 +32,6 @@ impl<R> Relation<R> {
     pub fn negate_<T>(self) -> Relation<impl Op<T>>
     where
         R: Op<T>,
-        T: Eq + Hash,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();

@@ -37,7 +37,6 @@ impl<R> Relation<R> {
     where
         R: Op<T>,
         F: Fn(T) -> U,
-        U: Eq + Hash,
     {
         let node_id = self.node_id;
         let commit_id = self.commit_id.clone();

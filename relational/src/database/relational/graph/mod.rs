@@ -23,7 +23,7 @@ impl NodeId {
 pub(super) struct Node {
     pub(super) id: NodeId,
     pub(super) name: Option<String>,
-    pub(super) op_type: &'static str,
+    pub(super) op_type: String,
     /// Element counter - None for terminal nodes (output, interrupt).
     pub(super) count: Option<Arc<AtomicUsize>>,
     pub(super) parents: Vec<NodeId>,
@@ -49,7 +49,7 @@ impl Graph {
     /// Add a node to the graph, returning its ID and counter.
     pub(crate) fn add_node(
         &mut self,
-        op_type: &'static str,
+        op_type: impl Into<String>,
         parents: Vec<NodeId>,
     ) -> (NodeId, Arc<AtomicUsize>) {
         let id = NodeId(self.nodes.len());
@@ -57,7 +57,7 @@ impl Graph {
         self.nodes.push(Node {
             id,
             name: None,
-            op_type,
+            op_type: op_type.into(),
             count: Some(count.clone()),
             parents,
         });
@@ -65,12 +65,12 @@ impl Graph {
     }
 
     /// Add a terminal node (output, interrupt) without a counter.
-    pub(crate) fn add_terminal_node(&mut self, op_type: &'static str, parents: Vec<NodeId>) {
+    pub(crate) fn add_terminal_node(&mut self, op_type: impl Into<String>, parents: Vec<NodeId>) {
         let id = NodeId(self.nodes.len());
         self.nodes.push(Node {
             id,
             name: None,
-            op_type,
+            op_type: op_type.into(),
             count: None,
             parents,
         });
@@ -84,9 +84,16 @@ impl Graph {
     }
 
     /// Override the op_type of a node.
-    pub(crate) fn set_op_type(&mut self, id: NodeId, op_type: &'static str) {
+    pub(crate) fn set_op_type(&mut self, id: NodeId, op_type: impl Into<String>) {
         if let Some(node) = self.nodes.get_mut(id.index()) {
-            node.op_type = op_type;
+            node.op_type = op_type.into();
+        }
+    }
+
+    /// Mark the op_type of a node as starred (for consolidation).
+    pub(crate) fn star_op_type(&mut self, id: NodeId) {
+        if let Some(node) = self.nodes.get_mut(id.index()) {
+            node.op_type = format!("*{}", node.op_type);
         }
     }
 

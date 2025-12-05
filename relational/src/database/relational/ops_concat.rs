@@ -35,7 +35,6 @@ impl<L> Relation<L> {
     where
         L: Op<T>,
         R: Op<T>,
-        T: Eq + Hash,
     {
         assert_same_commit_id(&self.commit_id, &right.commit_id);
         let left_node = self.node_id;

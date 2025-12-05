@@ -25,7 +25,7 @@ impl<T: Eq + Hash, R: Op<T>> Op<T> for ConsolidateOp<T, R> {
         }
     }
 
-    fn passthrough_op_name(&self, name: &'static str) -> bool {
+    fn passthrough_op_type(&self, name: &'static str) -> bool {
         if self.passthrough {
             self.upstream.set_op_type(name);
         }
@@ -51,7 +51,7 @@ impl<R> Relation<R> {
     {
         #[cfg(feature = "consolidate_all")]
         {
-            self
+            self.with_starred_op_type()
         }
         #[cfg(not(feature = "consolidate_all"))]
         {

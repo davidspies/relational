@@ -29,7 +29,7 @@ pub trait Op<T>: Sized {
         Box::new(self)
     }
 
-    fn passthrough_op_name(&self, _name: &'static str) -> bool {
+    fn passthrough_op_type(&self, _name: &'static str) -> bool {
         false
     }
 }

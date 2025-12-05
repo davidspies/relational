@@ -93,10 +93,18 @@ impl<R> Relation<R> {
     where
         R: Op<T>,
     {
-        if self.inner.passthrough_op_name(op_type) {
+        if self.inner.passthrough_op_type(op_type) {
             return self;
         }
         self.set_op_type(op_type);
+        self
+    }
+
+    pub(crate) fn with_starred_op_type<T>(self) -> Self
+    where
+        R: Op<T>,
+    {
+        self.star_op_type();
         self
     }
 
@@ -106,6 +114,14 @@ impl<R> Relation<R> {
             .as_mut()
             .expect("cannot set op_type after build()")
             .set_op_type(self.node_id, op_type);
+    }
+
+    pub(crate) fn star_op_type(&self) {
+        self.graph
+            .borrow_mut()
+            .as_mut()
+            .expect("cannot star op_type after build()")
+            .star_op_type(self.node_id);
     }
 
     /// Box this relation to break the type chain.
