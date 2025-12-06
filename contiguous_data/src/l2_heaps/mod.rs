@@ -3,11 +3,12 @@ mod heap_root;
 mod heapify;
 mod mutations;
 
-use arrayvec::ArrayVec;
-use index_list::{Index, IndexList};
 use std::hash::Hash;
 
 use ahash::AHashMap;
+use arrayvec::ArrayVec;
+use derive_where::derive_where;
+use index_list::{Index, IndexList};
 
 pub(crate) use heap_root::HeapRoot;
 
@@ -18,6 +19,7 @@ pub(crate) struct HeapNode<V> {
     right: Option<Index>,
 }
 
+#[derive_where(Default)]
 pub struct L2Heaps<K, V, const N: usize = 2> {
     nodes: IndexList<HeapNode<V>>,
     roots: AHashMap<K, HeapRoot<V, N>>,
@@ -28,13 +30,7 @@ pub struct L2Heaps<K, V, const N: usize = 2> {
 
 impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K, V, N> {
     pub fn new() -> Self {
-        Self {
-            nodes: IndexList::new(),
-            roots: AHashMap::new(),
-            positions: AHashMap::new(),
-            scratch: Vec::new(),
-            scratch_values: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn is_empty(&self, key: &K) -> bool {
@@ -69,14 +65,6 @@ impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> L2Heaps<K
             HeapRoot::Small(arr) => Some(arr),
             HeapRoot::Large { top, .. } => Some(top),
         }
-    }
-}
-
-impl<K: Hash + Eq + Clone, V: Ord + Hash + Eq + Clone, const N: usize> Default
-    for L2Heaps<K, V, N>
-{
-    fn default() -> Self {
-        Self::new()
     }
 }
 

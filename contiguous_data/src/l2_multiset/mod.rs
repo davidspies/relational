@@ -4,9 +4,9 @@ mod root;
 
 use std::hash::Hash;
 
-use index_list::{Index, IndexList};
-
 use ahash::AHashMap;
+use derive_where::derive_where;
+use index_list::{Index, IndexList};
 
 use crate::{Diff, Multiset};
 
@@ -18,6 +18,7 @@ struct ListNode<V> {
     prev: Option<Index>,
 }
 
+#[derive_where(Default)]
 pub struct L2Multiset<K, V> {
     nodes: IndexList<ListNode<V>>,
     roots: AHashMap<K, Root<V>>,
@@ -27,12 +28,7 @@ pub struct L2Multiset<K, V> {
 
 impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
     pub fn new() -> Self {
-        Self {
-            nodes: IndexList::new(),
-            roots: AHashMap::new(),
-            positions: AHashMap::new(),
-            counts: Multiset::new(),
-        }
+        Self::default()
     }
 
     /// Check if key has no values with non-zero count.
@@ -148,12 +144,6 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
     /// Iterate over all keys that have at least one value.
     pub fn keys(&self) -> impl Iterator<Item = &K> {
         self.roots.keys()
-    }
-}
-
-impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> Default for L2Multiset<K, V> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

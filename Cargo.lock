@@ -231,6 +231,7 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "arrayvec",
+ "derive-where",
  "index_list",
  "proptest",
 ]

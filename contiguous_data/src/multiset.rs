@@ -3,6 +3,7 @@
 use std::hash::Hash;
 
 use ahash::AHashMap;
+use derive_where::derive_where;
 
 use crate::Diff;
 
@@ -12,23 +13,16 @@ use crate::Diff;
 /// Multiplicities can be negative during intermediate computation but typically
 /// should be non-negative in final results.
 #[derive(Debug, Clone)]
+#[derive_where(Default)]
 pub struct Multiset<T> {
     /// The current state: tuple -> multiplicity
     data: AHashMap<T, Diff>,
 }
 
-impl<T: Eq + Hash> Default for Multiset<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<T: Eq + Hash> Multiset<T> {
     /// Create an empty collection.
     pub fn new() -> Self {
-        Multiset {
-            data: AHashMap::new(),
-        }
+        Self::default()
     }
 
     /// Check if the collection is empty.

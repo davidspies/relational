@@ -5,6 +5,7 @@ use std::hash::Hash;
 
 use ahash::AHashMap;
 use contiguous_data::{Diff, L2Vec, Multiset};
+use derive_where::derive_where;
 
 /// A variable in an iterative computation.
 ///
@@ -17,6 +18,7 @@ use contiguous_data::{Diff, L2Vec, Multiset};
 ///
 /// During normal operation, tuples are added to output_seen when they first become
 /// non-zero in input_totals. During pop(), we manipulate output_seen directly.
+#[derive_where(Default)]
 pub struct Variable<T> {
     /// Cumulative input multiplicities.
     /// A tuple is considered "reachable" when this is non-zero.
@@ -34,13 +36,7 @@ pub struct Variable<T> {
 impl<T: Clone + Eq + Hash> Variable<T> {
     /// Create a new empty variable.
     pub fn new() -> Self {
-        Variable {
-            input_totals: AHashMap::new(),
-            output_seen: HashSet::new(),
-            staged: Multiset::new(),
-            pending: Multiset::new(),
-            outputs_by_checkpoint: L2Vec::new(),
-        }
+        Self::default()
     }
 
     /// Add input to this variable (used during normal fixpoint).
@@ -125,11 +121,5 @@ impl<T: Clone + Eq + Hash> Variable<T> {
                 self.outputs_by_checkpoint.push(tuple.clone());
             }
         }
-    }
-}
-
-impl<T: Clone + Eq + Hash> Default for Variable<T> {
-    fn default() -> Self {
-        Self::new()
     }
 }

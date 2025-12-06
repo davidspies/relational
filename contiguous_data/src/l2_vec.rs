@@ -1,10 +1,13 @@
 //! L2Vec - a Vec<Vec<T>> with efficient storage where only the last Vec is mutable.
 
+use derive_where::derive_where;
+
 /// A `Vec<Vec<T>>` equivalent with contiguous storage.
 ///
 /// Only the last inner vec is mutable. Implemented as a flat `Vec<T>`
 /// plus `Vec<usize>` for start indices.
 #[derive(Clone, Debug)]
+#[derive_where(Default)]
 pub struct L2Vec<T> {
     data: Vec<T>,
     /// Start index of each inner vec. Length is number of inner vecs.
@@ -14,10 +17,7 @@ pub struct L2Vec<T> {
 
 impl<T> L2Vec<T> {
     pub fn new() -> Self {
-        Self {
-            data: Vec::new(),
-            starts: Vec::new(),
-        }
+        Self::default()
     }
 
     /// Number of inner vecs.
@@ -76,12 +76,6 @@ impl<T> L2Vec<T> {
     /// Iterate over all inner vecs as slices.
     pub fn iter(&self) -> impl Iterator<Item = &[T]> {
         (0..self.starts.len()).map(|i| self.get(i).unwrap())
-    }
-}
-
-impl<T> Default for L2Vec<T> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
