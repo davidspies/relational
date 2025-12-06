@@ -60,7 +60,7 @@ impl<T: Clone + Eq + Hash> AnyInput for InputWrapper<T> {
         if let Some(tuples) = self.checkpoint_stack.pop() {
             let mut state = self.state.borrow_mut();
             for tuple in tuples {
-                state.remove(&tuple);
+                state.remove(tuple);
             }
         }
     }

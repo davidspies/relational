@@ -45,14 +45,8 @@ impl<T: Eq + Hash> Multiset<T> {
         self.get(tuple) != 0
     }
 
-    /// Insert a tuple (increment multiplicity by 1).
-    pub fn insert(&mut self, tuple: T) {
-        self.update(tuple, 1);
-    }
-
-    /// Delete a tuple (decrement multiplicity by 1).
-    pub fn delete(&mut self, tuple: T) {
-        self.update(tuple, -1);
+    pub fn remove(&mut self, tuple: &T) -> Diff {
+        self.data.remove(tuple).unwrap_or(0)
     }
 
     /// Update the multiplicity of a tuple by a diff.
@@ -105,11 +99,11 @@ impl<T: Eq + Hash> IntoIterator for Multiset<T> {
     }
 }
 
-impl<T: Eq + Hash> FromIterator<T> for Multiset<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+impl<T: Eq + Hash> FromIterator<(T, Diff)> for Multiset<T> {
+    fn from_iter<I: IntoIterator<Item = (T, Diff)>>(iter: I) -> Self {
         let mut coll = Multiset::new();
-        for tuple in iter {
-            coll.insert(tuple);
+        for (tuple, diff) in iter {
+            coll.update(tuple, diff);
         }
         coll
     }
@@ -122,9 +116,9 @@ mod tests {
     #[test]
     fn test_collection_basic() {
         let mut coll = Multiset::new();
-        coll.insert(1);
-        coll.insert(2);
-        coll.insert(1);
+        coll.update(1, 1);
+        coll.update(2, 1);
+        coll.update(1, 1);
 
         assert_eq!(coll.get(&1), 2);
         assert_eq!(coll.get(&2), 1);
@@ -136,12 +130,12 @@ mod tests {
     #[test]
     fn test_collection_delete() {
         let mut coll = Multiset::new();
-        coll.insert(1);
-        coll.insert(1);
-        coll.delete(1);
+        coll.update(1, 1);
+        coll.update(1, 1);
+        coll.update(1, -1);
 
         assert_eq!(coll.get(&1), 1);
-        coll.delete(1);
+        coll.update(1, -1);
         assert!(!coll.contains(&1));
         assert!(coll.is_empty());
     }

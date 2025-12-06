@@ -1,10 +1,11 @@
 //! FeedbackWithId wrapper - stamps tuples with CommitId when first seen.
 
 use std::cell::{Cell, RefCell};
+use std::collections::hash_map;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use contiguous_data::{L2Vec, Multiset};
 
 use crate::database::Relation;
@@ -33,8 +34,8 @@ pub(crate) struct FeedbackWithIdWrapper<T, R: Op<T>> {
     outputs_by_checkpoint: L2Vec<(T, CommitId)>,
     /// Scratch space for collecting changes.
     change_scratch: Multiset<T>,
-    /// Scratch space for checkpoint tuples during pop (T -> CommitId).
-    checkpoint_scratch: AHashMap<T, CommitId>,
+    /// Scratch space for checkpoint tuples during pop.
+    checkpoint_scratch: AHashSet<T>,
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
@@ -50,7 +51,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
             input_totals: AHashMap::new(),
             outputs_by_checkpoint: L2Vec::new(),
             change_scratch: Multiset::new(),
-            checkpoint_scratch: AHashMap::new(),
+            checkpoint_scratch: AHashSet::new(),
         }
     }
 
@@ -59,7 +60,6 @@ impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
             self.outputs_by_checkpoint.push_empty();
         }
     }
-
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R> {
@@ -69,15 +69,9 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
 
     fn send_inverse(&mut self) {
         // Collect from last checkpoint (don't pop yet)
-        let tuples: Vec<_> = self
-            .outputs_by_checkpoint
-            .last()
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect();
+        let tuples = self.outputs_by_checkpoint.last().unwrap();
         let mut var = self.variable.borrow_mut();
-        for (tuple, commit_id) in &tuples {
+        for (tuple, commit_id) in tuples {
             var.emit_inverse(&(tuple.clone(), *commit_id));
         }
     }
@@ -87,59 +81,39 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
     }
 
     fn pop_pull_and_forward(&mut self) {
-        // 1. Pop checkpoint and collect its contents
         assert!(self.checkpoint_scratch.is_empty());
-        for (tuple, commit_id) in self.outputs_by_checkpoint.pop().into_iter().flatten() {
-            self.checkpoint_scratch.insert(tuple, commit_id);
-        }
-
-        // 2. Pull changes and update input totals, emit as needed
+        self.checkpoint_scratch
+            .extend(self.outputs_by_checkpoint.pop().unwrap().map(|(t, _)| t));
         self.input.dump_to_multiset(&mut self.change_scratch);
 
         let current_id = self.commit_id.get();
         let mut var = self.variable.borrow_mut();
-        for (tuple, diff) in self.change_scratch.drain() {
-            let was_emitted = self.input_totals.contains_key(&tuple);
-            let checkpoint_id = self.checkpoint_scratch.remove(&tuple);
-            *self.input_totals.entry(tuple.clone()).or_insert(0) += diff;
-            let total = *self.input_totals.get(&tuple).unwrap();
 
-            // Emit if:
-            // - Checkpoint tuple that's still present (re-emit with original id)
-            // - OR new tuple that's now present (emit with current id)
-            if total != 0 {
-                if let Some(id) = checkpoint_id {
-                    // Checkpoint tuple - re-emit with original commit_id
-                    var.emit((tuple.clone(), id));
-                    if !self.outputs_by_checkpoint.is_empty() {
-                        self.outputs_by_checkpoint.push((tuple, id));
-                    }
-                } else if !was_emitted {
-                    // New tuple appearing for first time
-                    var.emit((tuple.clone(), current_id));
-                    if !self.outputs_by_checkpoint.is_empty() {
-                        self.outputs_by_checkpoint.push((tuple, current_id));
-                    }
-                }
-            } else {
-                // Tuple is gone, remove from input_totals
+        for tuple in self.checkpoint_scratch.drain() {
+            let diff = self.change_scratch.remove(&tuple);
+            let input_total = self.input_totals.get_mut(&tuple).unwrap();
+            *input_total += diff;
+            if *input_total == 0 {
                 self.input_totals.remove(&tuple);
+            } else {
+                if !self.outputs_by_checkpoint.is_empty() {
+                    self.outputs_by_checkpoint.push((tuple.clone(), current_id));
+                }
+                var.emit((tuple, current_id));
             }
         }
-        drop(var);
 
-        // 3. Re-emit remaining checkpoint tuples (not in change_scratch) if still present
-        let mut var = self.variable.borrow_mut();
-        for (tuple, commit_id) in self.checkpoint_scratch.drain() {
-            let total = self.input_totals.get(&tuple).copied().unwrap_or(0);
-            if total != 0 {
-                var.emit((tuple.clone(), commit_id));
-                if !self.outputs_by_checkpoint.is_empty() {
-                    self.outputs_by_checkpoint.push((tuple, commit_id));
+        for (tuple, diff) in self.change_scratch.drain() {
+            match self.input_totals.entry(tuple) {
+                hash_map::Entry::Occupied(occupied_entry) => *occupied_entry.into_mut() += diff,
+                hash_map::Entry::Vacant(vacant_entry) => {
+                    let tuple = vacant_entry.key();
+                    if !self.outputs_by_checkpoint.is_empty() {
+                        self.outputs_by_checkpoint.push((tuple.clone(), current_id));
+                    }
+                    var.emit((tuple.clone(), current_id));
+                    vacant_entry.insert(diff);
                 }
-            } else {
-                // Checkpoint tuple is now gone, remove from input_totals
-                self.input_totals.remove(&tuple);
             }
         }
     }

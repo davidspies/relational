@@ -96,58 +96,40 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
     }
 
     fn pop_pull_and_forward(&mut self) {
-        // 1. Pop checkpoint and collect its contents
         assert!(self.checkpoint_scratch.is_empty());
         for tuple in self.outputs_by_checkpoint.pop().into_iter().flatten() {
             self.checkpoint_scratch.insert(tuple);
         }
-
-        // 2. Pull changes and update input totals, emit as needed
         self.input.dump_to_multiset(&mut self.change_scratch);
 
-        let mut var = self.variable.borrow_mut();
+        let mut to_emit = Vec::new();
+
         for (tuple, diff) in self.change_scratch.drain() {
             let was_emitted = self.input_totals.contains_key(&tuple);
             let is_checkpoint = self.checkpoint_scratch.remove(&tuple);
             *self.input_totals.entry(tuple.clone()).or_insert(0) += diff;
-            let total = *self.input_totals.get(&tuple).unwrap();
+            let total = self.input_totals[&tuple];
 
-            // Emit if:
-            // - Checkpoint tuple that's still present (re-emit)
-            // - OR new tuple that's now present (emit for first time)
-            if total != 0 {
-                if is_checkpoint {
-                    // Checkpoint tuple - re-emit
-                    var.emit(tuple.clone());
-                    if !self.outputs_by_checkpoint.is_empty() {
-                        self.outputs_by_checkpoint.push(tuple);
-                    }
-                } else if !was_emitted {
-                    // New tuple appearing for first time
-                    var.emit(tuple.clone());
-                    if !self.outputs_by_checkpoint.is_empty() {
-                        self.outputs_by_checkpoint.push(tuple);
-                    }
-                }
-            } else {
-                // Tuple is gone, remove from input_totals
+            if total != 0 && (is_checkpoint || !was_emitted) {
+                to_emit.push(tuple);
+            } else if total == 0 && is_checkpoint {
                 self.input_totals.remove(&tuple);
             }
         }
-        drop(var);
 
-        // 3. Re-emit remaining checkpoint tuples (not in change_scratch) if still present
-        let mut var = self.variable.borrow_mut();
         for tuple in self.checkpoint_scratch.drain() {
-            let total = self.input_totals.get(&tuple).copied().unwrap_or(0);
-            if total != 0 {
-                var.emit(tuple.clone());
-                if !self.outputs_by_checkpoint.is_empty() {
-                    self.outputs_by_checkpoint.push(tuple);
-                }
+            if self.input_totals.get(&tuple).copied().unwrap_or(0) != 0 {
+                to_emit.push(tuple);
             } else {
-                // Checkpoint tuple is now gone, remove from input_totals
                 self.input_totals.remove(&tuple);
+            }
+        }
+
+        let mut var = self.variable.borrow_mut();
+        for tuple in to_emit {
+            var.emit(tuple.clone());
+            if !self.outputs_by_checkpoint.is_empty() {
+                self.outputs_by_checkpoint.push(tuple);
             }
         }
     }

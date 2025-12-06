@@ -6,23 +6,23 @@ use std::collections::HashMap;
 fn test_basic_insert_delete() {
     let mut l2: L2Multiset<&str, i32> = L2Multiset::new();
 
-    l2.insert("a", 1);
+    l2.update("a", 1, 1);
     assert!(l2.contains(&"a", &1));
     assert_eq!(l2.get(&"a", &1), 1);
     assert_eq!(l2.len(&"a"), 1);
 
-    l2.insert("a", 1);
+    l2.update("a", 1, 1);
     assert_eq!(l2.get(&"a", &1), 2);
     assert_eq!(l2.len(&"a"), 1); // Still 1 distinct value
 
-    l2.insert("a", 2);
+    l2.update("a", 2, 1);
     assert_eq!(l2.len(&"a"), 2);
 
-    l2.delete(&"a", &1);
+    l2.update("a", 1, -1);
     assert_eq!(l2.get(&"a", &1), 1);
     assert!(l2.contains(&"a", &1));
 
-    l2.delete(&"a", &1);
+    l2.update("a", 1, -1);
     assert_eq!(l2.get(&"a", &1), 0);
     assert!(!l2.contains(&"a", &1));
     assert_eq!(l2.len(&"a"), 1); // Only value 2 left
@@ -32,9 +32,9 @@ fn test_basic_insert_delete() {
 fn test_iter_values() {
     let mut l2: L2Multiset<&str, i32> = L2Multiset::new();
 
-    l2.insert("a", 1);
-    l2.insert("a", 2);
-    l2.insert("a", 3);
+    l2.update("a", 1, 1);
+    l2.update("a", 2, 1);
+    l2.update("a", 3, 1);
 
     let values: Vec<_> = l2.iter_values(&"a").cloned().collect();
     assert_eq!(values.len(), 3);
@@ -48,27 +48,27 @@ fn test_promotion_and_demotion() {
     let mut l2: L2Multiset<&str, i32> = L2Multiset::new();
 
     // Small: 1 element
-    l2.insert("a", 1);
+    l2.update("a", 1, 1);
     assert_eq!(l2.len(&"a"), 1);
 
     // Small: 2 elements
-    l2.insert("a", 2);
+    l2.update("a", 2, 1);
     assert_eq!(l2.len(&"a"), 2);
 
     // Promote to Large: 3 elements
-    l2.insert("a", 3);
+    l2.update("a", 3, 1);
     assert_eq!(l2.len(&"a"), 3);
 
     // Still Large: 4 elements
-    l2.insert("a", 4);
+    l2.update("a", 4, 1);
     assert_eq!(l2.len(&"a"), 4);
 
     // Remove to 3
-    l2.delete(&"a", &4);
+    l2.update("a", 4, -1);
     assert_eq!(l2.len(&"a"), 3);
 
     // Demote to Small: 2 elements
-    l2.delete(&"a", &3);
+    l2.update("a", 3, -1);
     assert_eq!(l2.len(&"a"), 2);
 
     // Verify values still present
@@ -84,10 +84,10 @@ fn test_empty_key() {
     assert_eq!(l2.len(&"a"), 0);
     assert!(l2.iter_values(&"a").next().is_none());
 
-    l2.insert("a", 1);
+    l2.update("a", 1, 1);
     assert!(!l2.is_empty(&"a"));
 
-    l2.delete(&"a", &1);
+    l2.update("a", 1, -1);
     assert!(l2.is_empty(&"a"));
 }
 
@@ -113,20 +113,19 @@ proptest! {
         for op in ops {
             match op {
                 Op::Insert(k, v) => {
-                    l2.insert(k, v);
+                    l2.update(k, v, 1);
                     let ms = reference.entry(k).or_default();
-                    ms.insert(v);
+                    ms.update(v, 1);
                     if ms.is_empty() {
                         reference.remove(&k);
                     }
                 }
                 Op::Delete(k, v) => {
-                    l2.delete(&k, &v);
-                    if let Some(ms) = reference.get_mut(&k) {
-                        ms.delete(v);
-                        if ms.is_empty() {
-                            reference.remove(&k);
-                        }
+                    l2.update(k, v, -1);
+                    let ms = reference.entry(k).or_default();
+                    ms.update(v, -1);
+                    if ms.is_empty() {
+                        reference.remove(&k);
                     }
                 }
             }

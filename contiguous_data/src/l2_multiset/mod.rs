@@ -46,40 +46,6 @@ impl<K: Hash + Eq + Clone, V: Hash + Eq + Clone> L2Multiset<K, V> {
         self.counts.contains(&(key.clone(), value.clone()))
     }
 
-    /// Insert (key, value) - increment count by 1.
-    pub fn insert(&mut self, key: K, value: V) {
-        let kv = (key.clone(), value.clone());
-        let was_present = self.counts.contains(&kv);
-        self.counts.insert(kv);
-        let is_present = self.counts.contains(&(key.clone(), value.clone()));
-
-        // Update structure based on presence change
-        if !was_present && is_present {
-            self.add_to_structure(key, value);
-        } else if was_present && !is_present {
-            self.remove_from_structure(&key, &value);
-        }
-    }
-
-    /// Delete (key, value) - decrement count by 1.
-    /// No-op if the key doesn't exist (matches AHashMap<K, Multiset<V>> semantics).
-    pub fn delete(&mut self, key: &K, value: &V) {
-        if !self.roots.contains_key(key) {
-            return;
-        }
-        let kv = (key.clone(), value.clone());
-        let was_present = self.counts.contains(&kv);
-        self.counts.delete(kv);
-        let is_present = self.counts.contains(&(key.clone(), value.clone()));
-
-        // Update structure based on presence change
-        if !was_present && is_present {
-            self.add_to_structure(key.clone(), value.clone());
-        } else if was_present && !is_present {
-            self.remove_from_structure(key, value);
-        }
-    }
-
     /// Iterate over values for a key (each value appears once regardless of count).
     pub fn iter_values(&self, key: &K) -> impl Iterator<Item = &V> {
         let root = self.roots.get(key);

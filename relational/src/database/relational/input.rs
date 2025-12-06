@@ -35,7 +35,7 @@ impl<T: Clone + Eq + Hash> InputState<T> {
     /// Insert a tuple if not already seen. Returns true if newly added.
     pub(crate) fn insert(&mut self, tuple: T) -> bool {
         if self.seen.insert(tuple.clone()) {
-            self.pending.insert(tuple.clone());
+            self.pending.update(tuple.clone(), 1);
             self.new_inserts.insert(tuple);
             true
         } else {
@@ -49,9 +49,9 @@ impl<T: Clone + Eq + Hash> InputState<T> {
     }
 
     /// Remove a tuple from the seen set and emit -1. Used during pop().
-    pub(crate) fn remove(&mut self, tuple: &T) {
-        if self.seen.remove(tuple) {
-            self.pending.delete(tuple.clone());
+    pub(crate) fn remove(&mut self, tuple: T) {
+        if self.seen.remove(&tuple) {
+            self.pending.update(tuple, -1);
         }
     }
 }
@@ -111,7 +111,7 @@ impl<T: Clone + Eq + Hash> PersistentInputHandle<T> {
     pub fn delete(&mut self, tuple: T) -> bool {
         let mut state = self.state.borrow_mut();
         if state.seen.remove(&tuple) {
-            state.pending.delete(tuple);
+            state.pending.update(tuple, -1);
             true
         } else {
             false
