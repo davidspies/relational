@@ -25,8 +25,6 @@ pub(crate) struct FeedbackWithIdWrapper<T, R: Op<T>> {
     input: Relation<R>,
     /// Track input totals by T alone (not (T, CommitId)) for pop() handling.
     input_totals_by_t: AHashMap<T, i64>,
-    /// Maps T -> CommitId for tuples currently in output.
-    t_to_commit_id: AHashMap<T, CommitId>,
     /// Scratch space for collecting changes.
     change_scratch: Multiset<T>,
     /// Scratch space for checkpoint tuples during pop (T -> CommitId).
@@ -44,7 +42,6 @@ impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
             commit_id,
             input,
             input_totals_by_t: AHashMap::new(),
-            t_to_commit_id: AHashMap::new(),
             change_scratch: Multiset::new(),
             checkpoint_scratch: AHashMap::new(),
         }
@@ -86,12 +83,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
             *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff;
 
             if !self.checkpoint_scratch.contains_key(&tuple) {
-                // Get or assign commit_id for this tuple
-                let commit_id = *self
-                    .t_to_commit_id
-                    .entry(tuple.clone())
-                    .or_insert(current_id);
-                let full_tuple = (tuple.clone(), commit_id);
+                let full_tuple = (tuple.clone(), current_id);
                 let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
                 var.set_input_total(full_tuple.clone(), input_total);
                 var.forward_reachable(&full_tuple);
@@ -103,8 +95,6 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
             let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
             if input_total != 0 {
                 var.forward_reachable(&(tuple, commit_id));
-            } else {
-                self.t_to_commit_id.remove(&tuple);
             }
         }
     }
@@ -125,15 +115,10 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
 
         let mut var = self.variable.borrow_mut();
         for (tuple, diff) in changes {
-            // Track the T -> CommitId mapping (first discovery wins)
-            let commit_id = *self
-                .t_to_commit_id
-                .entry(tuple.clone())
-                .or_insert(current_id);
             // Also track input totals by T
             *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff;
             // Add to variable with commit ID stamp (use the mapped commit_id, not new_id)
-            var.add_change((tuple, commit_id), diff);
+            var.add_change((tuple, current_id), diff);
         }
         var.commit();
 
