@@ -12,6 +12,8 @@ pub struct AnalysisResult {
     pub learned_clause: Vec<(Lit, Level)>,
     /// The max level of any literal in the learned clause.
     pub conflict_level: Level,
+    /// The second highest level (backtrack target for non-chronological backtracking).
+    pub backtrack_level: Level,
 }
 
 impl Solver {
@@ -50,6 +52,14 @@ impl Solver {
             .max()
             .unwrap_or(Level::TOP);
 
+        // Get the second highest level (backtrack target)
+        let backtrack_level = learned_clause
+            .iter()
+            .map(|&(_lit, level)| level)
+            .filter(|&level| level != conflict_level)
+            .max()
+            .unwrap_or(Level::TOP);
+
         // 5. Pop the frame
         let popped = db.pop();
         assert!(popped, "Analysis frame should exist");
@@ -57,6 +67,7 @@ impl Solver {
         AnalysisResult {
             learned_clause,
             conflict_level,
+            backtrack_level,
         }
     }
 }

@@ -83,7 +83,6 @@ impl Solver {
                     )
                 ))
                 .group_min()
-                .map(|(lit, (level, _commit_id, _hash, clause_id))| (lit, (level, clause_id)))
         );
 
         let (analysis_start_clause_id, analysis_start_var) = analysis
@@ -102,31 +101,52 @@ impl Solver {
                 .snd()
                 .map(Not::not)
         );
-        assign!(analysis_start_lits = analysis_start_var_lits.concat(analysis_start_clause_lits));
-        create_variable!(db, analysis_lits_var, analysis_lits, Lit);
-        assign_saved!(analysis_lit_causes = causes.get().semijoin(analysis_lits));
+        assign_saved!(
+            analysis_start_lits = analysis_start_var_lits.concat(analysis_start_clause_lits)
+        );
         assign!(
-            analysis_level = analysis_lit_causes
+            analysis_level = causes
                 .get()
-                .map(|(_lit, (level, _clause_id))| level)
+                .semijoin(analysis_start_lits.get())
+                .map(|(_lit, (level, _, _, _))| level)
                 .consolidate()
                 .global_max()
         );
-        let (on_level, new_clause) = analysis_lit_causes
+        create_variable!(db, analysis_lits_var, analysis_lits, Lit);
+        let analysis_lits = analysis_lits.save();
+        assign_saved!(analysis_lit_causes = causes.get().semijoin(analysis_lits.get()));
+        let (on_level, below_level) = analysis_lit_causes
             .get()
             .cartesian_product(analysis_level)
-            .map(|((lit, (level, clause_id)), max_level)| {
-                if level == max_level && clause_id != ClauseId::DECISION {
-                    Either::Left(clause_id)
+            .map(|(entry @ (lit, (level, _, _, _)), max_level)| {
+                if level == max_level {
+                    Either::Left(entry)
                 } else {
                     Either::Right((!lit, level))
+                }
+            })
+            .partition();
+        assign_saved!(on_level = on_level);
+        assign!(min_lit_on_level = on_level.get().swap().global_min().snd());
+        let (analysis_clause_ids, level_retained) = on_level
+            .get()
+            .cartesian_product(min_lit_on_level)
+            .map(|((lit, (level, _, _, clause_id)), min_lit)| {
+                let retain = match level {
+                    Level::TOP => clause_id == ClauseId::DECISION,
+                    _ => lit == min_lit,
+                };
+                if retain {
+                    Either::Right((!lit, level))
+                } else {
+                    Either::Left(clause_id)
                 }
             })
             .partition();
         assign!(
             analysis_new_lits = all_clauses
                 .get()
-                .semijoin(on_level)
+                .semijoin(analysis_clause_ids)
                 .snd()
                 .consolidate()
                 .map(Not::not)
@@ -134,8 +154,9 @@ impl Solver {
         );
         db.feedback(
             analysis_lits_var,
-            analysis_start_lits.concat(analysis_new_lits),
+            analysis_start_lits.get().concat(analysis_new_lits),
         );
+        assign!(new_clause = below_level.concat(level_retained));
 
         // === Conflict Detection ===
         // Direct conflict: both a literal and its negation are assigned

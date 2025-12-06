@@ -88,6 +88,7 @@ impl Solver {
                     let AnalysisResult {
                         learned_clause,
                         conflict_level,
+                        backtrack_level,
                     } = self.analyze_conflict(db, conflict);
 
                     // Log the learned clause to proof
@@ -103,9 +104,6 @@ impl Solver {
                         }
                         return (false, stats);
                     };
-
-                    let mut backtrack_level = conflict_level;
-                    backtrack_level.dec();
 
                     // Bump VSIDS activity for variables in learned clause
                     for &(lit, _) in &learned_clause {
