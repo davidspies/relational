@@ -1,6 +1,7 @@
 //! FeedbackWithId wrapper - stamps tuples with CommitId when first seen.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::rc::Rc;
 
@@ -23,8 +24,10 @@ pub(crate) struct FeedbackWithIdWrapper<T, R: Op<T>> {
     commit_id: Rc<Cell<CommitId>>,
     /// The input relation produces T.
     input: Relation<R>,
-    /// Track input totals by T alone (not (T, CommitId)) for pop() handling.
-    input_totals_by_t: AHashMap<T, i64>,
+    /// Track input totals by T alone (not (T, CommitId)).
+    input_totals: AHashMap<T, i64>,
+    /// The seen set - tuples (by T) we've emitted +1 for.
+    output_seen: HashSet<T>,
     /// Scratch space for collecting changes.
     change_scratch: Multiset<T>,
     /// Scratch space for checkpoint tuples during pop (T -> CommitId).
@@ -41,7 +44,8 @@ impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
             variable,
             commit_id,
             input,
-            input_totals_by_t: AHashMap::new(),
+            input_totals: AHashMap::new(),
+            output_seen: HashSet::new(),
             change_scratch: Multiset::new(),
             checkpoint_scratch: AHashMap::new(),
         }
@@ -52,6 +56,21 @@ impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
             self.variable.borrow_mut().push_checkpoint();
         }
     }
+
+    /// Try to emit a tuple if it's reachable and not already seen.
+    fn try_emit(
+        input_totals: &AHashMap<T, i64>,
+        output_seen: &mut HashSet<T>,
+        var: &mut Variable<(T, CommitId)>,
+        tuple: &T,
+        commit_id: CommitId,
+    ) {
+        let input_total = input_totals.get(tuple).copied().unwrap_or(0);
+        if input_total != 0 && !output_seen.contains(tuple) {
+            output_seen.insert(tuple.clone());
+            var.emit((tuple.clone(), commit_id));
+        }
+    }
 }
 
 impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R> {
@@ -60,7 +79,13 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
     }
 
     fn send_inverse(&mut self) {
-        self.variable.borrow_mut().send_inverse();
+        let mut var = self.variable.borrow_mut();
+        // Collect from last checkpoint (don't pop yet)
+        let tuples: Vec<_> = var.last_checkpoint().cloned().collect();
+        for (tuple, commit_id) in &tuples {
+            self.output_seen.remove(tuple);
+            var.emit_inverse(&(tuple.clone(), *commit_id));
+        }
     }
 
     fn commit(&mut self) {
@@ -71,54 +96,63 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
         // 1. Pop checkpoint and get its contents
         assert!(self.checkpoint_scratch.is_empty());
         for (tuple, commit_id) in self.variable.borrow_mut().pop_checkpoint_drain() {
+            self.output_seen.remove(&tuple);
             self.checkpoint_scratch.insert(tuple, commit_id);
         }
 
-        // 2. Pull changes, update input totals, and forward non-checkpoint items
+        // 2. Pull changes and update input totals
         self.input.dump_to_multiset(&mut self.change_scratch);
 
         let current_id = self.commit_id.get();
         let mut var = self.variable.borrow_mut();
         for (tuple, diff) in self.change_scratch.drain() {
-            *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff;
+            *self.input_totals.entry(tuple.clone()).or_insert(0) += diff;
 
+            // Forward non-checkpoint items with current commit ID
             if !self.checkpoint_scratch.contains_key(&tuple) {
-                let full_tuple = (tuple.clone(), current_id);
-                let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
-                var.set_input_total(full_tuple.clone(), input_total);
-                var.forward_reachable(&full_tuple);
+                Self::try_emit(
+                    &self.input_totals,
+                    &mut self.output_seen,
+                    &mut var,
+                    &tuple,
+                    current_id,
+                );
             }
         }
 
         // 3. Forward items from popped checkpoint that are still reachable
+        // (keep their original commit_id)
         for (tuple, commit_id) in self.checkpoint_scratch.drain() {
-            let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
-            if input_total != 0 {
-                var.forward_reachable(&(tuple, commit_id));
-            }
+            Self::try_emit(
+                &self.input_totals,
+                &mut self.output_seen,
+                &mut var,
+                &tuple,
+                commit_id,
+            );
         }
     }
 
     fn step(&mut self) -> bool {
         // Consolidate changes per tuple using Multiset to handle cases where
         // upstream emits both +1 and -1 for the same tuple within a single step.
-        // Without consolidation, the Variable's seen-set semantics would incorrectly
-        // add tuples that net to zero.
-        let mut changes = Multiset::new();
-        self.input.dump_to_multiset(&mut changes);
+        self.input.dump_to_multiset(&mut self.change_scratch);
 
-        if changes.is_empty() {
+        if self.change_scratch.is_empty() {
             return false;
         }
 
         let current_id = self.commit_id.get();
-
         let mut var = self.variable.borrow_mut();
-        for (tuple, diff) in changes {
-            // Also track input totals by T
-            *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff;
-            // Add to variable with commit ID stamp (use the mapped commit_id, not new_id)
-            var.add_input((tuple, current_id), diff);
+        for (tuple, diff) in self.change_scratch.drain() {
+            *self.input_totals.entry(tuple.clone()).or_insert(0) += diff;
+            Self::try_emit(
+                &self.input_totals,
+                &mut self.output_seen,
+                &mut var,
+                &tuple,
+                current_id,
+            );
         }
         var.commit();
 
