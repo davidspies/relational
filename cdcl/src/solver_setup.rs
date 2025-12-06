@@ -127,7 +127,7 @@ impl Solver {
             })
             .partition();
         assign_saved!(on_level = on_level);
-        assign!(min_lit_on_level = on_level.get().swap().global_min().snd());
+        assign!(min_lit_on_level = on_level.get().swap().global_min().snd().consolidate());
         let (analysis_clause_ids, level_retained) = on_level
             .get()
             .cartesian_product(min_lit_on_level)
