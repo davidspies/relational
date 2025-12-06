@@ -153,22 +153,17 @@ impl<T: Clone + Eq + Hash, R: Op<T>, V: Clone + Eq + Hash, C: Convert<T, V>> Any
         }
 
         let current_id = self.commit_id.get();
-        let mut to_emit = Vec::new();
+        let mut var = self.variable.borrow_mut();
         for (tuple, diff) in self.change_scratch.drain() {
             let was_emitted = self.input_totals.contains_key(&tuple);
             *self.input_totals.entry(tuple.clone()).or_insert(0) += diff;
             let total = *self.input_totals.get(&tuple).unwrap();
 
             if total != 0 && !was_emitted {
-                to_emit.push(tuple);
-            }
-        }
-
-        let mut var = self.variable.borrow_mut();
-        for tuple in to_emit {
-            var.emit(self.converter.convert((tuple.clone(), current_id)));
-            if !self.outputs_by_checkpoint.is_empty() {
-                self.outputs_by_checkpoint.push((tuple, current_id));
+                var.emit(self.converter.convert((tuple.clone(), current_id)));
+                if !self.outputs_by_checkpoint.is_empty() {
+                    self.outputs_by_checkpoint.push((tuple, current_id));
+                }
             }
         }
         var.commit();
