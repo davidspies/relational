@@ -1,4 +1,4 @@
-//! FeedbackWithId wrapper - stamps tuples with CommitId when first seen.
+//! Generic feedback wrapper with optional CommitId stamping.
 
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map;
@@ -15,36 +15,61 @@ use crate::database::relational::Op;
 
 use super::feedback::AnyFeedback;
 
-/// Wrapper for feedback_with_id - stamps tuples with CommitId when first seen.
-/// Input relation produces T, variable stores (T, CommitId).
-///
-/// Uses `input_totals` for two purposes:
-/// 1. Track cumulative input counts (non-zero = tuple is present in input)
-/// 2. Track "has been emitted" (key exists = we've emitted +1 for this tuple)
-pub(crate) struct FeedbackWithIdWrapper<T, R: Op<T>> {
-    /// Shared variable state (also accessed by VariableRelation).
-    variable: Rc<RefCell<Variable<(T, CommitId)>>>,
-    /// Shared commit ID counter.
-    commit_id: Rc<Cell<CommitId>>,
-    /// The input relation produces T.
-    input: Relation<R>,
-    /// Cumulative input counts. Key exists = has been emitted.
-    input_totals: AHashMap<T, i64>,
-    /// Stack of outputs added at each checkpoint level (T -> CommitId).
-    outputs_by_checkpoint: L2Vec<(T, CommitId)>,
-    /// Scratch space for collecting changes.
-    change_scratch: Multiset<T>,
-    /// Scratch space for checkpoint tuples during pop.
-    checkpoint_scratch: AHashSet<T>,
+/// Marker: strip CommitId, output just T.
+#[derive(Default)]
+pub(crate) struct NotWithId;
+/// Marker: keep CommitId, output (T, CommitId).
+#[derive(Default)]
+pub(crate) struct WithId;
+
+/// Convert (T, CommitId) to output type V.
+pub(crate) trait Convert<T, V>: Default {
+    fn convert(&self, input: (T, CommitId)) -> V;
 }
 
-impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
+impl<T> Convert<T, T> for NotWithId {
+    fn convert(&self, (input, _): (T, CommitId)) -> T {
+        input
+    }
+}
+
+impl<T> Convert<T, (T, CommitId)> for WithId {
+    fn convert(&self, input: (T, CommitId)) -> (T, CommitId) {
+        input
+    }
+}
+
+/// Generic feedback wrapper.
+///
+/// - T: input tuple type
+/// - R: input relation operator
+/// - V: variable output type (T or (T, CommitId))
+/// - C: converter from (T, CommitId) to V
+pub(crate) struct FeedbackWrapperG<T, R: Op<T>, V, C: Convert<T, V>> {
+    variable: Rc<RefCell<Variable<V>>>,
+    commit_id: Rc<Cell<CommitId>>,
+    input: Relation<R>,
+    input_totals: AHashMap<T, i64>,
+    outputs_by_checkpoint: L2Vec<(T, CommitId)>,
+    change_scratch: Multiset<T>,
+    checkpoint_scratch: AHashSet<T>,
+    converter: C,
+}
+
+/// Regular feedback: variable stores T.
+pub(crate) type FeedbackWrapper<T, R> = FeedbackWrapperG<T, R, T, NotWithId>;
+/// Feedback with ID: variable stores (T, CommitId).
+pub(crate) type FeedbackWithIdWrapper<T, R> = FeedbackWrapperG<T, R, (T, CommitId), WithId>;
+
+impl<T: Clone + Eq + Hash, R: Op<T>, V: Clone + Eq + Hash, C: Convert<T, V>>
+    FeedbackWrapperG<T, R, V, C>
+{
     pub(crate) fn new(
-        variable: Rc<RefCell<Variable<(T, CommitId)>>>,
+        variable: Rc<RefCell<Variable<V>>>,
         input: Relation<R>,
         commit_id: Rc<Cell<CommitId>>,
     ) -> Self {
-        FeedbackWithIdWrapper {
+        FeedbackWrapperG {
             variable,
             commit_id,
             input,
@@ -52,6 +77,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
             outputs_by_checkpoint: L2Vec::new(),
             change_scratch: Multiset::new(),
             checkpoint_scratch: AHashSet::new(),
+            converter: C::default(),
         }
     }
 
@@ -62,17 +88,18 @@ impl<T: Clone + Eq + Hash, R: Op<T>> FeedbackWithIdWrapper<T, R> {
     }
 }
 
-impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R> {
+impl<T: Clone + Eq + Hash, R: Op<T>, V: Clone + Eq + Hash, C: Convert<T, V>> AnyFeedback
+    for FeedbackWrapperG<T, R, V, C>
+{
     fn push_checkpoint(&mut self) {
         self.outputs_by_checkpoint.push_empty();
     }
 
     fn send_inverse(&mut self) {
-        // Collect from last checkpoint (don't pop yet)
         let tuples = self.outputs_by_checkpoint.last().unwrap();
         let mut var = self.variable.borrow_mut();
         for (tuple, commit_id) in tuples {
-            var.emit_inverse(&(tuple.clone(), *commit_id));
+            var.emit_inverse(&self.converter.convert((tuple.clone(), *commit_id)));
         }
     }
 
@@ -99,7 +126,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
                 if !self.outputs_by_checkpoint.is_empty() {
                     self.outputs_by_checkpoint.push((tuple.clone(), current_id));
                 }
-                var.emit((tuple, current_id));
+                var.emit(self.converter.convert((tuple, current_id)));
             }
         }
 
@@ -111,7 +138,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
                     if !self.outputs_by_checkpoint.is_empty() {
                         self.outputs_by_checkpoint.push((tuple.clone(), current_id));
                     }
-                    var.emit((tuple.clone(), current_id));
+                    var.emit(self.converter.convert((tuple.clone(), current_id)));
                     vacant_entry.insert(diff);
                 }
             }
@@ -119,15 +146,12 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
     }
 
     fn step(&mut self) -> bool {
-        // Consolidate changes per tuple using Multiset to handle cases where
-        // upstream emits both +1 and -1 for the same tuple within a single step.
         self.input.dump_to_multiset(&mut self.change_scratch);
 
         if self.change_scratch.is_empty() {
             return false;
         }
 
-        // Collect tuples to emit (can't modify outputs_by_checkpoint while iterating)
         let current_id = self.commit_id.get();
         let mut to_emit = Vec::new();
         for (tuple, diff) in self.change_scratch.drain() {
@@ -135,7 +159,6 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
             *self.input_totals.entry(tuple.clone()).or_insert(0) += diff;
             let total = *self.input_totals.get(&tuple).unwrap();
 
-            // Emit if present (count != 0) AND not previously emitted
             if total != 0 && !was_emitted {
                 to_emit.push(tuple);
             }
@@ -143,7 +166,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
 
         let mut var = self.variable.borrow_mut();
         for tuple in to_emit {
-            var.emit((tuple.clone(), current_id));
+            var.emit(self.converter.convert((tuple.clone(), current_id)));
             if !self.outputs_by_checkpoint.is_empty() {
                 self.outputs_by_checkpoint.push((tuple, current_id));
             }

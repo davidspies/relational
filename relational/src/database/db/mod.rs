@@ -83,7 +83,7 @@ impl DatabaseBuilder {
             graph.add_feedback_edge(input_node, variable_node);
         }
 
-        let mut wrapper = FeedbackWrapper::new(variable.inner, input);
+        let mut wrapper = FeedbackWrapper::new(variable.inner, input, self.commit_id.clone());
         wrapper.push_initial_checkpoints(self.checkpoint_depth);
         self.steps.push(StratifiedStep::Feedback(Box::new(wrapper)));
     }
