@@ -118,7 +118,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
             // Also track input totals by T
             *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff;
             // Add to variable with commit ID stamp (use the mapped commit_id, not new_id)
-            var.add_change((tuple, current_id), diff);
+            var.add_input((tuple, current_id), diff);
         }
         var.commit();
 

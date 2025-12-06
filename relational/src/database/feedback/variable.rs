@@ -60,11 +60,6 @@ impl<T: Clone + Eq + Hash> Variable<T> {
         // If input_totals == 0 or already in output_seen, do nothing
     }
 
-    /// Backwards compatibility alias for add_input.
-    pub(crate) fn add_change(&mut self, tuple: T, diff: Diff) {
-        self.add_input(tuple, diff);
-    }
-
     /// Take the pending changes (empties the buffer).
     pub(crate) fn drain_pending(&mut self) -> impl Iterator<Item = (T, Diff)> {
         self.pending.drain()

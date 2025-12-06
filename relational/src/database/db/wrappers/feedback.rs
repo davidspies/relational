@@ -105,7 +105,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWrapper<T, R> {
 
         let mut var = self.variable.borrow_mut();
         for (tuple, diff) in self.change_scratch.drain() {
-            var.add_change(tuple, diff);
+            var.add_input(tuple, diff);
         }
         var.commit();
 
