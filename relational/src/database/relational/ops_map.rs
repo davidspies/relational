@@ -29,6 +29,10 @@ where
             consumer(f(t), diff);
         });
     }
+
+    fn passthrough_op_type(&self, name: &'static str) -> bool {
+        self.inner.passthrough_op_type(name)
+    }
 }
 
 impl<R> Relation<R> {

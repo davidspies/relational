@@ -46,8 +46,8 @@ impl ClauseDeletion {
     }
 
     /// Register a newly learned clause with its LBD.
-    pub(crate) fn on_learn(&mut self, clause_id: ClauseId, literals: &[Lit], levels: &[Level]) {
-        let lbd = compute_lbd(literals, levels);
+    pub(crate) fn on_learn(&mut self, clause_id: ClauseId, clause: &[(Lit, Level)]) {
+        let lbd = compute_lbd(clause);
         self.clause_info.insert(
             clause_id,
             ClauseInfo {
@@ -126,12 +126,10 @@ impl Default for ClauseDeletion {
 
 /// Compute the LBD (Literal Block Distance) of a clause.
 /// LBD is the number of distinct decision levels among the clause's literals.
-fn compute_lbd(literals: &[Lit], levels: &[Level]) -> u32 {
-    assert_eq!(literals.len(), levels.len());
-
+fn compute_lbd(clause: &[(Lit, Level)]) -> u32 {
     // Use a small vec for typical clause sizes, avoiding allocation
-    let mut seen_levels: Vec<Level> = Vec::with_capacity(literals.len());
-    for &level in levels {
+    let mut seen_levels: Vec<Level> = Vec::with_capacity(clause.len());
+    for &(_, level) in clause {
         if !seen_levels.contains(&level) {
             seen_levels.push(level);
         }

@@ -123,11 +123,6 @@ impl ClauseId {
     pub(crate) fn raw(self) -> u32 {
         self.0
     }
-
-    /// Check if this is a decision (no reason clause).
-    pub(crate) fn is_decision(self) -> bool {
-        self.0 == 0
-    }
 }
 
 /// A conflict detected during propagation.

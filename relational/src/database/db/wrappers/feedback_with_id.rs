@@ -80,13 +80,17 @@ impl<T: Clone + Eq + Hash, R: Op<T>> AnyFeedback for FeedbackWithIdWrapper<T, R>
         // 2. Pull changes, update input totals, and forward non-checkpoint items
         self.input.dump_to_multiset(&mut self.change_scratch);
 
+        let current_id = self.commit_id.get();
         let mut var = self.variable.borrow_mut();
         for (tuple, diff) in self.change_scratch.drain() {
             *self.input_totals_by_t.entry(tuple.clone()).or_insert(0) += diff;
 
-            if let Some(&commit_id) = self.t_to_commit_id.get(&tuple)
-                && !self.checkpoint_scratch.contains_key(&tuple)
-            {
+            if !self.checkpoint_scratch.contains_key(&tuple) {
+                // Get or assign commit_id for this tuple
+                let commit_id = *self
+                    .t_to_commit_id
+                    .entry(tuple.clone())
+                    .or_insert(current_id);
                 let full_tuple = (tuple.clone(), commit_id);
                 let input_total = self.input_totals_by_t.get(&tuple).copied().unwrap_or(0);
                 var.set_input_total(full_tuple.clone(), input_total);

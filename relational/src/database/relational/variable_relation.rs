@@ -5,6 +5,7 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use contiguous_data::Diff;
+use derive_where::derive_where;
 
 use crate::database::feedback::Variable as InternalVariable;
 
@@ -15,19 +16,11 @@ use super::op::Op;
 ///
 /// Created by `Database::create_variable()` and passed to `Database::feedback()`
 /// to wire up the input relation.
+#[derive_where(Clone)]
 pub struct Variable<T> {
     pub(crate) inner: Rc<RefCell<InternalVariable<T>>>,
     /// The node ID of the VariableRelation in the dataflow graph.
     pub(crate) node_id: NodeId,
-}
-
-impl<T> Clone for Variable<T> {
-    fn clone(&self) -> Self {
-        Variable {
-            inner: self.inner.clone(),
-            node_id: self.node_id,
-        }
-    }
 }
 
 /// A relation that reads changes from a feedback variable.

@@ -35,12 +35,6 @@ impl ProofWriter {
         Ok(())
     }
 
-    /// Log the empty clause (final proof of UNSAT).
-    pub(crate) fn add_empty_clause(&mut self) -> std::io::Result<()> {
-        writeln!(self.writer, "0")?;
-        Ok(())
-    }
-
     /// Flush the writer to ensure all data is written.
     pub(crate) fn flush(&mut self) -> std::io::Result<()> {
         self.writer.flush()

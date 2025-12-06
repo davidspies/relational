@@ -4,9 +4,11 @@ use std::time::Instant;
 
 use relational::database::Database;
 
+use crate::conflict_analysis::AnalysisResult;
+use crate::types::Level;
+
 use super::Solver;
 use super::proof::ProofWriter;
-use super::types::Level;
 
 /// Statistics for debugging/profiling.
 #[derive(Default)]
@@ -51,11 +53,7 @@ impl Solver {
             // Periodic progress report every 5 seconds
             let now = Instant::now();
             if now.duration_since(last_report).as_secs() >= 5 {
-                let causes = self.outputs.causes.get();
                 let level = self.state.current_level.raw();
-                let fixed = causes.count_at_level(Level::TOP);
-                let total_non_fixed = self.state.num_vars as usize - fixed;
-                let assigned_non_fixed = causes.count_non_fixed();
                 let learned = self.state.clause_deletion.len();
                 let elapsed = start.elapsed().as_secs_f64();
                 let SolveStats {
@@ -65,7 +63,7 @@ impl Solver {
                 } = stats;
                 eprintln!(
                     "c progress: {elapsed:.1}s decisions={decisions} conflicts={conflicts} restarts={restarts} \
-                    learned={learned} level={level} assigned={assigned_non_fixed}/{total_non_fixed}",
+                    learned={learned} level={level}",
                 );
                 last_report = now;
             }
@@ -87,52 +85,53 @@ impl Solver {
                 Err(conflict) => {
                     stats.conflicts += 1;
                     // Conflict! Analyze and learn.
-                    match self.analyze_conflict(conflict) {
-                        None => {
-                            // Conflict at level 0 = UNSAT
-                            if let Some(ref mut p) = proof {
-                                let _ = p.add_empty_clause();
-                                let _ = p.flush();
-                            }
-                            return (false, stats);
-                        }
-                        Some(analysis) => {
-                            // Log the learned clause to proof
-                            if let Some(ref mut p) = proof {
-                                let _ = p.add_clause(&analysis.learned_clause);
-                            }
+                    let AnalysisResult {
+                        learned_clause,
+                        conflict_level,
+                    } = self.analyze_conflict(db, conflict);
 
-                            // Bump VSIDS activity for variables in learned clause
-                            for lit in &analysis.learned_clause {
-                                self.state.vsids.bump(lit.var());
-                            }
-                            self.state.vsids.decay();
-
-                            // Non-chronological backtrack to the computed level FIRST
-                            self.backtrack_to(db, analysis.backtrack_level);
-
-                            // Then learn the clause with LBD tracking
-                            self.learn_clause_with_levels(
-                                db,
-                                &analysis.learned_clause,
-                                &analysis.learned_clause_levels,
-                            );
-
-                            // Decay clause activities
-                            self.state.clause_deletion.decay_activities();
-
-                            // Check if we should restart
-                            if self.state.restart.on_conflict() {
-                                stats.restarts += 1;
-                                self.restart(db);
-                                // Good time to clean up learned clauses
-                                self.maybe_delete_clauses(db);
-                            }
-
-                            // The learned clause is now unit (asserting), so propagation
-                            // will assign the UIP literal on the next iteration
-                        }
+                    // Log the learned clause to proof
+                    if let Some(ref mut p) = proof {
+                        let lits: Vec<_> = learned_clause.iter().map(|&(lit, _)| lit).collect();
+                        let _ = p.add_clause(&lits);
                     }
+
+                    if conflict_level == Level::TOP {
+                        // Conflict at level 0 = UNSAT
+                        if let Some(ref mut p) = proof {
+                            let _ = p.flush();
+                        }
+                        return (false, stats);
+                    };
+
+                    let mut backtrack_level = conflict_level;
+                    backtrack_level.dec();
+
+                    // Bump VSIDS activity for variables in learned clause
+                    for &(lit, _) in &learned_clause {
+                        self.state.vsids.bump(lit.var());
+                    }
+                    self.state.vsids.decay();
+
+                    // Non-chronological backtrack to the computed level FIRST
+                    self.backtrack_to(db, backtrack_level);
+
+                    // Then learn the clause with LBD tracking
+                    self.learn_clause(db, &learned_clause);
+
+                    // Decay clause activities
+                    self.state.clause_deletion.decay_activities();
+
+                    // Check if we should restart
+                    if self.state.restart.on_conflict() {
+                        stats.restarts += 1;
+                        self.restart(db);
+                        // Good time to clean up learned clauses
+                        self.maybe_delete_clauses(db);
+                    }
+
+                    // The learned clause is now unit (asserting), so propagation
+                    // will assign the UIP literal on the next iteration
                 }
             }
         }

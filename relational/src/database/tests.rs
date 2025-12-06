@@ -1046,3 +1046,73 @@ fn test_graph_element_counting() {
         );
     }
 }
+
+#[test]
+fn test_feedback_with_id_new_tuples_after_pop() {
+    // This test verifies that feedback_with_id correctly handles NEW tuples
+    // that appear AS A RESULT OF popping a checkpoint.
+    //
+    // The bug: pop_pull_and_forward only forwarded tuples that already had a
+    // commit_id. But when pop itself causes new tuples to appear (e.g., by
+    // removing something that was blocking them), those tuples have never been
+    // seen before and have no commit_id.
+    //
+    // Scenario:
+    // - x is persistent input (survives pop)
+    // - y is normal input (reverts on pop)
+    // - feedback_with_id(z, x.set_minus(y))
+    // - push, insert 1 into y, insert 1 into x, pop
+    // - After pop: y loses 1, x keeps 1, so 1 appears in set_minus for first time
+    let mut db = DatabaseBuilder::new();
+
+    // x is persistent, y is normal
+    let (mut x_handle, x_rel) = db.create_persistent_input::<i32>();
+    let (mut y_handle, y_rel) = db.create_input::<i32>();
+
+    // Create feedback_with_id on x.set_minus(y)
+    let (z_var, z_var_rel) = db.create_variable::<(i32, CommitId)>();
+    let z_rel = z_var_rel.save();
+
+    let diff = x_rel.set_minus(y_rel);
+    db.feedback_with_id(z_var, diff);
+
+    let z_out = z_rel.get().boxed().output();
+
+    let mut db = db.build();
+    db.commit();
+
+    // Initially empty
+    let z1: Vec<_> = z_out.collect();
+    assert!(z1.is_empty(), "Should start empty");
+
+    // Push checkpoint
+    db.push();
+
+    // Insert 1 into y (normal input - will revert on pop)
+    y_handle.insert(1);
+    db.commit();
+
+    // Insert 1 into x (persistent - survives pop)
+    x_handle.insert(1);
+    db.commit();
+
+    // At this point: x={1}, y={1}, so set_minus is empty
+    let z2: Vec<_> = z_out.collect();
+    assert!(
+        !z2.iter().any(|(val, _)| *val == 1),
+        "1 should be blocked by y"
+    );
+
+    // Pop - y reverts to empty, x keeps 1
+    // Now set_minus produces 1 FOR THE FIRST TIME
+    assert!(db.pop());
+
+    // This is where the bug manifested: 1 appears in the feedback input
+    // for the first time as a result of the pop, but it has no commit_id
+    // because it was never seen before.
+    let z3: Vec<_> = z_out.collect();
+    assert!(
+        z3.iter().any(|(val, _)| *val == 1),
+        "1 should appear after pop unblocks it"
+    );
+}

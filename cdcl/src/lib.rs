@@ -6,7 +6,6 @@
 //! - Push/pop checkpoints for backtracking
 //! - Persistent inputs for learned clauses
 
-mod cause_sink;
 mod clause_deletion;
 mod cnf;
 mod conflict_analysis;

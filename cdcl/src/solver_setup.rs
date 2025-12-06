@@ -4,19 +4,21 @@ use std::hash::Hash;
 use std::ops::Not;
 
 use ahash::{AHashMap, RandomState};
+use either::Either;
 use relational::database::{CommitId, DatabaseBuilder};
 use relational::{
     assign, assign_and_interrupt, assign_saved, create_input, create_persistent_input,
     create_variable,
 };
 
-/// Seeded hash for deterministic watched literal selection.
+/// Seeded hash for deterministic ordering.
 fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
     let build_hasher = RandomState::with_seeds(seed, 0, 0, 0);
     build_hasher.hash_one(val)
 }
 
 const WATCH_SEED: u64 = 0x7a3b9c1d4e5f6028;
+const CAUSE_SEED: u64 = 0x1f2e3d4c5b6a7980; // For deterministic cause selection
 
 use crate::clause_deletion::ClauseDeletion;
 use crate::restart::RestartStrategy;
@@ -43,14 +45,13 @@ impl Solver {
             decision_assignments,
             (Lit, Level)
         );
+        create_input!(db, analysis_inp, analysis, Conflict);
 
         // Current level = max(levels)
         assign_saved!(current_level = levels.global_max());
 
         // All clauses (original + learned)
         assign_saved!(all_clauses = clauses.concat(learned));
-
-        assign!(all_clause_ids = all_clauses.get().fst().consolidate());
 
         // === Feedback-based Unit Propagation ===
         // prep accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
@@ -66,15 +67,75 @@ impl Solver {
                 .group_min()
         );
 
-        // Causes: tracks all ways each literal was derived
-        assign!(
-            causes = prep
-                .get()
-                .map(|((lit, level, cid), commit_id)| ((lit, commit_id), (cid, level)))
-        );
-
         // Derived: which literals are assigned true
         assign_saved!(assigned = assignments.get().fst());
+
+        assign_saved!(
+            causes = prep
+                .get()
+                .map(|((lit, level, clause_id), commit_id)| (
+                    lit,
+                    (
+                        level,
+                        commit_id,
+                        seeded_hash(&(lit, level, clause_id), CAUSE_SEED),
+                        clause_id
+                    )
+                ))
+                .group_min()
+                .map(|(lit, (level, _commit_id, _hash, clause_id))| (lit, (level, clause_id)))
+        );
+
+        let (analysis_start_clause_id, analysis_start_var) = analysis
+            .map(|conflict| match conflict {
+                Conflict::EmptyClause(clause_id) => Either::Left(clause_id),
+                Conflict::DirectConflict(var) => Either::Right(var),
+            })
+            .partition();
+        assign!(
+            analysis_start_var_lits = analysis_start_var.flat_map(|v| [Lit::pos(v), Lit::neg(v)])
+        );
+        assign!(
+            analysis_start_clause_lits = all_clauses
+                .get()
+                .semijoin(analysis_start_clause_id)
+                .snd()
+                .map(Not::not)
+        );
+        assign!(analysis_start_lits = analysis_start_var_lits.concat(analysis_start_clause_lits));
+        create_variable!(db, analysis_lits_var, analysis_lits, Lit);
+        assign_saved!(analysis_lit_causes = causes.get().semijoin(analysis_lits));
+        assign!(
+            analysis_level = analysis_lit_causes
+                .get()
+                .map(|(_lit, (level, _clause_id))| level)
+                .consolidate()
+                .global_max()
+        );
+        let (on_level, new_clause) = analysis_lit_causes
+            .get()
+            .cartesian_product(analysis_level)
+            .map(|((lit, (level, clause_id)), max_level)| {
+                if level == max_level && clause_id != ClauseId::DECISION {
+                    Either::Left(clause_id)
+                } else {
+                    Either::Right((!lit, level))
+                }
+            })
+            .partition();
+        assign!(
+            analysis_new_lits = all_clauses
+                .get()
+                .semijoin(on_level)
+                .snd()
+                .consolidate()
+                .map(Not::not)
+                .intersection(assigned.get())
+        );
+        db.feedback(
+            analysis_lits_var,
+            analysis_start_lits.concat(analysis_new_lits),
+        );
 
         // === Conflict Detection ===
         // Direct conflict: both a literal and its negation are assigned
@@ -135,6 +196,7 @@ impl Solver {
                 .consolidate()
         );
 
+        assign!(all_clause_ids = all_clauses.get().fst().consolidate());
         // Empty clauses: Clauses which are no longer satisfiable
         // Interrupt early when an empty clause is detected
         assign_and_interrupt!(
@@ -159,7 +221,7 @@ impl Solver {
         );
 
         // Unit clauses: exactly one remaining literal (must be assigned true)
-        assign!(
+        assign_saved!(
             units = grouped_watched_literals.get().filter_map(|(cid, arr)| {
                 let mut iter = arr.into_iter();
                 let (_hash, lit) = iter.next().unwrap();
@@ -168,7 +230,7 @@ impl Solver {
         );
 
         // === Set up the feedback loop ===
-        assign!(unit_with_level = units.cartesian_product(current_level.get()));
+        assign!(unit_with_level = units.get().cartesian_product(current_level.get()));
         assign!(unit_lit_level_cid = unit_with_level.map(|((cid, lit), level)| (lit, level, cid)));
 
         assign!(
@@ -191,35 +253,36 @@ impl Solver {
             this_level_assignments = assignments.get().swap().semijoin(current_level.get()).snd()
         );
 
-        // Create outputs from relations (need to box them to store in struct)
-        let causes_out = causes.boxed().output_with_sink();
+        // Create outputs from relations
+        let new_clause_out = new_clause.boxed().output_with_sink();
         let conflicts_out = conflicts.boxed().output_with_sink();
         let this_level_assignments_out = this_level_assignments.boxed().output();
+        let assigned_out = assigned.get().output();
 
         // Initialize with Level::TOP so unit propagation works at level 0
         levels_inp.insert(Level::TOP);
 
         Solver {
             inputs: Inputs {
+                analysis: analysis_inp,
                 clauses: clauses_inp,
                 learned: learned_inp,
                 levels: levels_inp,
                 decision_assignments: decision_assignments_inp,
             },
             outputs: Outputs {
-                causes: causes_out,
+                assigned: assigned_out,
+                new_clause: new_clause_out,
                 conflicts: conflicts_out,
                 this_level_assignments: this_level_assignments_out,
             },
             state: State {
                 current_level: Level::TOP,
                 next_learned_id: ClauseId::new(1),
-                decision_stack: Vec::new(),
                 clause_db: AHashMap::new(),
                 restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
                 clause_deletion: ClauseDeletion::new(),
                 vsids: Vsids::new(num_vars),
-                num_vars,
             },
         }
     }

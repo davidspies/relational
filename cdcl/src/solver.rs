@@ -1,9 +1,8 @@
 //! CDCL SAT Solver structure and methods.
 
 use ahash::AHashMap;
-use relational::database::{CommitId, Database, InputHandle, Output, PersistentInputHandle};
+use relational::database::{Database, InputHandle, Output, PersistentInputHandle, SavedOutput};
 
-use super::cause_sink::CauseSink;
 use super::clause_deletion::ClauseDeletion;
 use super::conflicts_sink::ConflictsSink;
 use super::restart::RestartStrategy;
@@ -11,7 +10,6 @@ use super::types::{ClauseId, Conflict, Level, Lit, Var};
 use super::vsids::Vsids;
 
 /// Type aliases for outputs with custom sinks.
-type CausesOutput = Output<((Lit, CommitId), (ClauseId, Level)), CauseSink>;
 type ConflictsOutput = Output<Conflict, ConflictsSink>;
 
 /// Input handles for the solver.
@@ -22,18 +20,21 @@ pub(super) struct Inputs {
     pub(crate) learned: PersistentInputHandle<(ClauseId, Lit)>,
     /// Decision levels - we insert the current level here
     pub(crate) levels: InputHandle<Level>,
-    /// Decision assignments (lit, level, clause_id) - inserted directly for decisions
+    /// Decision assignments (lit, level) - inserted directly for decisions
     pub(crate) decision_assignments: InputHandle<(Lit, Level)>,
+    /// Analysis input for conflict analysis
+    pub(crate) analysis: InputHandle<Conflict>,
 }
 
 /// Output relations from the dataflow.
 pub(super) struct Outputs {
-    /// Causes: ((lit, commit_id), (clause_id, level)) with CauseSink for efficient lookup
-    pub(crate) causes: CausesOutput,
-    /// Conflicts detected during propagation
+    /// Assigned literals (derived from feedback variable).
+    pub(crate) assigned: SavedOutput<Lit>,
+    /// Learned clause literals for conflict analysis: (literal, level).
+    pub(crate) new_clause: Output<(Lit, Level)>,
+    /// Conflicts detected during propagation.
     pub(crate) conflicts: ConflictsOutput,
-    /// Assignments at the current decision level. Positive counts indicate assigned true,
-    /// negative indicate assigned false. Conflict literals are omitted.
+    /// Assignments at the current decision level for VSIDS phase saving.
     pub(crate) this_level_assignments: Output<Lit>,
 }
 
@@ -43,8 +44,6 @@ pub(super) struct State {
     pub(crate) current_level: Level,
     /// Next clause ID for learned clauses.
     pub(crate) next_learned_id: ClauseId,
-    /// Stack of decisions: (level, literal, tried_both)
-    pub(crate) decision_stack: Vec<(Level, Lit, bool)>,
     /// Cache of clause contents: clause_id -> list of literals
     pub(crate) clause_db: AHashMap<ClauseId, Vec<Lit>>,
     /// Restart strategy.
@@ -53,8 +52,6 @@ pub(super) struct State {
     pub(crate) clause_deletion: ClauseDeletion,
     /// VSIDS decision heuristic.
     pub(crate) vsids: Vsids,
-    /// Total number of variables.
-    pub(crate) num_vars: u32,
 }
 
 /// CDCL SAT Solver.
@@ -80,13 +77,9 @@ impl Solver {
     }
 
     /// Make a decision: assign a literal at a new decision level.
-    /// `tried_opposite` indicates if we've already tried the opposite polarity.
-    pub(super) fn decide_internal(&mut self, db: &mut Database, lit: Lit, tried_opposite: bool) {
+    pub(super) fn decide_internal(&mut self, db: &mut Database, lit: Lit) {
         db.push();
         self.state.current_level.inc();
-        self.state
-            .decision_stack
-            .push((self.state.current_level, lit, tried_opposite));
 
         self.inputs.levels.insert(self.state.current_level);
         self.inputs
@@ -97,7 +90,7 @@ impl Solver {
 
     /// Make a decision: assign a literal at a new decision level.
     pub(crate) fn decide(&mut self, db: &mut Database, lit: Lit) {
-        self.decide_internal(db, lit, false);
+        self.decide_internal(db, lit);
     }
 
     /// Propagate units until fixpoint or conflict.
@@ -145,7 +138,6 @@ impl Solver {
 
             let popped = db.pop();
             assert!(popped, "Tried to backtrack past level 0");
-            self.state.decision_stack.pop();
             self.state.current_level.dec();
         }
         // Trigger propagation after backtracking to pick up any unit learned clauses
@@ -153,30 +145,19 @@ impl Solver {
     }
 
     /// Learn a clause with level information for LBD tracking.
-    pub(crate) fn learn_clause_with_levels(
-        &mut self,
-        db: &mut Database,
-        literals: &[Lit],
-        levels: &[Level],
-    ) -> ClauseId {
+    pub(crate) fn learn_clause(&mut self, db: &mut Database, clause: &[(Lit, Level)]) -> ClauseId {
         let cid = self.state.next_learned_id;
         self.state.next_learned_id = ClauseId::new(self.state.next_learned_id.raw() + 1);
-        for &lit in literals {
+        let literals: Vec<Lit> = clause.iter().map(|&(lit, _)| lit).collect();
+        for &lit in &literals {
             self.inputs.learned.insert((cid, lit));
         }
         // Cache clause contents for conflict analysis
-        self.state.clause_db.insert(cid, literals.to_vec());
-        // Track for clause deletion if we have levels
-        if !levels.is_empty() {
-            self.state.clause_deletion.on_learn(cid, literals, levels);
-        }
+        self.state.clause_db.insert(cid, literals);
+        // Track for clause deletion
+        self.state.clause_deletion.on_learn(cid, clause);
         db.commit();
         cid
-    }
-
-    /// Get the literals in a clause.
-    pub(crate) fn get_clause(&self, clause_id: ClauseId) -> Option<&[Lit]> {
-        self.state.clause_db.get(&clause_id).map(|v| v.as_slice())
     }
 
     /// Restart: backtrack to level 0, clearing all decisions.

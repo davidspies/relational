@@ -14,6 +14,7 @@ clap = { version = "*", features = ["derive"] }
 consume_on_drop = "*"
 contiguous_data = { path = "../contiguous_data" }
 ctrlc = "*"
+either = "*"
 priority-queue = "*"
 rand = "*"
 rand_chacha = "*"
