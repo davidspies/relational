@@ -113,10 +113,8 @@ impl Solver {
                 .global_max()
         );
         create_variable!(db, analysis_lits_var, analysis_lits, Lit);
-        let analysis_lits = analysis_lits.save();
-        assign_saved!(analysis_lit_causes = causes.get().semijoin(analysis_lits.get()));
+        assign!(analysis_lit_causes = causes.get().semijoin(analysis_lits));
         let (on_level, below_level) = analysis_lit_causes
-            .get()
             .cartesian_product(analysis_level)
             .map(|(entry @ (lit, (level, _, _, _)), max_level)| {
                 if level == max_level {
@@ -181,7 +179,6 @@ impl Solver {
         );
 
         create_variable!(db, satisfied_clause_ids_var, satisfied_clause_ids, ClauseId);
-        let satisfied_clause_ids = satisfied_clause_ids.save();
 
         create_variable!(
             db,
@@ -200,7 +197,7 @@ impl Solver {
         assign_saved!(
             grouped_watched_literals = grouped_watched_literals_satisfiable
                 .get()
-                .antijoin(satisfied_clause_ids.get())
+                .antijoin(satisfied_clause_ids)
         );
 
         assign_saved!(
@@ -242,7 +239,7 @@ impl Solver {
         );
 
         // Unit clauses: exactly one remaining literal (must be assigned true)
-        assign_saved!(
+        assign!(
             units = grouped_watched_literals.get().filter_map(|(cid, arr)| {
                 let mut iter = arr.into_iter();
                 let (_hash, lit) = iter.next().unwrap();
@@ -251,7 +248,7 @@ impl Solver {
         );
 
         // === Set up the feedback loop ===
-        assign!(unit_with_level = units.get().cartesian_product(current_level.get()));
+        assign!(unit_with_level = units.cartesian_product(current_level.get()));
         assign!(unit_lit_level_cid = unit_with_level.map(|((cid, lit), level)| (lit, level, cid)));
 
         assign!(
