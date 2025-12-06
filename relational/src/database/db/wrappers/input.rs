@@ -49,10 +49,11 @@ impl<T: Clone + Eq + Hash> AnyInput for InputWrapper<T> {
 
     fn record_pending_inserts(&mut self) {
         if let Some(level) = self.checkpoint_stack.last_mut() {
-            let new_inserts = self.state.borrow_mut().take_new_inserts();
+            let mut state = self.state.borrow_mut();
+            let new_inserts = state.take_new_inserts();
             level.extend(new_inserts);
         } else {
-            self.state.borrow_mut().take_new_inserts();
+            self.state.borrow_mut().take_new_inserts().count();
         }
     }
 

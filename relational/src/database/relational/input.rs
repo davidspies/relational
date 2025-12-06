@@ -44,8 +44,8 @@ impl<T: Clone + Eq + Hash> InputState<T> {
     }
 
     /// Take the set of newly inserted tuples (clears it).
-    pub(crate) fn take_new_inserts(&mut self) -> HashSet<T> {
-        std::mem::take(&mut self.new_inserts)
+    pub(crate) fn take_new_inserts(&mut self) -> impl Iterator<Item = T> + '_ {
+        self.new_inserts.drain()
     }
 
     /// Remove a tuple from the seen set and emit -1. Used during pop().
