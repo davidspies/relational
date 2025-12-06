@@ -78,11 +78,23 @@ for file in $(find cnf_benchmarks -name "*.cnf" | sort); do
             verify_output=$(echo "$output" | ./verify_sat.py "$file" 2>&1)
             verify_code=$?
             set -e
-            if [ $verify_code -eq 0 ]; then
-                echo "OK: $file (SAT)"
-            else
+            if [ $verify_code -ne 0 ]; then
                 echo "FAIL: $file (SAT solution invalid)"
                 failed+=("$file (SAT invalid)")
+                continue
+            fi
+            if [ "$SKIP_DRAT" = "1" ]; then
+                echo "OK: $file (SAT, proof not verified)"
+            else
+                set +e
+                verify_output=$(bin/drat-trim "$file" "$proof_file" -f 2>&1)
+                set -e
+                if [[ "$verify_output" == *"s DERIVATION"* ]]; then
+                    echo "OK: $file (SAT)"
+                else
+                    echo "FAIL: $file (DRAT derivation invalid)"
+                    failed+=("$file (DRAT invalid)")
+                fi
             fi
             ;;
         *)

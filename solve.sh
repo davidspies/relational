@@ -43,4 +43,7 @@ elif echo "$output" | grep -q "^s SATISFIABLE"; then
     echo "---"
     echo "Verifying solution..."
     echo "$output" | ./verify_sat.py "$file"
+    echo "Verifying proof derivation with drat-trim..."
+    make -s bin/drat-trim
+    bin/drat-trim "$file" "$proof_file" -f
 fi
