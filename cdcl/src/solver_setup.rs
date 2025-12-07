@@ -126,7 +126,7 @@ impl Solver {
                 }
             )
         );
-        assign_saved!(on_level = on_level);
+        let on_level = on_level.save();
         assign!(min_lit_on_level = on_level.get().swap().global_min().snd().consolidate());
         assign_partition!(
             (analysis_clause_ids, level_retained) = on_level
