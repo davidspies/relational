@@ -1,6 +1,7 @@
 //! Tests for CDCL SAT solver.
 
 use contiguous_data::HashSet;
+use relational::create_persistent_input;
 use relational::database::DatabaseBuilder;
 
 use super::types::{Lit, Var};
@@ -21,7 +22,8 @@ fn test_simple_sat() {
     // (x1 OR x2) AND (x1 OR NOT x2)
     // SAT: x1 = true
     let mut db_builder = DatabaseBuilder::new();
-    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]));
+    create_persistent_input!(db_builder, _external_inp, external, Lit);
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]), external);
     let mut db = db_builder.build();
 
     solver.add_clause(&mut db, 0, &[lit(1), lit(2)]); // x1 OR x2
@@ -37,7 +39,8 @@ fn test_simple_unsat() {
     // (x1) AND (NOT x1)
     // UNSAT
     let mut db_builder = DatabaseBuilder::new();
-    let mut solver = Solver::new(&mut db_builder, &vars(&[1]));
+    create_persistent_input!(db_builder, _external_inp, external, Lit);
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1]), external);
     let mut db = db_builder.build();
 
     solver.add_clause(&mut db, 0, &[lit(1)]); // x1
@@ -51,7 +54,8 @@ fn test_unit_propagation() {
     // (x1) AND (NOT x1 OR x2) AND (NOT x2 OR x3)
     // Unit prop: x1=T -> x2=T -> x3=T
     let mut db_builder = DatabaseBuilder::new();
-    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2, 3]));
+    create_persistent_input!(db_builder, _external_inp, external, Lit);
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2, 3]), external);
     let mut db = db_builder.build();
 
     solver.add_clause(&mut db, 0, &[lit(1)]); // x1
@@ -69,7 +73,8 @@ fn test_backtracking() {
     // (x1 OR x2) AND (NOT x1 OR x2) AND (x1 OR NOT x2) AND (NOT x1 OR NOT x2)
     // This is UNSAT (pigeon hole for 2 pigeons, 1 hole)
     let mut db_builder = DatabaseBuilder::new();
-    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]));
+    create_persistent_input!(db_builder, _external_inp, external, Lit);
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]), external);
     let mut db = db_builder.build();
 
     solver.add_clause(&mut db, 0, &[lit(1), lit(2)]); // x1 OR x2
@@ -85,7 +90,8 @@ fn test_solve_add_clause_solve_again() {
     // First solve: (x1 OR x2) - SAT
     // Then add: (NOT x1) AND (NOT x2) - makes it UNSAT
     let mut db_builder = DatabaseBuilder::new();
-    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]));
+    create_persistent_input!(db_builder, _external_inp, external, Lit);
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]), external);
     let mut db = db_builder.build();
 
     solver.add_clause(&mut db, 0, &[lit(1), lit(2)]); // x1 OR x2
@@ -101,4 +107,55 @@ fn test_solve_add_clause_solve_again() {
     // Second solve - should be UNSAT
     let result2 = solver.solve(&mut db);
     assert!(result2.is_none(), "second solve should be UNSAT");
+}
+
+#[test]
+fn test_external_variables() {
+    // (x1 OR x2) with external variable x3 = true
+    // x3 is not in vars, so it won't be decided, but it participates in propagation
+    let mut db_builder = DatabaseBuilder::new();
+    create_persistent_input!(db_builder, external_inp, external, Lit);
+    // Only x1, x2 are decision variables; x3 is external
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]), external);
+    let mut db = db_builder.build();
+
+    // Add clause: (NOT x3 OR x1) - if x3 is true, x1 must be true
+    solver.add_clause(&mut db, 0, &[lit(-3), lit(1)]);
+    // Add clause: (x1 OR x2)
+    solver.add_clause(&mut db, 1, &[lit(1), lit(2)]);
+
+    // Set x3 = true externally
+    external_inp.insert(lit(3));
+    db.commit();
+
+    // Solve - x3=true should propagate to x1=true
+    let assignment = solver.solve(&mut db).expect("expected SAT");
+    assert_eq!(assignment.get(&Var::new(1)), Some(&true), "x1 should be true via propagation from x3");
+    // x3 should also appear in the assignment
+    assert_eq!(assignment.get(&Var::new(3)), Some(&true), "x3 should be in assignment");
+}
+
+#[test]
+fn test_external_variable_unsat() {
+    // Test that external variables can cause UNSAT
+    let mut db_builder = DatabaseBuilder::new();
+    create_persistent_input!(db_builder, external_inp, external, Lit);
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1]), external);
+    let mut db = db_builder.build();
+
+    // (x2 OR x1) - at least one must be true
+    solver.add_clause(&mut db, 0, &[lit(2), lit(1)]);
+    // (NOT x2 OR NOT x1) - at least one must be false
+    solver.add_clause(&mut db, 1, &[lit(-2), lit(-1)]);
+
+    // With no external assignment, this is SAT (x1=T, x2=F or x1=F, x2=T)
+    let _assignment1 = solver.solve(&mut db).expect("expected SAT without external");
+
+    // Now set x2 = false externally
+    external_inp.insert(lit(-2));
+    db.commit();
+    // This forces x1 = true (from clause 0)
+    let assignment2 = solver.solve(&mut db).expect("expected SAT with x2=false");
+    assert_eq!(assignment2.get(&Var::new(1)), Some(&true), "x1 must be true when x2 is false");
+    assert_eq!(assignment2.get(&Var::new(2)), Some(&false));
 }

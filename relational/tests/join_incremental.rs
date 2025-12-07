@@ -17,8 +17,8 @@ use relational::database::DatabaseBuilder;
 fn test_join_simultaneous_inserts() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut left, left_rel) = db.create_input::<(i32, i32)>(); // (key, left_val)
-    let (mut right, right_rel) = db.create_input::<(i32, i32)>(); // (key, right_val)
+    let (left, left_rel) = db.create_input::<(i32, i32)>(); // (key, left_val)
+    let (right, right_rel) = db.create_input::<(i32, i32)>(); // (key, right_val)
 
     // Join on the first element (key)
     let joined = left_rel.join(right_rel);
@@ -71,8 +71,8 @@ fn test_join_simultaneous_inserts() {
 fn test_join_both_sides_from_empty() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut left, left_rel) = db.create_input::<(i32, ())>();
-    let (mut right, right_rel) = db.create_input::<(i32, ())>();
+    let (left, left_rel) = db.create_input::<(i32, ())>();
+    let (right, right_rel) = db.create_input::<(i32, ())>();
 
     // Join where left == right (identity key)
     let joined = left_rel.join(right_rel);
@@ -102,8 +102,8 @@ fn test_join_both_sides_from_empty() {
 fn test_join_multiplicity_not_doubled() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut left, left_rel) = db.create_input::<(i32, ())>();
-    let (mut right, right_rel) = db.create_input::<(i32, ())>();
+    let (left, left_rel) = db.create_input::<(i32, ())>();
+    let (right, right_rel) = db.create_input::<(i32, ())>();
 
     // Join where left == right (identity key)
     let joined = left_rel.join(right_rel);
@@ -127,8 +127,8 @@ fn test_join_multiplicity_not_doubled() {
 fn test_join_multiple_keys_simultaneous() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut left, left_rel) = db.create_input::<(char, i32)>(); // (key, val)
-    let (mut right, right_rel) = db.create_input::<(char, i32)>(); // (key, val)
+    let (left, left_rel) = db.create_input::<(char, i32)>(); // (key, val)
+    let (right, right_rel) = db.create_input::<(char, i32)>(); // (key, val)
 
     let joined = left_rel.join(right_rel);
     let joined_out = joined.boxed().output();

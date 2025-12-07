@@ -83,7 +83,7 @@ pub struct InputHandle<T> {
 impl<T: Clone + Eq + Hash> InputHandle<T> {
     /// Insert a tuple into the input relation.
     /// Uses seen-set semantics: if already present, this is a no-op.
-    pub fn insert(&mut self, tuple: T) {
+    pub fn insert(&self, tuple: T) {
         self.state.borrow_mut().insert(tuple);
     }
 }
@@ -100,14 +100,14 @@ pub struct PersistentInputHandle<T> {
 impl<T: Clone + Eq + Hash> PersistentInputHandle<T> {
     /// Insert a tuple into the input relation.
     /// Uses seen-set semantics: if already present, this is a no-op.
-    pub fn insert(&mut self, tuple: T) {
+    pub fn insert(&self, tuple: T) {
         self.state.borrow_mut().insert(tuple);
     }
 
     /// Delete a tuple from the input relation.
     /// Uses seen-set semantics: if not present, this is a no-op.
     /// Returns true if the tuple was present and removed.
-    pub fn delete(&mut self, tuple: T) -> bool {
+    pub fn delete(&self, tuple: T) -> bool {
         let mut state = self.state.borrow_mut();
         if state.seen.remove(&tuple) {
             state.pending.update(tuple, -1);

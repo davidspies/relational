@@ -16,7 +16,7 @@ fn test_stratified_two_feedbacks() {
     let mut db = DatabaseBuilder::new();
 
     // Input: edges in a graph
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let edges = edges_rel.save();
 
     // First feedback: transitive closure (reachability)
@@ -79,7 +79,7 @@ fn test_stratified_two_feedbacks() {
 fn test_incremental_after_feedback() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let edges = edges_rel.save();
 
     // Set up transitive closure
@@ -126,7 +126,7 @@ fn test_incremental_after_feedback() {
 fn test_feedback_order_independence() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let edges = edges_rel.save();
 
     // Transitive closure
@@ -159,7 +159,7 @@ fn test_three_feedbacks_chain() {
     let mut db = DatabaseBuilder::new();
 
     // Level 0: base facts
-    let (mut facts_h, facts_rel) = db.create_input::<i32>();
+    let (facts_h, facts_rel) = db.create_input::<i32>();
 
     // Level 1: double the facts
     let (doubled_var, doubled_var_rel) = db.create_variable::<i32>();
@@ -208,7 +208,7 @@ fn test_three_feedbacks_chain() {
 fn test_feedback_immediate_fixpoint() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut items_h, items_rel) = db.create_input::<i32>();
+    let (items_h, items_rel) = db.create_input::<i32>();
     items_h.insert(1);
     items_h.insert(2);
 
@@ -299,7 +299,7 @@ fn test_feedback_immediate_fixpoint() {
 fn test_a_reaches_fixpoint_between_b_applications() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut seeds_h, seeds_rel) = db.create_input::<i32>();
+    let (seeds_h, seeds_rel) = db.create_input::<i32>();
 
     // Variable V - the shared counter
     let (v_var, v_var_rel) = db.create_variable::<i32>();
@@ -385,7 +385,7 @@ fn test_interleaved_mutual_fixpoint() {
     let mut db = DatabaseBuilder::new();
 
     // Input numbers
-    let (mut input_h, input_rel) = db.create_input::<i32>();
+    let (input_h, input_rel) = db.create_input::<i32>();
 
     // A: tracks numbers, adds +2 to each (stays in same parity class)
     let (a_var, a_var_rel) = db.create_variable::<i32>();
@@ -463,7 +463,7 @@ fn test_interleaved_mutual_fixpoint() {
 fn test_diamond_dependency() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut input_h, input_rel) = db.create_input::<i32>();
+    let (input_h, input_rel) = db.create_input::<i32>();
 
     // B = input * 2
     let input_saved = input_rel.save();
@@ -499,7 +499,7 @@ fn test_diamond_dependency() {
 fn test_push_pop_simple() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut items_h, items_rel) = db.create_input::<i32>();
+    let (items_h, items_rel) = db.create_input::<i32>();
     let items_saved = items_rel.save();
     let doubled = items_saved.get().map(|x| x * 2);
     let items_out = items_saved.get().boxed().output();
@@ -550,7 +550,7 @@ fn test_push_pop_simple() {
 fn test_push_pop_nested() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut items_h, items_rel) = db.create_input::<i32>();
+    let (items_h, items_rel) = db.create_input::<i32>();
 
     items_h.insert(1);
     let mut db = db.build();
@@ -595,7 +595,7 @@ fn test_push_pop_nested() {
 fn test_push_pop_with_feedback() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_input::<(i32, i32)>();
     let edges = edges_rel.save();
 
     // Set up transitive closure
@@ -658,7 +658,7 @@ fn test_pop_empty_stack() {
 fn test_push_pop_no_changes() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut items_h, items_rel) = db.create_input::<i32>();
+    let (items_h, items_rel) = db.create_input::<i32>();
     items_h.insert(1);
     items_h.insert(2);
     let mut db = db.build();
@@ -692,10 +692,10 @@ fn test_persistent_vs_regular_inputs() {
     let mut db = DatabaseBuilder::new();
 
     // Regular input: decision variables (should be undone on pop)
-    let (mut decisions_h, decisions_rel) = db.create_input::<i32>();
+    let (decisions_h, decisions_rel) = db.create_input::<i32>();
 
     // Persistent input: learned clauses (should survive pop)
-    let (mut learned_h, learned_rel) = db.create_persistent_input::<i32>();
+    let (learned_h, learned_rel) = db.create_persistent_input::<i32>();
 
     // Insert initial data before any checkpoint
     decisions_h.insert(1);
@@ -751,8 +751,8 @@ fn test_persistent_vs_regular_inputs() {
 fn test_persistent_nested_checkpoints() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut regular_h, regular_rel) = db.create_input::<i32>();
-    let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
+    let (regular_h, regular_rel) = db.create_input::<i32>();
+    let (persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     regular_h.insert(1);
     persistent_h.insert(100);
@@ -812,8 +812,8 @@ fn test_persistent_nested_checkpoints() {
 fn test_persistent_with_derived() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut regular_h, regular_rel) = db.create_input::<i32>();
-    let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
+    let (regular_h, regular_rel) = db.create_input::<i32>();
+    let (persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     // Derived: union of regular and persistent
     let combined = regular_rel.concat(persistent_rel);
@@ -852,7 +852,7 @@ fn test_persistent_with_derived() {
 fn test_persistent_delete() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
+    let (persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     persistent_h.insert(100);
     persistent_h.insert(200);
@@ -901,7 +901,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
     let mut db = DatabaseBuilder::new();
 
     // Persistent edges - survive pop
-    let (mut edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();
 
     // Create timestamped path variable
     let (path_var, path_var_rel) = db.create_variable::<((i32, i32), CommitId)>();
@@ -1021,7 +1021,7 @@ fn test_feedback_with_id_with_persistent_input_and_pop() {
 #[test]
 fn test_push_insert_pop_minimal() {
     let mut db = DatabaseBuilder::new();
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
     let path_rel = path_var_rel.save();
@@ -1064,7 +1064,7 @@ fn test_push_insert_pop_minimal() {
 #[test]
 fn test_push_insert_pop() {
     let mut db = DatabaseBuilder::new();
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
     let path_rel = path_var_rel.save();
@@ -1147,7 +1147,7 @@ fn test_regular_feedback_with_persistent_input_and_pop() {
     let mut db = DatabaseBuilder::new();
 
     // Persistent edges - survive pop
-    let (mut edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_persistent_input::<(i32, i32)>();
 
     // Create path variable (no CommitId tracking)
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();

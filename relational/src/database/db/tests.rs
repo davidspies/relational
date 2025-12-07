@@ -6,7 +6,7 @@ use crate::database::{DatabaseBuilder, Op};
 #[test]
 fn test_pop_duplicate_insert() {
     let mut builder = DatabaseBuilder::new();
-    let (mut handle, rel) = builder.create_input::<i32>();
+    let (handle, rel) = builder.create_input::<i32>();
 
     let out = rel.boxed().output();
 
@@ -39,7 +39,7 @@ fn test_pop_duplicate_insert() {
 #[test]
 fn test_pop_transitive_closure() {
     let mut builder = DatabaseBuilder::new();
-    let (mut edges_h, edges_rel) = builder.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = builder.create_input::<(i32, i32)>();
 
     // Set up transitive closure: path = edges ∪ (path ⋈ edges)
     let (path_var, path_var_rel) = builder.create_variable::<(i32, i32)>();
@@ -84,7 +84,7 @@ fn test_pop_transitive_closure() {
 #[test]
 fn test_db_create_input_and_commit() {
     let mut builder = DatabaseBuilder::new();
-    let (mut handle, mut rel) = builder.create_input::<i32>();
+    let (handle, mut rel) = builder.create_input::<i32>();
 
     handle.insert(1);
     handle.insert(2);
@@ -110,7 +110,7 @@ fn test_db_create_input_and_commit() {
 #[test]
 fn test_db_push_pop_simple() {
     let mut builder = DatabaseBuilder::new();
-    let (mut handle, mut rel) = builder.create_input::<i32>();
+    let (handle, mut rel) = builder.create_input::<i32>();
 
     // Initial state
     handle.insert(1);

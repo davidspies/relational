@@ -6,7 +6,7 @@ use std::ops::Not;
 use ahash::RandomState;
 use contiguous_data::{HashMap, HashSet};
 use either::Either;
-use relational::database::{CommitId, DatabaseBuilder};
+use relational::database::{CommitId, DatabaseBuilder, Op, Relation};
 use relational::{
     assign, assign_and_interrupt, assign_partition, assign_saved, create_input,
     create_persistent_input, create_variable,
@@ -32,10 +32,18 @@ use super::types::{Cause, ClauseId, Level, Lit, Var};
 impl Solver {
     /// Create a new solver using the provided database builder.
     ///
-    /// `vars` is the set of variables in the problem.
+    /// `vars` is the set of decision variables in the problem.
+    /// `external` is a relation of pre-assigned literals for external variables.
+    /// External variables participate in unit propagation and conflict analysis
+    /// but cannot be selected as decision literals.
+    ///
     /// The caller is responsible for calling `db.build()` after this returns
     /// and passing the resulting `&mut Database` to solver methods.
-    pub fn new(db: &mut DatabaseBuilder, vars: &HashSet<Var>) -> Self {
+    pub fn new<E: Op<Lit> + 'static>(
+        db: &mut DatabaseBuilder,
+        vars: &HashSet<Var>,
+        external: Relation<E>,
+    ) -> Self {
         // === Input Relations ===
         create_input!(db, clauses_inp, clauses, (ClauseId, Lit));
         create_persistent_input!(db, learned_inp, learned, (ClauseId, Lit));
@@ -135,14 +143,14 @@ impl Solver {
                 .cartesian_product(min_lit_on_level)
                 .filter_map(|((lit, (level, _, _, cause)), min_lit)| {
                     let retain = match level {
-                        Level::TOP => cause == Cause::Decision,
+                        Level::TOP => cause == Cause::NoClause,
                         _ => lit == min_lit,
                     };
                     if retain {
                         Some(Either::Right((!lit, level)))
                     } else {
                         match cause {
-                            Cause::Decision => None,
+                            Cause::NoClause => None,
                             Cause::FromClause(clause_id) => Some(Either::Left(clause_id)),
                         }
                     }
@@ -261,10 +269,16 @@ impl Solver {
                 unit_with_level.map(|((cid, lit), level)| (lit, level, Cause::FromClause(cid)))
         );
 
+        // External literals are assigned at Level::TOP with no clause cause
+        assign!(
+            external_assignments = external.map(|lit| (lit, Level::TOP, Cause::NoClause))
+        );
+
         assign!(
             all_new_assignments = decision_assignments
-                .map(|(lit, level)| (lit, level, Cause::Decision))
+                .map(|(lit, level)| (lit, level, Cause::NoClause))
                 .concat(unit_lit_level_cause)
+                .concat(external_assignments)
         );
 
         db.feedback_with_id(prep_var, all_new_assignments);

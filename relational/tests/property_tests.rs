@@ -31,7 +31,7 @@ fn arb_op() -> impl Strategy<Value = ReplayOp> {
 /// Returns the final state of the path relation.
 fn apply_ops_with_pop(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
     let mut db = DatabaseBuilder::new();
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
@@ -100,7 +100,7 @@ fn apply_ops_replay_model(ops: &[ReplayOp]) -> Vec<(i32, i32)> {
 
     // Now replay only surviving insert/delete operations
     let mut db = DatabaseBuilder::new();
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // Set up transitive closure
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
@@ -178,8 +178,8 @@ proptest! {
 /// Apply operations with both regular and persistent inputs.
 fn apply_ops_with_persistent(ops: &[ReplayOp]) -> (Vec<i32>, Vec<i32>) {
     let mut db = DatabaseBuilder::new();
-    let (mut regular_h, regular_rel) = db.create_input::<i32>();
-    let (mut persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
+    let (regular_h, regular_rel) = db.create_input::<i32>();
+    let (persistent_h, persistent_rel) = db.create_persistent_input::<i32>();
 
     let regular_out = regular_rel.boxed().output();
     let persistent_out = persistent_rel.boxed().output();
@@ -234,8 +234,8 @@ fn apply_ops_replay_persistent_model(ops: &[ReplayOp]) -> (Vec<i32>, Vec<i32>) {
     }
 
     let mut db = DatabaseBuilder::new();
-    let (mut regular_h, regular_rel) = db.create_input::<i32>();
-    let (mut persistent_h, persistent_rel) = db.create_input::<i32>(); // Use regular input for replay
+    let (regular_h, regular_rel) = db.create_input::<i32>();
+    let (persistent_h, persistent_rel) = db.create_input::<i32>(); // Use regular input for replay
 
     let regular_out = regular_rel.boxed().output();
     let persistent_out = persistent_rel.boxed().output();
@@ -290,7 +290,7 @@ fn test_nested_pop_specific_case() {
 fn test_multiple_feedbacks_with_pop() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut edges_h, edges_rel) = db.create_input::<(i32, i32)>();
+    let (edges_h, edges_rel) = db.create_input::<(i32, i32)>();
 
     // First feedback: transitive closure
     let (reach_var, reach_var_rel) = db.create_variable::<(i32, i32)>();

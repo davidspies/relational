@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader, Read};
 
 use anyhow::{Context, Result, bail};
 use contiguous_data::{HashMap, HashSet};
+use relational::create_persistent_input;
 use relational::database::{Database, DatabaseBuilder};
 
 use crate::types::Lit;
@@ -137,7 +138,8 @@ impl Cnf {
         let vars = self.vars();
         let mut db_builder = DatabaseBuilder::new();
         db_builder.max_iterations = None;
-        let mut solver = Solver::new(&mut db_builder, &vars);
+        create_persistent_input!(db_builder, _external_inp, external, Lit);
+        let mut solver = Solver::new(&mut db_builder, &vars, external);
         let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {
@@ -155,7 +157,8 @@ impl Cnf {
         let vars = self.vars();
         let mut db_builder = DatabaseBuilder::new();
         db_builder.max_iterations = None;
-        let mut solver = Solver::new(&mut db_builder, &vars);
+        create_persistent_input!(db_builder, _external_inp, external, Lit);
+        let mut solver = Solver::new(&mut db_builder, &vars, external);
         let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {

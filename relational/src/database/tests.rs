@@ -24,7 +24,7 @@ fn collect_to_map<T: Clone + Eq + Hash, R: Op<T>>(rel: &mut R) -> HashMap<T, i64
 #[test]
 fn test_create_and_insert() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, mut rel) = db.create_input::<(i32, i32)>();
+    let (handle, mut rel) = db.create_input::<(i32, i32)>();
 
     handle.insert((1, 2));
     handle.insert((2, 3));
@@ -40,7 +40,7 @@ fn test_create_and_insert() {
 #[test]
 fn test_map() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     let mut mapped = rel.map(|x| x * 2);
 
     handle.insert(1);
@@ -58,8 +58,8 @@ fn test_map() {
 #[test]
 fn test_join() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle_edges, rel_edges) = db.create_input::<(i32, i32)>();
-    let (mut handle_labels, rel_labels) = db.create_input::<(i32, String)>();
+    let (handle_edges, rel_edges) = db.create_input::<(i32, i32)>();
+    let (handle_labels, rel_labels) = db.create_input::<(i32, String)>();
     let mut joined = rel_edges.join(rel_labels);
 
     handle_edges.insert((1, 2));
@@ -81,7 +81,7 @@ fn test_join() {
 #[test]
 fn test_transitive_closure() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, edges) = db.create_input::<(i32, i32)>();
+    let (handle, edges) = db.create_input::<(i32, i32)>();
 
     // Create the path variable
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
@@ -127,7 +127,7 @@ fn test_transitive_closure() {
 #[test]
 fn test_multiplicities() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     let out = rel.boxed().output();
 
     // Insert duplicates
@@ -164,7 +164,7 @@ fn test_multiplicities() {
 fn test_checkpoint_and_restore() {
     // The new system uses push/pop instead of checkpoint/restore
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     let doubled = rel.map(|n| n * 2);
     let doubled_out = doubled.boxed().output();
 
@@ -210,7 +210,7 @@ fn test_commit_id_advances_with_feedback() {
     assert_eq!(db.commit_id(), CommitId::new(0));
 
     // Create a feedback loop to generate commit ID increments
-    let (mut handle, edges) = db.create_input::<(i32, i32)>();
+    let (handle, edges) = db.create_input::<(i32, i32)>();
 
     let (path_var, path_var_rel) = db.create_variable::<(i32, i32)>();
     let path_rel = path_var_rel.save();
@@ -269,7 +269,7 @@ fn test_commit_id_advances_with_feedback() {
 #[test]
 fn test_commit_id_monotonic_through_backtracking() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, _rel) = db.create_input::<i32>();
+    let (handle, _rel) = db.create_input::<i32>();
     let mut db = db.build();
 
     // Track commit IDs through push/pop cycles
@@ -317,7 +317,7 @@ fn test_commit_id_advances_per_feedback_iteration() {
     // how many times it advances for a chain of length N.
 
     let mut db = DatabaseBuilder::new();
-    let (mut handle, edges) = db.create_input::<(i32, i32)>();
+    let (handle, edges) = db.create_input::<(i32, i32)>();
 
     let initial_commit = db.commit_id();
 
@@ -382,7 +382,7 @@ fn test_feedback_with_id_discovery_order() {
     // Test that feedback_with_id correctly tracks when tuples are discovered.
     // Longer paths should have higher commit IDs than shorter paths.
     let mut db = DatabaseBuilder::new();
-    let (mut handle, edges) = db.create_input::<(i32, i32)>();
+    let (handle, edges) = db.create_input::<(i32, i32)>();
 
     // Create a timestamped path variable
     let (path_var, path_var_rel) = db.create_variable::<((i32, i32), CommitId)>();
@@ -463,7 +463,7 @@ fn test_feedback_with_id_discovery_order() {
 #[test]
 fn test_input_basic() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, mut rel) = db.create_input::<i32>();
+    let (handle, mut rel) = db.create_input::<i32>();
 
     handle.insert(1);
     handle.insert(2);
@@ -484,7 +484,7 @@ fn test_input_basic() {
 #[test]
 fn test_filter() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     let mut filtered = rel.filter(|x| x % 2 == 0);
 
     handle.insert(1);
@@ -503,7 +503,7 @@ fn test_filter() {
 #[test]
 fn test_flat_map() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     // Each number produces itself and its double
     let mut flat_mapped = rel.flat_map(|x| vec![x, x * 2]);
 
@@ -521,8 +521,8 @@ fn test_flat_map() {
 #[test]
 fn test_union() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle_a, rel_a) = db.create_input::<i32>();
-    let (mut handle_b, rel_b) = db.create_input::<i32>();
+    let (handle_a, rel_a) = db.create_input::<i32>();
+    let (handle_b, rel_b) = db.create_input::<i32>();
     let mut unioned = rel_a.concat(rel_b);
 
     handle_a.insert(1);
@@ -541,7 +541,7 @@ fn test_union() {
 #[test]
 fn test_distinct() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     let mut distinct_rel = rel.distinct();
 
     handle.insert(1);
@@ -559,8 +559,8 @@ fn test_distinct() {
 fn test_distinct_on_union() {
     // Distinct is meaningful when unioning relations that might have duplicates
     let mut db = DatabaseBuilder::new();
-    let (mut handle_a, rel_a) = db.create_input::<i32>();
-    let (mut handle_b, rel_b) = db.create_input::<i32>();
+    let (handle_a, rel_a) = db.create_input::<i32>();
+    let (handle_b, rel_b) = db.create_input::<i32>();
     let unioned = rel_a.concat(rel_b);
     let mut distinct_rel = unioned.distinct();
 
@@ -578,7 +578,7 @@ fn test_distinct_on_union() {
 #[test]
 fn test_distinct_incremental_with_pop() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     let mut distinct_rel = rel.distinct();
 
     handle.insert(1);
@@ -608,8 +608,8 @@ fn test_distinct_incremental_with_pop() {
 #[test]
 fn test_difference() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle_a, rel_a) = db.create_input::<i32>();
-    let (mut handle_b, rel_b) = db.create_input::<i32>();
+    let (handle_a, rel_a) = db.create_input::<i32>();
+    let (handle_b, rel_b) = db.create_input::<i32>();
     let mut diff = rel_a.set_minus(rel_b);
 
     handle_a.insert(1);
@@ -630,8 +630,8 @@ fn test_difference() {
 #[test]
 fn test_join_incremental() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle_a, rel_a) = db.create_input::<(i32, i32)>();
-    let (mut handle_b, rel_b) = db.create_input::<(i32, i32)>();
+    let (handle_a, rel_a) = db.create_input::<(i32, i32)>();
+    let (handle_b, rel_b) = db.create_input::<(i32, i32)>();
     let mut joined = rel_a.join(rel_b);
 
     handle_a.insert((1, 10));
@@ -654,7 +654,7 @@ fn test_join_incremental() {
 #[test]
 fn test_chained_operators() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     // Filter evens, then double
     let evens = rel.filter(|x| x % 2 == 0);
     let mut doubled = evens.map(|x| x * 2);
@@ -675,7 +675,7 @@ fn test_chained_operators() {
 #[test]
 fn test_boxed() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     // Box to break type chain
     let boxed = rel.boxed();
     let mut mapped = boxed.map(|x| x * 2);
@@ -693,7 +693,7 @@ fn test_boxed() {
 #[test]
 fn test_saved_relation() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
     let saved = rel.save();
     // Get two consumers
     let mut getter1 = saved.get();
@@ -728,7 +728,7 @@ fn test_saved_relation() {
 #[test]
 fn test_self_join_with_saved() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<(i32, i32)>();
+    let (handle, rel) = db.create_input::<(i32, i32)>();
     let saved = rel.save();
     let left = saved.get();
     let right = saved.get();
@@ -749,7 +749,7 @@ fn test_self_join_with_saved() {
 #[test]
 fn test_sum() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<(String, i64)>();
+    let (handle, rel) = db.create_input::<(String, i64)>();
     let mut summed = rel.group_sum();
 
     handle.insert(("a".to_string(), 10));
@@ -767,7 +767,7 @@ fn test_sum() {
 #[test]
 fn test_sum_incremental() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<(String, i64)>();
+    let (handle, rel) = db.create_input::<(String, i64)>();
     let mut summed = rel.group_sum();
 
     handle.insert(("a".to_string(), 10));
@@ -790,7 +790,7 @@ fn test_sum_incremental() {
 #[test]
 fn test_max() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<(String, i32)>();
+    let (handle, rel) = db.create_input::<(String, i32)>();
     let mut maxed = rel.group_max();
 
     handle.insert(("a".to_string(), 10));
@@ -809,7 +809,7 @@ fn test_max() {
 #[test]
 fn test_max_incremental_with_pop() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<(String, i32)>();
+    let (handle, rel) = db.create_input::<(String, i32)>();
     let mut maxed = rel.group_max();
 
     handle.insert(("a".to_string(), 10));
@@ -842,7 +842,7 @@ fn test_max_incremental_with_pop() {
 #[test]
 fn test_count_via_sum() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<(String, i32)>();
+    let (handle, rel) = db.create_input::<(String, i32)>();
     // Count by mapping each tuple to 1 and summing
     let ones = rel.map(|t| (t.0.clone(), 1i64));
     let mut counted = ones.group_sum();
@@ -864,7 +864,7 @@ fn test_min_via_max_reverse() {
     use std::cmp::Reverse;
 
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<(String, i32)>();
+    let (handle, rel) = db.create_input::<(String, i32)>();
     // Min by wrapping values in Reverse and using max
     let reversed = rel.map(|t| (t.0.clone(), Reverse(t.1)));
     let mut maxed = reversed.group_max();
@@ -883,7 +883,7 @@ fn test_min_via_max_reverse() {
 #[test]
 fn test_push_pop_simple() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, mut rel) = db.create_input::<i32>();
+    let (handle, mut rel) = db.create_input::<i32>();
 
     handle.insert(1);
     handle.insert(2);
@@ -913,8 +913,8 @@ fn test_push_pop_simple() {
 #[test]
 fn test_consolidate() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle_a, rel_a) = db.create_input::<i32>();
-    let (mut handle_b, rel_b) = db.create_input::<i32>();
+    let (handle_a, rel_a) = db.create_input::<i32>();
+    let (handle_b, rel_b) = db.create_input::<i32>();
     // Union produces: 1 (+1), 2 (+1), 1 (+1), 3 (+1) = 1 with mult 2
     let unioned = rel_a.concat(rel_b);
     let mut consolidated = unioned.consolidate_();
@@ -937,8 +937,8 @@ fn test_consolidate() {
 #[test]
 fn test_consolidate_cancellation() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle_a, rel_a) = db.create_input::<i32>();
-    let (mut handle_b, rel_b) = db.create_input::<i32>();
+    let (handle_a, rel_a) = db.create_input::<i32>();
+    let (handle_b, rel_b) = db.create_input::<i32>();
     // a has +1 for 1, b.negate has -1 for 1 -> they cancel
     let negated_b = rel_b.negate();
     let combined = rel_a.concat(negated_b);
@@ -959,8 +959,8 @@ fn test_consolidate_cancellation() {
 #[test]
 fn test_consolidate_incremental() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle_a, rel_a) = db.create_input::<i32>();
-    let (mut handle_b, rel_b) = db.create_input::<i32>();
+    let (handle_a, rel_a) = db.create_input::<i32>();
+    let (handle_b, rel_b) = db.create_input::<i32>();
     let unioned = rel_a.concat(rel_b);
     let mut consolidated = unioned.consolidate_();
 
@@ -985,7 +985,7 @@ fn test_consolidate_incremental() {
 #[test]
 fn test_graph_tracking() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
 
     // Build a simple dataflow: input -> filter -> map
     let filtered = rel.filter(|x| *x > 0).named("positive_filter");
@@ -1015,7 +1015,7 @@ fn test_graph_tracking() {
 #[test]
 fn test_graph_element_counting() {
     let mut db = DatabaseBuilder::new();
-    let (mut handle, rel) = db.create_input::<i32>();
+    let (handle, rel) = db.create_input::<i32>();
 
     let mut mapped = rel.map(|x| x * 2).named("doubler");
 
@@ -1066,8 +1066,8 @@ fn test_feedback_with_id_new_tuples_after_pop() {
     let mut db = DatabaseBuilder::new();
 
     // x is persistent, y is normal
-    let (mut x_handle, x_rel) = db.create_persistent_input::<i32>();
-    let (mut y_handle, y_rel) = db.create_input::<i32>();
+    let (x_handle, x_rel) = db.create_persistent_input::<i32>();
+    let (y_handle, y_rel) = db.create_input::<i32>();
 
     // Create feedback_with_id on x.set_minus(y)
     let (z_var, z_var_rel) = db.create_variable::<(i32, CommitId)>();

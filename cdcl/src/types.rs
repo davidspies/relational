@@ -123,8 +123,8 @@ pub(crate) enum ClauseId {
 /// The cause of a literal assignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Cause {
-    /// The literal was assigned by a decision.
-    Decision,
+    /// The literal was assigned without a clause (decision or external).
+    NoClause,
     /// The literal was propagated from a clause.
     FromClause(ClauseId),
 }

@@ -13,7 +13,7 @@ fn test_distinct_after_map() {
     let mut db = DatabaseBuilder::new();
 
     // Input relation with (clause_id, literal) pairs
-    let (mut clauses, clauses_rel) = db.create_input::<(i32, i32)>();
+    let (clauses, clauses_rel) = db.create_input::<(i32, i32)>();
 
     // Extract clause IDs and deduplicate
     let clause_ids = clauses_rel.map(|(cid, _)| cid);
@@ -43,7 +43,7 @@ fn test_distinct_after_map() {
 fn test_distinct_incremental_insert() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut input, input_rel) = db.create_input::<i32>();
+    let (input, input_rel) = db.create_input::<i32>();
     let distinct_rel = input_rel.distinct();
     let out = distinct_rel.boxed().output();
 
@@ -72,7 +72,7 @@ fn test_distinct_incremental_insert() {
 fn test_distinct_incremental_with_pop() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut input, input_rel) = db.create_input::<i32>();
+    let (input, input_rel) = db.create_input::<i32>();
     let distinct_rel = input_rel.distinct();
     let out = distinct_rel.boxed().output();
 
@@ -108,7 +108,7 @@ fn test_distinct_incremental_with_pop() {
 fn test_distinct_with_push_pop() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut input, input_rel) = db.create_input::<i32>();
+    let (input, input_rel) = db.create_input::<i32>();
     let distinct_rel = input_rel.distinct();
     let out = distinct_rel.boxed().output();
 
@@ -145,9 +145,9 @@ fn test_cdcl_pattern() {
     let mut db = DatabaseBuilder::new();
 
     // clauses: (clause_id, literal)
-    let (mut clauses, clauses_rel) = db.create_input::<(i32, i32)>();
+    let (clauses, clauses_rel) = db.create_input::<(i32, i32)>();
     // assigned: literals that are assigned true
-    let (mut assigned, assigned_rel) = db.create_input::<i32>();
+    let (assigned, assigned_rel) = db.create_input::<i32>();
 
     // Save clauses_rel so we can use it in multiple places
     let saved_clauses = clauses_rel.save();
@@ -215,7 +215,7 @@ fn test_cdcl_pattern() {
 fn test_distinct_multiplicity() {
     let mut db = DatabaseBuilder::new();
 
-    let (mut input, input_rel) = db.create_input::<i32>();
+    let (input, input_rel) = db.create_input::<i32>();
     let distinct_rel = input_rel.distinct();
     let out = distinct_rel.boxed().output();
 
