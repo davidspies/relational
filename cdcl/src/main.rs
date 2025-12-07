@@ -4,6 +4,7 @@
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
@@ -65,8 +66,7 @@ fn main() {
 
     let cnf = Cnf::from_file(&args.cnf_file).unwrap();
 
-    let num_vars = cnf.num_vars();
-    let (mut db, mut solver) = cnf.into_solver();
+    let (mut db, mut solver, vars) = cnf.into_solver();
 
     let mut proof_writer = args
         .proof
@@ -92,7 +92,7 @@ fn main() {
 
     if solver.solve_with_proof(&mut db, proof_writer.as_mut()) {
         println!("s SATISFIABLE");
-        print_assignment(&solver, num_vars);
+        print_assignment(&solver, &vars);
     } else {
         println!("s UNSATISFIABLE");
     }
@@ -104,13 +104,14 @@ fn main() {
     }
 }
 
-fn print_assignment(solver: &cdcl::Solver, num_vars: u32) {
+fn print_assignment(solver: &cdcl::Solver, vars: &HashSet<Var>) {
+    let mut sorted_vars: Vec<_> = vars.iter().copied().collect();
+    sorted_vars.sort();
     print!("v");
-    for v in 1..=num_vars {
-        let var = Var::new(v);
+    for var in sorted_vars {
         match solver.value(var) {
-            Some(true) => print!(" {}", v),
-            Some(false) => print!(" -{}", v),
+            Some(true) => print!(" {}", var.raw()),
+            Some(false) => print!(" -{}", var.raw()),
             None => {}
         }
     }

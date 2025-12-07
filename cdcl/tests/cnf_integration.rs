@@ -1,6 +1,6 @@
 //! Integration tests for CNF parsing and solving.
 
-use cdcl::Cnf;
+use cdcl::{Cnf, Var};
 
 const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data");
 
@@ -21,7 +21,7 @@ fn test_simple_sat() {
     // Verify assignment satisfies the formula
     let assignment = result.assignment().unwrap();
     // x1 should be true (either clause requires it when x2 varies)
-    assert_eq!(assignment[1], Some(true));
+    assert_eq!(assignment[&Var::new(1)], true);
 }
 
 #[test]
@@ -44,9 +44,9 @@ fn test_unit_propagation() {
     assert!(result.is_sat());
 
     let assignment = result.assignment().unwrap();
-    assert_eq!(assignment[1], Some(true));
-    assert_eq!(assignment[2], Some(true));
-    assert_eq!(assignment[3], Some(true));
+    assert_eq!(assignment[&Var::new(1)], true);
+    assert_eq!(assignment[&Var::new(2)], true);
+    assert_eq!(assignment[&Var::new(3)], true);
 }
 
 #[test]
@@ -72,7 +72,12 @@ fn test_three_coloring_sat() {
     for v in 0..3 {
         let base = v * 3 + 1;
         let colors: Vec<bool> = (0..3)
-            .map(|c| assignment[base + c].unwrap_or(false))
+            .map(|c| {
+                assignment
+                    .get(&Var::new((base + c) as u32))
+                    .copied()
+                    .unwrap_or(false)
+            })
             .collect();
         let count = colors.iter().filter(|&&c| c).count();
         assert_eq!(count, 1, "Vertex {} should have exactly one color", v + 1);
@@ -82,7 +87,7 @@ fn test_three_coloring_sat() {
     let get_color = |v: usize| -> usize {
         let base = v * 3 + 1;
         (0..3)
-            .find(|&c| assignment[base + c] == Some(true))
+            .find(|&c| assignment.get(&Var::new((base + c) as u32)).copied() == Some(true))
             .unwrap()
     };
 
@@ -116,6 +121,6 @@ fn test_parse_from_string() {
 #[test]
 fn test_into_solver() {
     let cnf = load_cnf("simple_sat.cnf");
-    let (mut db, mut solver) = cnf.into_solver();
+    let (mut db, mut solver, _vars) = cnf.into_solver();
     assert!(solver.solve(&mut db));
 }

@@ -1,5 +1,6 @@
 //! DIMACS CNF parsing and solving.
 
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 
@@ -22,8 +23,8 @@ pub struct Cnf {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolveResult {
     /// The formula is satisfiable with the given assignment.
-    /// The vector contains the truth value for each variable (1-indexed, so index 0 is unused).
-    Satisfiable(Vec<Option<bool>>),
+    /// Maps each variable to its truth value.
+    Satisfiable(HashMap<Var, bool>),
     /// The formula is unsatisfiable.
     Unsatisfiable,
 }
@@ -35,6 +36,14 @@ impl Cnf {
 
     pub fn num_clauses(&self) -> usize {
         self.clauses.len()
+    }
+
+    /// Collect all variables that actually appear in the clauses.
+    pub fn vars(&self) -> HashSet<Var> {
+        self.clauses
+            .iter()
+            .flat_map(|clause| clause.iter().map(|lit| lit.var()))
+            .collect()
     }
 
     /// Parse a CNF formula from a DIMACS format string.
@@ -125,9 +134,10 @@ impl Cnf {
 
     /// Solve the CNF formula.
     pub fn solve(&self) -> SolveResult {
+        let vars = self.vars();
         let mut db_builder = DatabaseBuilder::new();
         db_builder.max_iterations = None;
-        let mut solver = Solver::new(&mut db_builder, self.num_vars);
+        let mut solver = Solver::new(&mut db_builder, &vars);
         let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {
@@ -135,28 +145,29 @@ impl Cnf {
         }
 
         if solver.solve(&mut db) {
-            let mut assignment = vec![None; (self.num_vars + 1) as usize];
-            for v in 1..=self.num_vars {
-                assignment[v as usize] = solver.value(Var::new(v));
-            }
+            let assignment = vars
+                .iter()
+                .filter_map(|&v| Some((v, solver.value(v)?)))
+                .collect();
             SolveResult::Satisfiable(assignment)
         } else {
             SolveResult::Unsatisfiable
         }
     }
 
-    /// Solve and return the database and solver (for access to more detailed results).
-    pub fn into_solver(self) -> (Database, Solver) {
+    /// Solve and return the database, solver, and variable set (for access to more detailed results).
+    pub fn into_solver(self) -> (Database, Solver, HashSet<Var>) {
+        let vars = self.vars();
         let mut db_builder = DatabaseBuilder::new();
         db_builder.max_iterations = None;
-        let mut solver = Solver::new(&mut db_builder, self.num_vars);
+        let mut solver = Solver::new(&mut db_builder, &vars);
         let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {
             solver.add_clause(&mut db, ClauseId::new((i + 1) as u32), clause);
         }
 
-        (db, solver)
+        (db, solver, vars)
     }
 }
 
@@ -172,7 +183,7 @@ impl SolveResult {
     }
 
     /// Get the assignment if satisfiable.
-    pub fn assignment(&self) -> Option<&[Option<bool>]> {
+    pub fn assignment(&self) -> Option<&HashMap<Var, bool>> {
         match self {
             SolveResult::Satisfiable(a) => Some(a),
             SolveResult::Unsatisfiable => None,

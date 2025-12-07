@@ -1,5 +1,6 @@
 //! CDCL Solver dataflow setup and constructor.
 
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::ops::Not;
 
@@ -26,15 +27,15 @@ use crate::types::Conflict;
 use crate::vsids::Vsids;
 
 use super::solver::{Inputs, Outputs, Solver, State};
-use super::types::{ClauseId, Level, Lit};
+use super::types::{ClauseId, Level, Lit, Var};
 
 impl Solver {
     /// Create a new solver using the provided database builder.
     ///
-    /// `num_vars` is the number of variables in the problem.
+    /// `vars` is the set of variables in the problem.
     /// The caller is responsible for calling `db.build()` after this returns
     /// and passing the resulting `&mut Database` to solver methods.
-    pub fn new(db: &mut DatabaseBuilder, num_vars: u32) -> Self {
+    pub fn new(db: &mut DatabaseBuilder, vars: &HashSet<Var>) -> Self {
         // === Input Relations ===
         create_input!(db, clauses_inp, clauses, (ClauseId, Lit));
         create_persistent_input!(db, learned_inp, learned, (ClauseId, Lit));
@@ -298,7 +299,7 @@ impl Solver {
                 clause_db: AHashMap::new(),
                 restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
                 clause_deletion: ClauseDeletion::new(),
-                vsids: Vsids::new(num_vars),
+                vsids: Vsids::new(vars),
             },
         }
     }

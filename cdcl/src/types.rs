@@ -68,6 +68,11 @@ impl Var {
         assert!(n > 0, "Variables are 1-indexed");
         Var(n)
     }
+
+    /// Get the raw u32 value.
+    pub fn raw(self) -> u32 {
+        self.0
+    }
 }
 
 impl fmt::Display for Var {

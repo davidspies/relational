@@ -3,6 +3,7 @@
 //! Uses a priority queue for O(log n) pick and O(log n) bump.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 use ahash::AHashMap;
 use priority_queue::PriorityQueue;
@@ -49,13 +50,13 @@ pub(crate) struct Vsids {
 }
 
 impl Vsids {
-    pub(crate) fn new(num_vars: u32) -> Self {
+    pub(crate) fn new(vars: &HashSet<Var>) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(0x5a7d3e1f9c2b8a04);
-        let mut queue = PriorityQueue::with_capacity(num_vars as usize);
+        let mut queue = PriorityQueue::with_capacity(vars.len());
         // Initialize all variables with 0 activity and random nonces
-        for i in 1..=num_vars {
+        for &var in vars {
             queue.push(
-                Var::new(i),
+                var,
                 Priority {
                     activity: 0.0,
                     nonce: rng.random(),
@@ -66,7 +67,7 @@ impl Vsids {
             queue,
             stashed: AHashMap::new(),
             bump: 1.0,
-            phase: AHashMap::with_capacity(num_vars as usize),
+            phase: AHashMap::with_capacity(vars.len()),
             rng,
         }
     }
