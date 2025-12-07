@@ -3,7 +3,7 @@
 //! Implements LBD (Literal Block Distance) based clause management.
 //! LBD is the number of distinct decision levels in a clause - lower is better.
 
-use relational::HashMap;
+use contiguous_data::HashMap;
 
 use crate::types::{ClauseId, Level, Lit};
 
@@ -36,7 +36,7 @@ impl ClauseDeletion {
     /// Create a new clause deletion manager.
     pub(crate) fn new() -> Self {
         Self {
-            clause_info: HashMap::new(),
+            clause_info: HashMap::default(),
             max_clauses: 2000,
             growth_factor: 1.1,
             activity_decay: 0.95,

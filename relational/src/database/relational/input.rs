@@ -7,8 +7,7 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::HashSet;
-use contiguous_data::{Diff, Multiset};
+use contiguous_data::{Diff, HashSet, Multiset};
 use derive_where::derive_where;
 
 use super::op::Op;
@@ -26,9 +25,9 @@ pub(crate) struct InputState<T> {
 impl<T: Clone + Eq + Hash> InputState<T> {
     pub(crate) fn new() -> Self {
         InputState {
-            seen: HashSet::new(),
+            seen: HashSet::default(),
             pending: Multiset::new(),
-            new_inserts: HashSet::new(),
+            new_inserts: HashSet::default(),
         }
     }
 

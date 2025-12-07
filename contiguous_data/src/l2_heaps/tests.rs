@@ -226,7 +226,7 @@ proptest! {
     #[test]
     fn behaves_like_hashmap_btreeset(ops in proptest::collection::vec(op_strategy(), 0..200)) {
         let mut l2: L2Heaps<u8, u8> = L2Heaps::new();
-        let mut reference: HashMap<u8, BTreeSet<u8>> = HashMap::new();
+        let mut reference: HashMap<u8, BTreeSet<u8>> = HashMap::default();
 
         for op in ops {
             match op {
@@ -274,7 +274,7 @@ impl<K: Hash + Eq + Clone + Debug, V: Ord + Hash + Eq + Clone + Debug, const N: 
     /// Verify internal invariants hold for all keys.
     pub fn sanity_check(&self) {
         // Count expected positions entries per key
-        let mut expected_positions_count: HashMap<K, usize> = HashMap::new();
+        let mut expected_positions_count: HashMap<K, usize> = HashMap::default();
 
         for (key, root) in &self.roots {
             match root {
@@ -331,7 +331,7 @@ impl<K: Hash + Eq + Clone + Debug, V: Ord + Hash + Eq + Clone + Debug, const N: 
         }
 
         // Verify positions entries match expected counts
-        let mut actual_positions_count: HashMap<K, usize> = HashMap::new();
+        let mut actual_positions_count: HashMap<K, usize> = HashMap::default();
         for ((key, value), idx) in &self.positions {
             *actual_positions_count.entry(key.clone()).or_default() += 1;
             // Verify the node exists and has the correct value

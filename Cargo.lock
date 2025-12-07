@@ -229,11 +229,11 @@ checksum = "47d91586aac6b9f9e32032b8ebf58a8eb03f4b58d3e18ea493b8b2083cb7b88e"
 name = "contiguous_data"
 version = "0.1.0"
 dependencies = [
- "ahash",
  "arrayvec",
  "derive-where",
  "index_list",
  "proptest",
+ "rustc-hash",
 ]
 
 [[package]]

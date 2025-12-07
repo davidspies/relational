@@ -69,7 +69,7 @@ impl<R> Relation<R> {
         Relation::new(
             SumOp {
                 inner: self,
-                sums: HashMap::new(),
+                sums: HashMap::default(),
             },
             commit_id,
             graph,

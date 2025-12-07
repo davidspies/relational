@@ -108,7 +108,7 @@ proptest! {
     #[test]
     fn prop_matches_hashmap_multiset(ops in proptest::collection::vec(op_strategy(), 0..100)) {
         let mut l2: L2Multiset<u8, u8> = L2Multiset::new();
-        let mut reference: HashMap<u8, Multiset<u8>> = HashMap::new();
+        let mut reference: HashMap<u8, Multiset<u8>> = HashMap::default();
 
         for op in ops {
             match op {

@@ -12,8 +12,8 @@ use cdcl::proof::ProofWriter;
 use cdcl::{Cnf, Var};
 use clap::Parser;
 use consume_on_drop::ConsumeOnDrop;
+use contiguous_data::HashSet;
 use relational::database::{Graph, GraphHandle};
-use relational::HashSet;
 
 static SVG_DUMP: Once = Once::new();
 

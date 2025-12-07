@@ -1,7 +1,7 @@
 //! Tests for CDCL SAT solver.
 
+use contiguous_data::HashSet;
 use relational::database::DatabaseBuilder;
-use relational::HashSet;
 
 use super::types::{Lit, Var};
 use super::*;

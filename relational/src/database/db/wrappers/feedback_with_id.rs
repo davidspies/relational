@@ -5,8 +5,7 @@ use std::collections::hash_map;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::{HashMap, HashSet};
-use contiguous_data::{L2Vec, Multiset};
+use contiguous_data::{HashMap, HashSet, L2Vec, Multiset};
 
 use crate::database::Relation;
 use crate::database::commit_id::CommitId;
@@ -73,10 +72,10 @@ impl<T: Clone + Eq + Hash, R: Op<T>, V: Clone + Eq + Hash, C: Convert<T, V>>
             variable,
             commit_id,
             input,
-            input_totals: HashMap::new(),
+            input_totals: HashMap::default(),
             outputs_by_checkpoint: L2Vec::new(),
             change_scratch: Multiset::new(),
-            checkpoint_scratch: HashSet::new(),
+            checkpoint_scratch: HashSet::default(),
             converter: C::default(),
         }
     }

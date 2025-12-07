@@ -8,7 +8,7 @@ default = []
 std-hash = []
 
 [dependencies]
-ahash = { workspace = true }
+rustc-hash = { workspace = true }
 arrayvec = "*"
 derive-where = "*"
 index_list = { version = "*" }

@@ -4,8 +4,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 
 use anyhow::{Context, Result, bail};
+use contiguous_data::{HashMap, HashSet};
 use relational::database::{Database, DatabaseBuilder};
-use relational::{HashMap, HashSet};
 
 use crate::types::Lit;
 use crate::{Solver, Var};

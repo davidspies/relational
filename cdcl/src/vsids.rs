@@ -4,10 +4,10 @@
 
 use std::cmp::Ordering;
 
+use contiguous_data::{HashMap, HashSet};
 use priority_queue::PriorityQueue;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use relational::{HashMap, HashSet};
 
 use super::types::Var;
 
@@ -66,9 +66,9 @@ impl Vsids {
         }
         Self {
             queue,
-            stashed: HashMap::new(),
+            stashed: HashMap::default(),
             bump: 1.0,
-            phase: HashMap::with_capacity(vars.len()),
+            phase: HashMap::default(),
             rng,
         }
     }

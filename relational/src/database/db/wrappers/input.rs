@@ -4,8 +4,7 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::HashSet;
-use contiguous_data::L2Vec;
+use contiguous_data::{HashSet, L2Vec};
 
 use crate::database::relational::input::InputState;
 
@@ -36,7 +35,7 @@ impl<T> InputWrapper<T> {
         InputWrapper {
             state,
             checkpoint_tuples: L2Vec::new(),
-            seen: HashSet::new(),
+            seen: HashSet::default(),
         }
     }
 

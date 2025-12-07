@@ -1,6 +1,6 @@
 //! CDCL SAT Solver structure and methods.
 
-use relational::HashMap;
+use contiguous_data::HashMap;
 use relational::database::{Database, InputHandle, Output, PersistentInputHandle, SavedOutput};
 
 use super::clause_deletion::ClauseDeletion;
@@ -104,7 +104,7 @@ impl Solver {
         while self.state.current_level > level {
             // Track which variables we've seen and their polarity.
             // None means conflict (both polarities seen).
-            let mut seen: HashMap<Var, Option<bool>> = HashMap::new();
+            let mut seen: HashMap<Var, Option<bool>> = HashMap::default();
             // Sort literals for deterministic processing order.
             let assignments = self.outputs.this_level_assignments.get();
             let mut lits: Vec<_> = assignments.iter().copied().collect();

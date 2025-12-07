@@ -95,8 +95,7 @@
 
 pub mod database;
 
-pub use contiguous_data::{HashMap, HashSet};
-pub use database::{CommitId, Database, DatabaseBuilder};
+pub use self::database::{CommitId, Database, DatabaseBuilder};
 
 /// Assign a relation to a variable with a name derived from the variable.
 #[macro_export]
