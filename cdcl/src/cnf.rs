@@ -144,14 +144,9 @@ impl Cnf {
             solver.add_clause(&mut db, i as u32, clause);
         }
 
-        if solver.solve(&mut db) {
-            let assignment = vars
-                .iter()
-                .filter_map(|&v| Some((v, solver.value(v)?)))
-                .collect();
-            SolveResult::Satisfiable(assignment)
-        } else {
-            SolveResult::Unsatisfiable
+        match solver.solve(&mut db) {
+            Some(assignment) => SolveResult::Satisfiable(assignment),
+            None => SolveResult::Unsatisfiable,
         }
     }
 

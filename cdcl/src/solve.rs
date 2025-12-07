@@ -2,10 +2,11 @@
 
 use std::time::Instant;
 
+use contiguous_data::HashMap;
 use relational::database::Database;
 
 use crate::conflict_analysis::AnalysisResult;
-use crate::types::Level;
+use crate::types::{Level, Var};
 
 use super::Solver;
 use super::proof::ProofWriter;
@@ -18,17 +19,27 @@ pub struct SolveStats {
     pub restarts: u64,
 }
 
+/// The result of solving: either a satisfying assignment or UNSAT.
+pub type SolveResult = Option<HashMap<Var, bool>>;
+
 impl Solver {
     /// Main solve loop with CDCL (Conflict-Driven Clause Learning).
     ///
+    /// Returns `Some(assignment)` if SAT, `None` if UNSAT.
     /// Uses 1-UIP conflict analysis to learn clauses and perform
     /// non-chronological backtracking.
-    pub fn solve(&mut self, db: &mut Database) -> bool {
+    pub fn solve(&mut self, db: &mut Database) -> SolveResult {
         self.solve_with_proof(db, None)
     }
 
     /// Solve with optional DRAT proof logging.
-    pub fn solve_with_proof(&mut self, db: &mut Database, proof: Option<&mut ProofWriter>) -> bool {
+    ///
+    /// Returns `Some(assignment)` if SAT, `None` if UNSAT.
+    pub fn solve_with_proof(
+        &mut self,
+        db: &mut Database,
+        proof: Option<&mut ProofWriter>,
+    ) -> SolveResult {
         let start = Instant::now();
         let (result, stats) = self.solve_internal(db, proof);
         eprintln!(
@@ -45,7 +56,7 @@ impl Solver {
         &mut self,
         db: &mut Database,
         mut proof: Option<&mut ProofWriter>,
-    ) -> (bool, SolveStats) {
+    ) -> (SolveResult, SolveStats) {
         let mut stats = SolveStats::default();
         let start = Instant::now();
         let mut last_report = start;
@@ -78,7 +89,16 @@ impl Solver {
                         }
                         None => {
                             // All variables assigned, no conflict = SAT
-                            return (true, stats);
+                            // Collect assignment before backtracking
+                            let assignment: HashMap<Var, bool> = self
+                                .outputs
+                                .assigned
+                                .get()
+                                .iter()
+                                .map(|&lit| (lit.var(), lit.is_positive()))
+                                .collect();
+                            self.backtrack_to(db, Level::TOP);
+                            return (Some(assignment), stats);
                         }
                     }
                 }
@@ -102,8 +122,9 @@ impl Solver {
                         if let Some(ref mut p) = proof {
                             let _ = p.flush();
                         }
-                        return (false, stats);
-                    };
+                        self.backtrack_to(db, Level::TOP);
+                        return (None, stats);
+                    }
 
                     // Bump VSIDS activity for variables in learned clause
                     for &(lit, _) in &learned_clause {

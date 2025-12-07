@@ -27,8 +27,9 @@ fn test_simple_sat() {
     solver.add_clause(&mut db, 0, &[lit(1), lit(2)]); // x1 OR x2
     solver.add_clause(&mut db, 1, &[lit(1), lit(-2)]); // x1 OR NOT x2
 
-    assert!(solver.solve(&mut db));
-    assert_eq!(solver.value(Var::new(1)), Some(true));
+    let result = solver.solve(&mut db);
+    let assignment = result.expect("expected SAT");
+    assert_eq!(assignment.get(&Var::new(1)), Some(&true));
 }
 
 #[test]
@@ -42,7 +43,7 @@ fn test_simple_unsat() {
     solver.add_clause(&mut db, 0, &[lit(1)]); // x1
     solver.add_clause(&mut db, 1, &[lit(-1)]); // NOT x1
 
-    assert!(!solver.solve(&mut db));
+    assert!(solver.solve(&mut db).is_none());
 }
 
 #[test]
@@ -57,10 +58,10 @@ fn test_unit_propagation() {
     solver.add_clause(&mut db, 1, &[lit(-1), lit(2)]); // NOT x1 OR x2
     solver.add_clause(&mut db, 2, &[lit(-2), lit(3)]); // NOT x2 OR x3
 
-    assert!(solver.solve(&mut db));
-    assert_eq!(solver.value(Var::new(1)), Some(true));
-    assert_eq!(solver.value(Var::new(2)), Some(true));
-    assert_eq!(solver.value(Var::new(3)), Some(true));
+    let assignment = solver.solve(&mut db).expect("expected SAT");
+    assert_eq!(assignment.get(&Var::new(1)), Some(&true));
+    assert_eq!(assignment.get(&Var::new(2)), Some(&true));
+    assert_eq!(assignment.get(&Var::new(3)), Some(&true));
 }
 
 #[test]
@@ -76,5 +77,28 @@ fn test_backtracking() {
     solver.add_clause(&mut db, 2, &[lit(1), lit(-2)]); // x1 OR NOT x2
     solver.add_clause(&mut db, 3, &[lit(-1), lit(-2)]); // NOT x1 OR NOT x2
 
-    assert!(!solver.solve(&mut db));
+    assert!(solver.solve(&mut db).is_none());
+}
+
+#[test]
+fn test_solve_add_clause_solve_again() {
+    // First solve: (x1 OR x2) - SAT
+    // Then add: (NOT x1) AND (NOT x2) - makes it UNSAT
+    let mut db_builder = DatabaseBuilder::new();
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]));
+    let mut db = db_builder.build();
+
+    solver.add_clause(&mut db, 0, &[lit(1), lit(2)]); // x1 OR x2
+
+    // First solve - should be SAT
+    let result1 = solver.solve(&mut db);
+    assert!(result1.is_some(), "first solve should be SAT");
+
+    // Add clauses that make it UNSAT
+    solver.add_clause(&mut db, 1, &[lit(-1)]); // NOT x1
+    solver.add_clause(&mut db, 2, &[lit(-2)]); // NOT x2
+
+    // Second solve - should be UNSAT
+    let result2 = solver.solve(&mut db);
+    assert!(result2.is_none(), "second solve should be UNSAT");
 }

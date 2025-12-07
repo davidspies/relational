@@ -122,5 +122,5 @@ fn test_parse_from_string() {
 fn test_into_solver() {
     let cnf = load_cnf("simple_sat.cnf");
     let (mut db, mut solver, _vars) = cnf.into_solver();
-    assert!(solver.solve(&mut db));
+    assert!(solver.solve(&mut db).is_some());
 }

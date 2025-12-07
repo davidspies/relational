@@ -12,7 +12,7 @@ use cdcl::proof::ProofWriter;
 use cdcl::{Cnf, Var};
 use clap::Parser;
 use consume_on_drop::ConsumeOnDrop;
-use contiguous_data::HashSet;
+use contiguous_data::HashMap;
 use relational::database::{Graph, GraphHandle};
 
 static SVG_DUMP: Once = Once::new();
@@ -66,7 +66,7 @@ fn main() {
 
     let cnf = Cnf::from_file(&args.cnf_file).unwrap();
 
-    let (mut db, mut solver, vars) = cnf.into_solver();
+    let (mut db, mut solver, _vars) = cnf.into_solver();
 
     let mut proof_writer = args
         .proof
@@ -90,11 +90,14 @@ fn main() {
         ConsumeOnDrop::new(move || dump_svg_once(&graph, &path))
     });
 
-    if solver.solve_with_proof(&mut db, proof_writer.as_mut()) {
-        println!("s SATISFIABLE");
-        print_assignment(&solver, &vars);
-    } else {
-        println!("s UNSATISFIABLE");
+    match solver.solve_with_proof(&mut db, proof_writer.as_mut()) {
+        Some(assignment) => {
+            println!("s SATISFIABLE");
+            print_assignment(&assignment);
+        }
+        None => {
+            println!("s UNSATISFIABLE");
+        }
     }
 
     if let Some(path) = &args.graph
@@ -104,15 +107,15 @@ fn main() {
     }
 }
 
-fn print_assignment(solver: &cdcl::Solver, vars: &HashSet<Var>) {
-    let mut sorted_vars: Vec<_> = vars.iter().copied().collect();
-    sorted_vars.sort();
+fn print_assignment(assignment: &HashMap<Var, bool>) {
+    let mut sorted: Vec<_> = assignment.iter().collect();
+    sorted.sort_by_key(|(var, _)| *var);
     print!("v");
-    for var in sorted_vars {
-        match solver.value(var) {
-            Some(true) => print!(" {}", var.raw()),
-            Some(false) => print!(" -{}", var.raw()),
-            None => {}
+    for (var, &value) in sorted {
+        if value {
+            print!(" {}", var.raw());
+        } else {
+            print!(" -{}", var.raw());
         }
     }
     println!(" 0");
