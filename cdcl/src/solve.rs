@@ -58,6 +58,12 @@ impl Solver {
         mut proof: Option<&mut ProofWriter>,
     ) -> (SolveResult, SolveStats) {
         let mut stats = SolveStats::default();
+
+        // Check for empty clause (immediate UNSAT)
+        if self.state.has_empty_clause {
+            return (None, stats);
+        }
+
         let start = Instant::now();
         let mut last_report = start;
         loop {
@@ -117,15 +123,6 @@ impl Solver {
                         let _ = p.add_clause(&lits);
                     }
 
-                    if conflict_level == Level::TOP {
-                        // Conflict at level 0 = UNSAT
-                        if let Some(ref mut p) = proof {
-                            let _ = p.flush();
-                        }
-                        self.backtrack_to(db, Level::TOP);
-                        return (None, stats);
-                    }
-
                     // Bump VSIDS activity for variables in learned clause
                     for &(lit, _) in &learned_clause {
                         self.state.vsids.bump(lit.var());
@@ -140,6 +137,14 @@ impl Solver {
 
                     // Decay clause activities
                     self.state.clause_deletion.decay_activities();
+
+                    if conflict_level == Level::TOP {
+                        // Conflict at level 0 = UNSAT
+                        if let Some(ref mut p) = proof {
+                            let _ = p.flush();
+                        }
+                        return (None, stats);
+                    }
 
                     // Check if we should restart
                     if self.state.restart.on_conflict() {

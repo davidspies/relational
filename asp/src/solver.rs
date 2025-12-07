@@ -230,3 +230,133 @@ enum MinimalityResult {
         difference: Vec<Atom>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse_smodels;
+
+    /// Helper to solve an ASP program and return sorted answer set names.
+    fn solve_asp(input: &str) -> Vec<Vec<String>> {
+        let program = parse_smodels(input).unwrap();
+        let solver = AspSolver::new(program);
+        let mut results: Vec<Vec<String>> = solver
+            .solve()
+            .into_iter()
+            .map(|answer_set| {
+                let mut names: Vec<String> = answer_set
+                    .iter()
+                    .filter_map(|atom| solver.atom_name(*atom).map(String::from))
+                    .collect();
+                names.sort();
+                names
+            })
+            .collect();
+        results.sort();
+        results
+    }
+
+    #[test]
+    fn test_simple_fact() {
+        // p.
+        let input = "1 2 0 0\n0\n2 p\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["p"]]);
+    }
+
+    #[test]
+    fn test_two_facts() {
+        // p. q.
+        let input = "1 2 0 0\n1 3 0 0\n0\n2 p\n3 q\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["p", "q"]]);
+    }
+
+    #[test]
+    fn test_default_negation_two_models() {
+        // a :- not b. b :- not a.
+        // Two answer sets: {a} and {b}
+        let input = "1 2 1 1 3\n1 3 1 1 2\n0\n2 a\n3 b\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a"], vec!["b"]]);
+    }
+
+    #[test]
+    fn test_self_referential_negation_unsat() {
+        // a :- not a.
+        // No stable models
+        let input = "1 2 1 1 2\n0\n2 a\n0\n";
+        let results = solve_asp(input);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_constraint_filters_model() {
+        // a :- not b. b :- not a. :- a, b.
+        // Still two answer sets since a and b can't both be true anyway
+        let input = "1 2 1 1 3\n1 3 1 1 2\n1 1 2 0 2 3\n0\n2 a\n3 b\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a"], vec!["b"]]);
+    }
+
+    #[test]
+    fn test_constraint_makes_unsat() {
+        // a :- not b. b :- not a. :- a. :- b.
+        // No stable models - both a and b are forbidden
+        let input = "1 2 1 1 3\n1 3 1 1 2\n1 1 1 0 2\n1 1 1 0 3\n0\n2 a\n3 b\n0\n";
+        let results = solve_asp(input);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_chain_derivation() {
+        // a. b :- a. c :- b.
+        // One answer set: {a, b, c}
+        let input = "1 2 0 0\n1 3 1 0 2\n1 4 1 0 3\n0\n2 a\n3 b\n4 c\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a", "b", "c"]]);
+    }
+
+    #[test]
+    fn test_unfounded_loop() {
+        // a :- b. b :- a.
+        // No facts, so no stable models with a or b (only empty model)
+        let input = "1 2 1 0 3\n1 3 1 0 2\n0\n2 a\n3 b\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![Vec::<String>::new()]);
+    }
+
+    #[test]
+    fn test_empty_program() {
+        // Empty program has one answer set: {}
+        let input = "0\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![Vec::<String>::new()]);
+    }
+
+    #[test]
+    fn test_supported_loop() {
+        // a :- b. b :- a. a :- not c.
+        // c is false by default, so a is supported, then b is supported
+        let input = "1 2 1 0 3\n1 3 1 0 2\n1 2 1 1 4\n0\n2 a\n3 b\n4 c\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a", "b"]]);
+    }
+
+    #[test]
+    fn test_constraint_requires_derivation() {
+        // a. :- not a. (a is a fact, constraint requires a to be true - satisfied)
+        let input = "1 2 0 0\n1 1 1 1 2\n0\n2 a\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a"]]);
+    }
+
+    #[test]
+    fn test_multiple_rules_same_head() {
+        // a :- b. a :- c. b.
+        // a is derived from b
+        let input = "1 2 1 0 3\n1 2 1 0 4\n1 3 0 0\n0\n2 a\n3 b\n4 c\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a", "b"]]);
+    }
+}

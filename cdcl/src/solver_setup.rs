@@ -325,6 +325,7 @@ impl Solver {
                 restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
                 clause_deletion: ClauseDeletion::new(),
                 vsids: Vsids::new(vars),
+                has_empty_clause: false,
             },
         }
     }

@@ -118,13 +118,13 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
 
     // At least one atom must be diminished (strict subset)
     // ∨ all a_diminished
+    // Note: if there are no user atoms, this is an empty clause (FALSE),
+    // which correctly makes top solver UNSAT (no smaller model than {})
     let mut diminished_clause = Vec::new();
     for atom_id in 2..=layout.num_atoms {
         diminished_clause.push(Lit::pos(layout.diminished(Atom(atom_id))));
     }
-    if !diminished_clause.is_empty() {
-        top_clauses.push(diminished_clause);
-    }
+    top_clauses.push(diminished_clause);
 
     EncodedProgram {
         layout,
@@ -174,10 +174,7 @@ fn encode_basic_rule(
     // Bottom clause: h_bottom ∨ ¬active_r
     // This says: if rule is active, head must be true
     if !rule.head.is_false() {
-        bottom_clauses.push(vec![
-            Lit::pos(layout.bottom(rule.head)),
-            Lit::neg(active),
-        ]);
+        bottom_clauses.push(vec![Lit::pos(layout.bottom(rule.head)), Lit::neg(active)]);
     } else {
         // Constraint rule: if active, contradiction
         // ¬active_r (rule can never be active)

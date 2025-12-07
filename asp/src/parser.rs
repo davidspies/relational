@@ -30,7 +30,9 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
             continue;
         }
 
-        let rule_type: u32 = parts[0].parse().map_err(|e| format!("Invalid rule type: {e}"))?;
+        let rule_type: u32 = parts[0]
+            .parse()
+            .map_err(|e| format!("Invalid rule type: {e}"))?;
 
         match rule_type {
             1 => {
@@ -92,7 +94,9 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
         // Format: atom_id name
         let parts: Vec<&str> = line.splitn(2, ' ').collect();
         if parts.len() >= 2 {
-            let atom_id: u32 = parts[0].parse().map_err(|e| format!("Invalid atom ID: {e}"))?;
+            let atom_id: u32 = parts[0]
+                .parse()
+                .map_err(|e| format!("Invalid atom ID: {e}"))?;
             let name = parts[1].to_string();
             program.symbols.push((Atom(atom_id), name));
         }
@@ -110,8 +114,12 @@ fn parse_basic_rule(parts: &[&str]) -> Result<BasicRule, String> {
     }
 
     let head = Atom(parts[1].parse().map_err(|e| format!("Invalid head: {e}"))?);
-    let body_count: usize = parts[2].parse().map_err(|e| format!("Invalid body count: {e}"))?;
-    let neg_count: usize = parts[3].parse().map_err(|e| format!("Invalid neg count: {e}"))?;
+    let body_count: usize = parts[2]
+        .parse()
+        .map_err(|e| format!("Invalid body count: {e}"))?;
+    let neg_count: usize = parts[3]
+        .parse()
+        .map_err(|e| format!("Invalid neg count: {e}"))?;
 
     if parts.len() < 4 + body_count {
         return Err(format!(
@@ -124,7 +132,10 @@ fn parse_basic_rule(parts: &[&str]) -> Result<BasicRule, String> {
     let mut pos_body = Vec::with_capacity(body_count - neg_count);
 
     for (i, &part) in parts[4..4 + body_count].iter().enumerate() {
-        let atom = Atom(part.parse().map_err(|e| format!("Invalid body literal: {e}"))?);
+        let atom = Atom(
+            part.parse()
+                .map_err(|e| format!("Invalid body literal: {e}"))?,
+        );
         if i < neg_count {
             neg_body.push(atom);
         } else {
@@ -145,7 +156,9 @@ fn parse_choice_rule(parts: &[&str]) -> Result<ChoiceRule, String> {
         return Err("Choice rule too short".to_string());
     }
 
-    let head_count: usize = parts[1].parse().map_err(|e| format!("Invalid head count: {e}"))?;
+    let head_count: usize = parts[1]
+        .parse()
+        .map_err(|e| format!("Invalid head count: {e}"))?;
 
     if parts.len() < 2 + head_count + 2 {
         return Err("Choice rule too short for heads".to_string());
@@ -153,7 +166,9 @@ fn parse_choice_rule(parts: &[&str]) -> Result<ChoiceRule, String> {
 
     let mut heads = Vec::with_capacity(head_count);
     for &part in &parts[2..2 + head_count] {
-        heads.push(Atom(part.parse().map_err(|e| format!("Invalid head: {e}"))?));
+        heads.push(Atom(
+            part.parse().map_err(|e| format!("Invalid head: {e}"))?,
+        ));
     }
 
     let body_start = 2 + head_count;
@@ -179,7 +194,10 @@ fn parse_choice_rule(parts: &[&str]) -> Result<ChoiceRule, String> {
         .iter()
         .enumerate()
     {
-        let atom = Atom(part.parse().map_err(|e| format!("Invalid body literal: {e}"))?);
+        let atom = Atom(
+            part.parse()
+                .map_err(|e| format!("Invalid body literal: {e}"))?,
+        );
         if i < neg_count {
             neg_body.push(atom);
         } else {
@@ -201,7 +219,9 @@ fn parse_disjunctive_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
         return Err("Disjunctive rule too short".to_string());
     }
 
-    let head_count: usize = parts[1].parse().map_err(|e| format!("Invalid head count: {e}"))?;
+    let head_count: usize = parts[1]
+        .parse()
+        .map_err(|e| format!("Invalid head count: {e}"))?;
 
     if parts.len() < 2 + head_count + 2 {
         return Err("Disjunctive rule too short for heads".to_string());
@@ -209,7 +229,9 @@ fn parse_disjunctive_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
 
     let mut heads = Vec::with_capacity(head_count);
     for &part in &parts[2..2 + head_count] {
-        heads.push(Atom(part.parse().map_err(|e| format!("Invalid head: {e}"))?));
+        heads.push(Atom(
+            part.parse().map_err(|e| format!("Invalid head: {e}"))?,
+        ));
     }
 
     let body_start = 2 + head_count;
@@ -235,7 +257,10 @@ fn parse_disjunctive_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
         .iter()
         .enumerate()
     {
-        let atom = Atom(part.parse().map_err(|e| format!("Invalid body literal: {e}"))?);
+        let atom = Atom(
+            part.parse()
+                .map_err(|e| format!("Invalid body literal: {e}"))?,
+        );
         if i < neg_count {
             neg_body.push(atom);
         } else {

@@ -2,7 +2,7 @@
 
 use std::io::{self, Read};
 
-use asp::{parse_smodels, AspSolver};
+use asp::{AspSolver, parse_smodels};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read smodels format from stdin

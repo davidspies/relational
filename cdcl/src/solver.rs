@@ -54,6 +54,8 @@ pub(super) struct State {
     pub(crate) clause_deletion: ClauseDeletion,
     /// VSIDS decision heuristic.
     pub(crate) vsids: Vsids,
+    /// Whether an empty clause has been added (immediate UNSAT).
+    pub(crate) has_empty_clause: bool,
 }
 
 /// CDCL SAT Solver.
@@ -66,6 +68,11 @@ pub struct Solver {
 impl Solver {
     /// Add an original clause to the solver.
     pub fn add_clause(&mut self, db: &mut Database, id: u32, literals: &[Lit]) {
+        // Empty clause means immediate UNSAT
+        if literals.is_empty() {
+            self.state.has_empty_clause = true;
+            return;
+        }
         let clause_id = ClauseId::Original(id);
         for &lit in literals {
             self.inputs.clauses.insert((clause_id, lit));
@@ -154,8 +161,12 @@ impl Solver {
         }
         // Cache clause contents for conflict analysis
         self.state.clause_db.insert(cid, literals);
-        // Track for clause deletion
-        self.state.clause_deletion.on_learn(cid, clause);
+        if clause.is_empty() {
+            self.state.has_empty_clause = true;
+        } else {
+            // Track for clause deletion
+            self.state.clause_deletion.on_learn(cid, clause);
+        }
         db.commit();
         cid
     }
