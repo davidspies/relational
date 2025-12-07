@@ -4,10 +4,10 @@
 
 use std::cmp::Ordering;
 
-use relational::{HashMap, HashSet};
 use priority_queue::PriorityQueue;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use relational::{HashMap, HashSet};
 
 use super::types::Var;
 
@@ -53,7 +53,9 @@ impl Vsids {
         let mut rng = ChaCha8Rng::seed_from_u64(0x5a7d3e1f9c2b8a04);
         let mut queue = PriorityQueue::with_capacity(vars.len());
         // Initialize all variables with 0 activity and random nonces
-        for &var in vars {
+        let mut sorted_vars: Vec<Var> = vars.iter().copied().collect();
+        sorted_vars.sort();
+        for &var in &sorted_vars {
             queue.push(
                 var,
                 Priority {
