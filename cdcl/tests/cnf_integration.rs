@@ -21,7 +21,7 @@ fn test_simple_sat() {
     // Verify assignment satisfies the formula
     let assignment = result.assignment().unwrap();
     // x1 should be true (either clause requires it when x2 varies)
-    assert_eq!(assignment[&Var::new(1)], true);
+    assert!(assignment[&Var::new(1)]);
 }
 
 #[test]
@@ -44,9 +44,9 @@ fn test_unit_propagation() {
     assert!(result.is_sat());
 
     let assignment = result.assignment().unwrap();
-    assert_eq!(assignment[&Var::new(1)], true);
-    assert_eq!(assignment[&Var::new(2)], true);
-    assert_eq!(assignment[&Var::new(3)], true);
+    assert!(assignment[&Var::new(1)]);
+    assert!(assignment[&Var::new(2)]);
+    assert!(assignment[&Var::new(3)]);
 }
 
 #[test]
