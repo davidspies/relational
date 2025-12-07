@@ -6,6 +6,7 @@ use std::marker::PhantomData;
 
 use contiguous_data::Multiset;
 
+use crate::database::commit_id::CommitId;
 use crate::database::saved::SavedGetter;
 
 use super::op::{DynOp, Op};
@@ -30,12 +31,21 @@ struct OutputInner<T, S, R> {
     relation: Relation<R>,
     scratch: Multiset<T>,
     state: S,
+    /// The commit ID when we last pulled from the relation.
+    last_update_commit_id: CommitId,
     _phantom: PhantomData<T>,
 }
 
 impl<T: Eq + Hash, S: Sink<T>, R: Op<T>> OutputInner<T, S, R> {
     /// Pull all pending changes from the relation into the accumulated state.
     fn update(&mut self) {
+        // Skip pull if commit ID hasn't changed since last update.
+        let current = self.relation.commit_id.get();
+        if current == self.last_update_commit_id {
+            return;
+        }
+        self.last_update_commit_id = current;
+
         Op::dump_to_multiset(&mut self.relation, &mut self.scratch);
         self.state.dump_all(&mut self.scratch);
     }
@@ -58,6 +68,7 @@ impl<T: Eq + Hash, S: Sink<T>, R: Op<T>> Output<T, S, R> {
                 relation,
                 scratch: Multiset::new(),
                 state: S::default(),
+                last_update_commit_id: CommitId::default(),
                 _phantom: PhantomData,
             }),
         }

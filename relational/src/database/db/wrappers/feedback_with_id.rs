@@ -53,6 +53,8 @@ pub(crate) struct FeedbackWrapperG<T, R: Op<T>, V, C: Convert<T, V>> {
     change_scratch: Multiset<T>,
     checkpoint_scratch: HashSet<T>,
     converter: C,
+    /// The commit ID when we last pulled from input.
+    last_update_commit_id: CommitId,
 }
 
 /// Regular feedback: variable stores T.
@@ -77,6 +79,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>, V: Clone + Eq + Hash, C: Convert<T, V>>
             change_scratch: Multiset::new(),
             checkpoint_scratch: HashSet::default(),
             converter: C::default(),
+            last_update_commit_id: CommitId::default(),
         }
     }
 
@@ -107,6 +110,10 @@ impl<T: Clone + Eq + Hash, R: Op<T>, V: Clone + Eq + Hash, C: Convert<T, V>> Any
     }
 
     fn pop_pull_and_forward(&mut self) {
+        let current = self.input.commit_id.get();
+        assert!(current != self.last_update_commit_id);
+        self.last_update_commit_id = current;
+
         assert!(self.checkpoint_scratch.is_empty());
         self.checkpoint_scratch
             .extend(self.outputs_by_checkpoint.pop().unwrap().map(|(t, _)| t));
@@ -145,6 +152,10 @@ impl<T: Clone + Eq + Hash, R: Op<T>, V: Clone + Eq + Hash, C: Convert<T, V>> Any
     }
 
     fn step(&mut self) -> bool {
+        let current = self.input.commit_id.get();
+        assert!(current != self.last_update_commit_id);
+        self.last_update_commit_id = current;
+
         self.input.dump_to_multiset(&mut self.change_scratch);
 
         if self.change_scratch.is_empty() {
