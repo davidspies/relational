@@ -25,4 +25,4 @@ mod tests;
 
 pub use cnf::Cnf;
 pub use solver::Solver;
-pub use types::Var;
+pub use types::{Lit, Var};

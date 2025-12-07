@@ -65,7 +65,7 @@ pub struct Solver {
 
 impl Solver {
     /// Add an original clause to the solver.
-    pub(crate) fn add_clause(&mut self, db: &mut Database, id: u32, literals: &[Lit]) {
+    pub fn add_clause(&mut self, db: &mut Database, id: u32, literals: &[Lit]) {
         let clause_id = ClauseId::Original(id);
         for &lit in literals {
             self.inputs.clauses.insert((clause_id, lit));

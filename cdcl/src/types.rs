@@ -9,33 +9,33 @@ pub struct Lit(i32);
 
 impl Lit {
     /// Create a positive literal for a variable.
-    pub(crate) fn pos(v: Var) -> Self {
+    pub fn pos(v: Var) -> Self {
         Lit(v.0 as i32)
     }
 
     /// Create a negative literal for a variable.
-    pub(crate) fn neg(v: Var) -> Self {
+    pub fn neg(v: Var) -> Self {
         Lit(-(v.0 as i32))
     }
 
     /// Create a literal from a raw i32 (positive = positive literal, negative = negative literal).
-    pub(crate) fn from_raw(raw: i32) -> Self {
+    pub fn from_raw(raw: i32) -> Self {
         assert!(raw != 0, "Literal cannot be 0");
         Lit(raw)
     }
 
     /// Get the variable this literal refers to.
-    pub(crate) fn var(self) -> Var {
+    pub fn var(self) -> Var {
         Var(self.0.unsigned_abs())
     }
 
     /// Check if this is a positive literal.
-    pub(crate) fn is_positive(self) -> bool {
+    pub fn is_positive(self) -> bool {
         self.0 > 0
     }
 
     /// Get the raw i32 value.
-    pub(crate) fn raw(self) -> i32 {
+    pub fn raw(self) -> i32 {
         self.0
     }
 }
