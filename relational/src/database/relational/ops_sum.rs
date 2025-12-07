@@ -3,8 +3,7 @@
 use std::hash::Hash;
 use std::ops::{Add, Mul, Sub};
 
-use ahash::AHashMap;
-use contiguous_data::Diff;
+use contiguous_data::{Diff, HashMap};
 
 use super::op::Op;
 use super::relation::Relation;
@@ -19,7 +18,7 @@ where
 {
     inner: Relation<R>,
     /// Track sum per key
-    sums: AHashMap<K, V>,
+    sums: HashMap<K, V>,
 }
 
 impl<K, V, R> Op<(K, V)> for SumOp<K, V, R>
@@ -70,7 +69,7 @@ impl<R> Relation<R> {
         Relation::new(
             SumOp {
                 inner: self,
-                sums: AHashMap::new(),
+                sums: HashMap::new(),
             },
             commit_id,
             graph,

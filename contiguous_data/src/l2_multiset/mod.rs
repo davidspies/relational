@@ -1,14 +1,13 @@
-//! L2Multiset - a AHashMap<K, Multiset<V>> with shared contiguous storage.
+//! L2Multiset - a HashMap<K, Multiset<V>> with shared contiguous storage.
 mod list_ops;
 mod root;
 
 use std::hash::Hash;
 
-use ahash::AHashMap;
 use derive_where::derive_where;
 use index_list::{Index, IndexList};
 
-use crate::{Diff, Multiset};
+use crate::{Diff, HashMap, Multiset};
 
 use self::root::Root;
 
@@ -21,8 +20,8 @@ struct ListNode<V> {
 #[derive_where(Default)]
 pub struct L2Multiset<K, V> {
     nodes: IndexList<ListNode<V>>,
-    roots: AHashMap<K, Root<V>>,
-    positions: AHashMap<(K, V), Index>,
+    roots: HashMap<K, Root<V>>,
+    positions: HashMap<(K, V), Index>,
     counts: Multiset<(K, V)>,
 }
 

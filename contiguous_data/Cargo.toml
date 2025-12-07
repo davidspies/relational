@@ -3,8 +3,12 @@ name = "contiguous_data"
 edition.workspace = true
 version.workspace = true
 
+[features]
+default = []
+std-hash = []
+
 [dependencies]
-ahash = "*"
+ahash = { workspace = true }
 arrayvec = "*"
 derive-where = "*"
 index_list = { version = "*" }

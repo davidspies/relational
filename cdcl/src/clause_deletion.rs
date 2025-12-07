@@ -3,7 +3,7 @@
 //! Implements LBD (Literal Block Distance) based clause management.
 //! LBD is the number of distinct decision levels in a clause - lower is better.
 
-use ahash::AHashMap;
+use relational::HashMap;
 
 use crate::types::{ClauseId, Level, Lit};
 
@@ -19,7 +19,7 @@ struct ClauseInfo {
 /// Manages learned clause deletion.
 pub(crate) struct ClauseDeletion {
     /// Metadata for each learned clause.
-    clause_info: AHashMap<ClauseId, ClauseInfo>,
+    clause_info: HashMap<ClauseId, ClauseInfo>,
     /// Maximum number of learned clauses before triggering deletion.
     max_clauses: usize,
     /// How much to grow max_clauses after each deletion.
@@ -36,7 +36,7 @@ impl ClauseDeletion {
     /// Create a new clause deletion manager.
     pub(crate) fn new() -> Self {
         Self {
-            clause_info: AHashMap::new(),
+            clause_info: HashMap::new(),
             max_clauses: 2000,
             growth_factor: 1.1,
             activity_decay: 0.95,

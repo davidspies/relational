@@ -7,7 +7,7 @@ version.workspace = true
 consolidate_all = []
 
 [dependencies]
-ahash = "*"
+ahash = { workspace = true }
 anyhow = "*"
 arrayvec = "*"
 contiguous_data = { path = "../contiguous_data" }

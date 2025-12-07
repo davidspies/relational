@@ -2,6 +2,12 @@
 
 //! A relational query engine with differential dataflow semantics.
 //!
+//! # Hash Collections
+//!
+//! This crate reexports `HashMap` and `HashSet` from `contiguous_data`.
+//! By default these use `ahash` for performance. Enable the `std-hash` feature
+//! to use the standard library's hash collections instead.
+//!
 //! This crate provides:
 //! - Differential collections that track changes over time
 //! - Relational operators (join, filter, map, etc.)
@@ -89,6 +95,7 @@
 
 pub mod database;
 
+pub use contiguous_data::{HashMap, HashSet};
 pub use database::{CommitId, Database, DatabaseBuilder};
 
 /// Assign a relation to a variable with a name derived from the variable.

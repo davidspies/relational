@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use ahash::AHashSet;
+use crate::HashSet;
 use contiguous_data::L2Vec;
 
 use crate::database::relational::input::InputState;
@@ -28,7 +28,7 @@ pub(crate) struct InputWrapper<T> {
     /// Tuples inserted at each checkpoint level (stratified).
     checkpoint_tuples: L2Vec<T>,
     /// All tuples currently tracked across all checkpoints (for dedup).
-    seen: AHashSet<T>,
+    seen: HashSet<T>,
 }
 
 impl<T> InputWrapper<T> {
@@ -36,7 +36,7 @@ impl<T> InputWrapper<T> {
         InputWrapper {
             state,
             checkpoint_tuples: L2Vec::new(),
-            seen: AHashSet::new(),
+            seen: HashSet::new(),
         }
     }
 

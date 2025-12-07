@@ -3,9 +3,8 @@
 //! Uses a priority queue for O(log n) pick and O(log n) bump.
 
 use std::cmp::Ordering;
-use std::collections::HashSet;
 
-use ahash::AHashMap;
+use relational::{HashMap, HashSet};
 use priority_queue::PriorityQueue;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -40,11 +39,11 @@ pub(crate) struct Vsids {
     /// Priority queue: var -> priority (only unassigned variables)
     queue: PriorityQueue<Var, Priority>,
     /// Stashed priorities for assigned variables (removed from queue)
-    stashed: AHashMap<Var, Priority>,
+    stashed: HashMap<Var, Priority>,
     /// Bump amount (increases for decay effect)
     bump: f64,
     /// Saved phase per variable
-    phase: AHashMap<Var, bool>,
+    phase: HashMap<Var, bool>,
     /// RNG for generating tie-breaking nonces
     rng: ChaCha8Rng,
 }
@@ -65,9 +64,9 @@ impl Vsids {
         }
         Self {
             queue,
-            stashed: AHashMap::new(),
+            stashed: HashMap::new(),
             bump: 1.0,
-            phase: AHashMap::with_capacity(vars.len()),
+            phase: HashMap::with_capacity(vars.len()),
             rng,
         }
     }

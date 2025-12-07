@@ -1,10 +1,10 @@
 //! CDCL Solver dataflow setup and constructor.
 
-use std::collections::HashSet;
 use std::hash::Hash;
 use std::ops::Not;
 
-use ahash::{AHashMap, RandomState};
+use ahash::RandomState;
+use relational::{HashMap, HashSet};
 use either::Either;
 use relational::database::{CommitId, DatabaseBuilder};
 use relational::{
@@ -302,7 +302,7 @@ impl Solver {
             state: State {
                 current_level: Level::TOP,
                 next_learned_id: 0,
-                clause_db: AHashMap::new(),
+                clause_db: HashMap::new(),
                 restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
                 clause_deletion: ClauseDeletion::new(),
                 vsids: Vsids::new(vars),

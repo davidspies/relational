@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use ahash::AHashSet;
+use crate::HashSet;
 use contiguous_data::{Diff, Multiset};
 use derive_where::derive_where;
 
@@ -16,19 +16,19 @@ use super::op::Op;
 /// The internal state of an input relation (seen-set semantics).
 pub(crate) struct InputState<T> {
     /// The seen set - tuples that have been inserted.
-    pub(crate) seen: AHashSet<T>,
+    pub(crate) seen: HashSet<T>,
     /// Pending changes (ready to be pulled) - accumulated diffs per tuple.
     pub(crate) pending: Multiset<T>,
     /// Tuples newly inserted in the current batch (since last take_new_inserts).
-    pub(crate) new_inserts: AHashSet<T>,
+    pub(crate) new_inserts: HashSet<T>,
 }
 
 impl<T: Clone + Eq + Hash> InputState<T> {
     pub(crate) fn new() -> Self {
         InputState {
-            seen: AHashSet::new(),
+            seen: HashSet::new(),
             pending: Multiset::new(),
-            new_inserts: AHashSet::new(),
+            new_inserts: HashSet::new(),
         }
     }
 

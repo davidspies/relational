@@ -1,11 +1,11 @@
 //! DIMACS CNF parsing and solving.
 
-use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 
 use anyhow::{Context, Result, bail};
 use relational::database::{Database, DatabaseBuilder};
+use relational::{HashMap, HashSet};
 
 use crate::types::Lit;
 use crate::{Solver, Var};

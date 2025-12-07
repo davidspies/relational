@@ -7,13 +7,13 @@ version.workspace = true
 dhat-heap = ["dep:dhat"]
 
 [dependencies]
-ahash = "*"
-dhat = { version = "*", optional = true }
+ahash = { workspace = true }
 anyhow = "*"
 clap = { version = "*", features = ["derive"] }
 consume_on_drop = "*"
 contiguous_data = { path = "../contiguous_data" }
 ctrlc = "*"
+dhat = { version = "*", optional = true }
 either = "*"
 priority-queue = "*"
 rand = "*"

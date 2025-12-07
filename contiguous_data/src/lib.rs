@@ -1,8 +1,10 @@
+pub mod hash;
 mod l2_heaps;
 mod l2_multiset;
 mod l2_vec;
 mod multiset;
 
+pub use hash::{HashMap, HashSet};
 pub use l2_heaps::L2Heaps;
 pub use l2_multiset::L2Multiset;
 pub use l2_vec::L2Vec;

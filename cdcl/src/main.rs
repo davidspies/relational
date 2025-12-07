@@ -4,7 +4,6 @@
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
@@ -14,6 +13,7 @@ use cdcl::{Cnf, Var};
 use clap::Parser;
 use consume_on_drop::ConsumeOnDrop;
 use relational::database::{Graph, GraphHandle};
+use relational::HashSet;
 
 static SVG_DUMP: Once = Once::new();
 

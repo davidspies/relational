@@ -5,7 +5,7 @@ use std::collections::hash_map;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use ahash::{AHashMap, AHashSet};
+use crate::{HashMap, HashSet};
 use contiguous_data::{L2Vec, Multiset};
 
 use crate::database::Relation;
@@ -49,10 +49,10 @@ pub(crate) struct FeedbackWrapperG<T, R: Op<T>, V, C: Convert<T, V>> {
     variable: Rc<RefCell<Variable<V>>>,
     commit_id: Rc<Cell<CommitId>>,
     input: Relation<R>,
-    input_totals: AHashMap<T, i64>,
+    input_totals: HashMap<T, i64>,
     outputs_by_checkpoint: L2Vec<(T, CommitId)>,
     change_scratch: Multiset<T>,
-    checkpoint_scratch: AHashSet<T>,
+    checkpoint_scratch: HashSet<T>,
     converter: C,
 }
 
@@ -73,10 +73,10 @@ impl<T: Clone + Eq + Hash, R: Op<T>, V: Clone + Eq + Hash, C: Convert<T, V>>
             variable,
             commit_id,
             input,
-            input_totals: AHashMap::new(),
+            input_totals: HashMap::new(),
             outputs_by_checkpoint: L2Vec::new(),
             change_scratch: Multiset::new(),
-            checkpoint_scratch: AHashSet::new(),
+            checkpoint_scratch: HashSet::new(),
             converter: C::default(),
         }
     }

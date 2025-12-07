@@ -2,10 +2,9 @@
 
 use std::hash::Hash;
 
-use ahash::AHashMap;
 use derive_where::derive_where;
 
-use crate::Diff;
+use crate::{Diff, HashMap};
 
 /// A differential collection storing tuples with their multiplicities.
 ///
@@ -16,7 +15,7 @@ use crate::Diff;
 #[derive_where(Default)]
 pub struct Multiset<T> {
     /// The current state: tuple -> multiplicity
-    data: AHashMap<T, Diff>,
+    data: HashMap<T, Diff>,
 }
 
 impl<T: Eq + Hash> Multiset<T> {

@@ -1,8 +1,7 @@
 //! Tests for CDCL SAT solver.
 
-use std::collections::HashSet;
-
 use relational::database::DatabaseBuilder;
+use relational::HashSet;
 
 use super::types::{Lit, Var};
 use super::*;

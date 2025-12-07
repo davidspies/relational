@@ -5,10 +5,11 @@ mod mutations;
 
 use std::hash::Hash;
 
-use ahash::AHashMap;
 use arrayvec::ArrayVec;
 use derive_where::derive_where;
 use index_list::{Index, IndexList};
+
+use crate::HashMap;
 
 pub(crate) use heap_root::HeapRoot;
 
@@ -22,8 +23,8 @@ pub(crate) struct HeapNode<V> {
 #[derive_where(Default)]
 pub struct L2Heaps<K, V, const N: usize = 2> {
     nodes: IndexList<HeapNode<V>>,
-    roots: AHashMap<K, HeapRoot<V, N>>,
-    positions: AHashMap<(K, V), Index>,
+    roots: HashMap<K, HeapRoot<V, N>>,
+    positions: HashMap<(K, V), Index>,
     scratch: Vec<Index>,
     scratch_values: Vec<V>,
 }
