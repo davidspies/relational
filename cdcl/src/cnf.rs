@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader, Read};
 use anyhow::{Context, Result, bail};
 use relational::database::{Database, DatabaseBuilder};
 
-use crate::types::{ClauseId, Lit};
+use crate::types::Lit;
 use crate::{Solver, Var};
 
 /// A parsed CNF formula.
@@ -141,7 +141,7 @@ impl Cnf {
         let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {
-            solver.add_clause(&mut db, ClauseId::new((i + 1) as u32), clause);
+            solver.add_clause(&mut db, i as u32, clause);
         }
 
         if solver.solve(&mut db) {
@@ -164,7 +164,7 @@ impl Cnf {
         let mut db = db_builder.build();
 
         for (i, clause) in self.clauses.iter().enumerate() {
-            solver.add_clause(&mut db, ClauseId::new((i + 1) as u32), clause);
+            solver.add_clause(&mut db, i as u32, clause);
         }
 
         (db, solver, vars)

@@ -27,7 +27,7 @@ use crate::types::Conflict;
 use crate::vsids::Vsids;
 
 use super::solver::{Inputs, Outputs, Solver, State};
-use super::types::{ClauseId, Level, Lit, Var};
+use super::types::{Cause, ClauseId, Level, Lit, Var};
 
 impl Solver {
     /// Create a new solver using the provided database builder.
@@ -55,8 +55,8 @@ impl Solver {
         assign_saved!(all_clauses = clauses.concat(learned));
 
         // === Feedback-based Unit Propagation ===
-        // prep accumulates ((Lit, Level, ClauseId), CommitId) via feedback_with_id
-        create_variable!(db, prep_var, prep, ((Lit, Level, ClauseId), CommitId));
+        // prep accumulates ((Lit, Level, Cause), CommitId) via feedback_with_id
+        create_variable!(db, prep_var, prep, ((Lit, Level, Cause), CommitId));
         let prep = prep.save();
 
         // Final assignments: for each literal, take the entry with minimum CommitId
@@ -74,13 +74,13 @@ impl Solver {
         assign_saved!(
             causes = prep
                 .get()
-                .map(|((lit, level, clause_id), commit_id)| (
+                .map(|((lit, level, cause), commit_id)| (
                     lit,
                     (
                         level,
                         commit_id,
-                        seeded_hash(&(lit, level, clause_id), CAUSE_SEED),
-                        clause_id
+                        seeded_hash(&(lit, level, cause), CAUSE_SEED),
+                        cause
                     )
                 ))
                 .group_min()
@@ -133,15 +133,18 @@ impl Solver {
             (analysis_clause_ids, level_retained) = on_level
                 .get()
                 .cartesian_product(min_lit_on_level)
-                .map(|((lit, (level, _, _, clause_id)), min_lit)| {
+                .filter_map(|((lit, (level, _, _, cause)), min_lit)| {
                     let retain = match level {
-                        Level::TOP => clause_id == ClauseId::DECISION,
+                        Level::TOP => cause == Cause::Decision,
                         _ => lit == min_lit,
                     };
                     if retain {
-                        Either::Right((!lit, level))
+                        Some(Either::Right((!lit, level)))
                     } else {
-                        Either::Left(clause_id)
+                        match cause {
+                            Cause::Decision => None,
+                            Cause::FromClause(clause_id) => Some(Either::Left(clause_id)),
+                        }
                     }
                 })
         );
@@ -253,12 +256,15 @@ impl Solver {
 
         // === Set up the feedback loop ===
         assign!(unit_with_level = units.cartesian_product(current_level.get()));
-        assign!(unit_lit_level_cid = unit_with_level.map(|((cid, lit), level)| (lit, level, cid)));
+        assign!(
+            unit_lit_level_cause =
+                unit_with_level.map(|((cid, lit), level)| (lit, level, Cause::FromClause(cid)))
+        );
 
         assign!(
             all_new_assignments = decision_assignments
-                .map(|(lit, level)| (lit, level, ClauseId::DECISION))
-                .concat(unit_lit_level_cid)
+                .map(|(lit, level)| (lit, level, Cause::Decision))
+                .concat(unit_lit_level_cause)
         );
 
         db.feedback_with_id(prep_var, all_new_assignments);
@@ -295,7 +301,7 @@ impl Solver {
             },
             state: State {
                 current_level: Level::TOP,
-                next_learned_id: ClauseId::new(1),
+                next_learned_id: 0,
                 clause_db: AHashMap::new(),
                 restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
                 clause_deletion: ClauseDeletion::new(),

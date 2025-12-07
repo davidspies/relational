@@ -111,23 +111,22 @@ impl Level {
     }
 }
 
-/// A clause ID for tracking which clause caused an implication.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub(crate) struct ClauseId(u32);
+/// A clause ID distinguishing original clauses from learned clauses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum ClauseId {
+    /// An original clause from the input formula.
+    Original(u32),
+    /// A learned clause from conflict analysis.
+    Learned(u32),
+}
 
-impl ClauseId {
-    /// A special clause ID indicating a decision (no reason clause).
-    pub(crate) const DECISION: ClauseId = ClauseId(0);
-
-    /// Create a new clause ID.
-    pub(crate) fn new(n: u32) -> Self {
-        ClauseId(n)
-    }
-
-    /// Get the raw u32 value.
-    pub(crate) fn raw(self) -> u32 {
-        self.0
-    }
+/// The cause of a literal assignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum Cause {
+    /// The literal was assigned by a decision.
+    Decision,
+    /// The literal was propagated from a clause.
+    FromClause(ClauseId),
 }
 
 /// A conflict detected during propagation.

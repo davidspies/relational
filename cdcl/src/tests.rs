@@ -4,17 +4,12 @@ use std::collections::HashSet;
 
 use relational::database::DatabaseBuilder;
 
-use super::types::{ClauseId, Lit, Var};
+use super::types::{Lit, Var};
 use super::*;
 
 // Helper to create literals from raw i32
 fn lit(raw: i32) -> Lit {
     Lit::from_raw(raw)
-}
-
-// Helper to create clause IDs
-fn cid(n: u32) -> ClauseId {
-    ClauseId::new(n)
 }
 
 // Helper to create a set of variables
@@ -30,8 +25,8 @@ fn test_simple_sat() {
     let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]));
     let mut db = db_builder.build();
 
-    solver.add_clause(&mut db, cid(1), &[lit(1), lit(2)]); // x1 OR x2
-    solver.add_clause(&mut db, cid(2), &[lit(1), lit(-2)]); // x1 OR NOT x2
+    solver.add_clause(&mut db, 0, &[lit(1), lit(2)]); // x1 OR x2
+    solver.add_clause(&mut db, 1, &[lit(1), lit(-2)]); // x1 OR NOT x2
 
     assert!(solver.solve(&mut db));
     assert_eq!(solver.value(Var::new(1)), Some(true));
@@ -45,8 +40,8 @@ fn test_simple_unsat() {
     let mut solver = Solver::new(&mut db_builder, &vars(&[1]));
     let mut db = db_builder.build();
 
-    solver.add_clause(&mut db, cid(1), &[lit(1)]); // x1
-    solver.add_clause(&mut db, cid(2), &[lit(-1)]); // NOT x1
+    solver.add_clause(&mut db, 0, &[lit(1)]); // x1
+    solver.add_clause(&mut db, 1, &[lit(-1)]); // NOT x1
 
     assert!(!solver.solve(&mut db));
 }
@@ -59,9 +54,9 @@ fn test_unit_propagation() {
     let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2, 3]));
     let mut db = db_builder.build();
 
-    solver.add_clause(&mut db, cid(1), &[lit(1)]); // x1
-    solver.add_clause(&mut db, cid(2), &[lit(-1), lit(2)]); // NOT x1 OR x2
-    solver.add_clause(&mut db, cid(3), &[lit(-2), lit(3)]); // NOT x2 OR x3
+    solver.add_clause(&mut db, 0, &[lit(1)]); // x1
+    solver.add_clause(&mut db, 1, &[lit(-1), lit(2)]); // NOT x1 OR x2
+    solver.add_clause(&mut db, 2, &[lit(-2), lit(3)]); // NOT x2 OR x3
 
     assert!(solver.solve(&mut db));
     assert_eq!(solver.value(Var::new(1)), Some(true));
@@ -77,10 +72,10 @@ fn test_backtracking() {
     let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2]));
     let mut db = db_builder.build();
 
-    solver.add_clause(&mut db, cid(1), &[lit(1), lit(2)]); // x1 OR x2
-    solver.add_clause(&mut db, cid(2), &[lit(-1), lit(2)]); // NOT x1 OR x2
-    solver.add_clause(&mut db, cid(3), &[lit(1), lit(-2)]); // x1 OR NOT x2
-    solver.add_clause(&mut db, cid(4), &[lit(-1), lit(-2)]); // NOT x1 OR NOT x2
+    solver.add_clause(&mut db, 0, &[lit(1), lit(2)]); // x1 OR x2
+    solver.add_clause(&mut db, 1, &[lit(-1), lit(2)]); // NOT x1 OR x2
+    solver.add_clause(&mut db, 2, &[lit(1), lit(-2)]); // x1 OR NOT x2
+    solver.add_clause(&mut db, 3, &[lit(-1), lit(-2)]); // NOT x1 OR NOT x2
 
     assert!(!solver.solve(&mut db));
 }

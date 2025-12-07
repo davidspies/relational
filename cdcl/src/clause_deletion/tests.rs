@@ -39,8 +39,8 @@ fn test_clause_deletion_glue_protection() {
         (Lit::pos(Var::new(1)), Level::new(1)),
         (Lit::pos(Var::new(2)), Level::new(1)),
     ];
-    cd.on_learn(ClauseId::new(1), &glue1);
-    cd.on_learn(ClauseId::new(2), &glue2);
+    cd.on_learn(ClauseId::Learned(0), &glue1);
+    cd.on_learn(ClauseId::Learned(1), &glue2);
 
     // Add some non-glue clauses (LBD > 2)
     let non_glue = [
@@ -48,10 +48,10 @@ fn test_clause_deletion_glue_protection() {
         (Lit::pos(Var::new(2)), Level::new(2)),
         (Lit::pos(Var::new(3)), Level::new(3)),
     ];
-    cd.on_learn(ClauseId::new(3), &non_glue);
-    cd.on_learn(ClauseId::new(4), &non_glue);
-    cd.on_learn(ClauseId::new(5), &non_glue);
-    cd.on_learn(ClauseId::new(6), &non_glue);
+    cd.on_learn(ClauseId::Learned(2), &non_glue);
+    cd.on_learn(ClauseId::Learned(3), &non_glue);
+    cd.on_learn(ClauseId::Learned(4), &non_glue);
+    cd.on_learn(ClauseId::Learned(5), &non_glue);
 
     assert!(cd.should_delete());
 
@@ -61,6 +61,6 @@ fn test_clause_deletion_glue_protection() {
     assert_eq!(deleted.len(), 2);
 
     // Glue clauses should be protected
-    assert!(cd.clause_info.contains_key(&ClauseId::new(1)));
-    assert!(cd.clause_info.contains_key(&ClauseId::new(2)));
+    assert!(cd.clause_info.contains_key(&ClauseId::Learned(0)));
+    assert!(cd.clause_info.contains_key(&ClauseId::Learned(1)));
 }
