@@ -275,11 +275,6 @@ impl Solver {
         );
 
         // Create outputs from relations
-        let new_clause_out = new_clause.boxed().output_with_sink();
-        let conflicts_out = conflicts.boxed().output_with_sink();
-        let this_level_assignments_out = this_level_assignments.boxed().output();
-        let assigned_out = assigned.get().output();
-
         // Initialize with Level::TOP so unit propagation works at level 0
         levels_inp.insert(Level::TOP);
 
@@ -292,10 +287,10 @@ impl Solver {
                 decision_assignments: decision_assignments_inp,
             },
             outputs: Outputs {
-                assigned: assigned_out,
-                new_clause: new_clause_out,
-                conflicts: conflicts_out,
-                this_level_assignments: this_level_assignments_out,
+                assigned: assigned.get().output(),
+                new_clause: new_clause.boxed().output_with_sink(),
+                conflicts: conflicts.boxed().output_with_sink(),
+                this_level_assignments: this_level_assignments.boxed().output(),
             },
             state: State {
                 current_level: Level::TOP,
