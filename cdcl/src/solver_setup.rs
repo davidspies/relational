@@ -39,10 +39,10 @@ impl Solver {
     ///
     /// The caller is responsible for calling `db.build()` after this returns
     /// and passing the resulting `&mut Database` to solver methods.
-    pub fn new<E: Op<Lit> + 'static>(
+    pub fn new(
         db: &mut DatabaseBuilder,
         vars: &HashSet<Var>,
-        external: Relation<E>,
+        external: Relation<impl Op<Lit> + 'static>,
     ) -> Self {
         // === Input Relations ===
         create_input!(db, clauses_inp, clauses, (ClauseId, Lit));
