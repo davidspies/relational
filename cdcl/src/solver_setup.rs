@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::ops::Not;
 
 use ahash::RandomState;
-use contiguous_data::{HashMap, HashSet};
+use contiguous_data::HashSet;
 use either::Either;
 use relational::database::{CommitId, DatabaseBuilder, Op, Relation};
 use relational::{
@@ -59,8 +59,11 @@ impl Solver {
         // Current level = max(levels)
         assign_saved!(current_level = levels.global_max());
 
+        // Save learned for output and concat
+        let learned = learned.save();
+
         // All clauses (original + learned)
-        assign_saved!(all_clauses = clauses.concat(learned));
+        assign_saved!(all_clauses = clauses.concat(learned.get()));
 
         // === Feedback-based Unit Propagation ===
         // prep accumulates ((Lit, Level, Cause), CommitId) via feedback_with_id
@@ -317,11 +320,11 @@ impl Solver {
                     .output(),
                 conflicts: conflicts.boxed().output_with_sink(),
                 this_level_assignments: this_level_assignments.boxed().output(),
+                learned_clauses: learned.get().boxed().output_with_sink(),
             },
             state: State {
                 current_level: Level::TOP,
                 next_learned_id: 0,
-                clause_db: HashMap::default(),
                 restart: RestartStrategy::new(100), // Restart after 100*luby(i) conflicts
                 clause_deletion: ClauseDeletion::new(),
                 vsids: Vsids::new(vars),

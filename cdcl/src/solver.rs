@@ -1,6 +1,6 @@
 //! CDCL SAT Solver structure and methods.
 
-use contiguous_data::HashMap;
+use contiguous_data::{HashMap, L2Multiset};
 use relational::database::{Database, InputHandle, Output, PersistentInputHandle, SavedOutput};
 
 use super::clause_deletion::ClauseDeletion;
@@ -11,6 +11,7 @@ use super::vsids::Vsids;
 
 /// Type aliases for outputs with custom sinks.
 type ConflictsOutput = Output<Conflict, ConflictsSink>;
+type LearnedClausesOutput = Output<(ClauseId, Lit), L2Multiset<ClauseId, Lit>>;
 
 /// Input handles for the solver.
 pub(super) struct Inputs {
@@ -38,6 +39,8 @@ pub(super) struct Outputs {
     pub(crate) conflicts: ConflictsOutput,
     /// Assignments at the current decision level for VSIDS phase saving.
     pub(crate) this_level_assignments: Output<Lit>,
+    /// Learned clauses indexed by clause_id for deletion.
+    pub(crate) learned_clauses: LearnedClausesOutput,
 }
 
 /// Solver state that doesn't involve the dataflow.
@@ -46,8 +49,6 @@ pub(super) struct State {
     pub(crate) current_level: Level,
     /// Next ID for learned clauses.
     pub(crate) next_learned_id: u32,
-    /// Cache of clause contents: clause_id -> list of literals
-    pub(crate) clause_db: HashMap<ClauseId, Vec<Lit>>,
     /// Restart strategy.
     pub(crate) restart: RestartStrategy,
     /// Clause deletion manager.
@@ -77,8 +78,6 @@ impl Solver {
         for &lit in literals {
             self.inputs.clauses.insert((clause_id, lit));
         }
-        // Cache clause contents for conflict analysis
-        self.state.clause_db.insert(clause_id, literals.to_vec());
         db.commit();
     }
 
@@ -155,12 +154,9 @@ impl Solver {
         let id = self.state.next_learned_id;
         self.state.next_learned_id += 1;
         let cid = ClauseId::Learned(id);
-        let literals: Vec<Lit> = clause.iter().map(|&(lit, _)| lit).collect();
-        for &lit in &literals {
+        for &(lit, _) in clause {
             self.inputs.learned.insert((cid, lit));
         }
-        // Cache clause contents for conflict analysis
-        self.state.clause_db.insert(cid, literals);
         if clause.is_empty() {
             self.state.has_empty_clause = true;
         } else {
@@ -181,11 +177,10 @@ impl Solver {
     pub(crate) fn maybe_delete_clauses(&mut self, db: &mut Database) {
         if self.state.clause_deletion.should_delete() {
             let to_delete = self.state.clause_deletion.select_for_deletion();
+            let learned_clauses = self.outputs.learned_clauses.get();
             for clause_id in to_delete {
-                if let Some(literals) = self.state.clause_db.remove(&clause_id) {
-                    for lit in literals {
-                        self.inputs.learned.delete((clause_id, lit));
-                    }
+                for &lit in learned_clauses.iter_values(&clause_id) {
+                    self.inputs.learned.delete((clause_id, lit));
                 }
             }
             db.commit();
