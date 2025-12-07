@@ -130,9 +130,17 @@ fn test_external_variables() {
 
     // Solve - x3=true should propagate to x1=true
     let assignment = solver.solve(&mut db).expect("expected SAT");
-    assert_eq!(assignment.get(&Var::new(1)), Some(&true), "x1 should be true via propagation from x3");
+    assert_eq!(
+        assignment.get(&Var::new(1)),
+        Some(&true),
+        "x1 should be true via propagation from x3"
+    );
     // x3 should also appear in the assignment
-    assert_eq!(assignment.get(&Var::new(3)), Some(&true), "x3 should be in assignment");
+    assert_eq!(
+        assignment.get(&Var::new(3)),
+        Some(&true),
+        "x3 should be in assignment"
+    );
 }
 
 #[test]
@@ -149,13 +157,19 @@ fn test_external_variable_unsat() {
     solver.add_clause(&mut db, 1, &[lit(-2), lit(-1)]);
 
     // With no external assignment, this is SAT (x1=T, x2=F or x1=F, x2=T)
-    let _assignment1 = solver.solve(&mut db).expect("expected SAT without external");
+    let _assignment1 = solver
+        .solve(&mut db)
+        .expect("expected SAT without external");
 
     // Now set x2 = false externally
     external_inp.insert(lit(-2));
     db.commit();
     // This forces x1 = true (from clause 0)
     let assignment2 = solver.solve(&mut db).expect("expected SAT with x2=false");
-    assert_eq!(assignment2.get(&Var::new(1)), Some(&true), "x1 must be true when x2 is false");
+    assert_eq!(
+        assignment2.get(&Var::new(1)),
+        Some(&true),
+        "x1 must be true when x2 is false"
+    );
     assert_eq!(assignment2.get(&Var::new(2)), Some(&false));
 }

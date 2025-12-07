@@ -32,6 +32,8 @@ pub(super) struct Outputs {
     pub(crate) assigned: SavedOutput<Lit>,
     /// Learned clause literals for conflict analysis: (literal, level).
     pub(crate) new_clause: Output<(Lit, Level)>,
+    /// Clause IDs used during conflict analysis (for activity bumping).
+    pub(crate) analysis_clause_ids: Output<ClauseId>,
     /// Conflicts detected during propagation.
     pub(crate) conflicts: ConflictsOutput,
     /// Assignments at the current decision level for VSIDS phase saving.

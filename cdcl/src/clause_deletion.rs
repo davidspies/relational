@@ -58,7 +58,6 @@ impl ClauseDeletion {
     }
 
     /// Bump activity for a clause used during conflict analysis.
-    #[allow(dead_code)]
     pub(crate) fn bump_activity(&mut self, clause_id: ClauseId) {
         if let Some(info) = self.clause_info.get_mut(&clause_id) {
             info.activity += self.activity_inc;

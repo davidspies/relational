@@ -45,6 +45,11 @@ impl Solver {
             self.outputs.new_clause.get().iter().copied().collect();
         learned_clause.sort();
 
+        // Bump activity for clauses that participated in the analysis
+        for clause_id in self.outputs.analysis_clause_ids.get().iter() {
+            self.state.clause_deletion.bump_activity(*clause_id);
+        }
+
         // Get the conflict level (max level in learned clause)
         let conflict_level = learned_clause
             .iter()

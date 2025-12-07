@@ -101,13 +101,14 @@ impl Solver {
                     Conflict::DirectConflict(var) => Either::Right(var),
                 })
         );
+        let analysis_start_clause_id = analysis_start_clause_id.save();
         assign!(
             analysis_start_var_lits = analysis_start_var.flat_map(|v| [Lit::pos(v), Lit::neg(v)])
         );
         assign!(
             analysis_start_clause_lits = all_clauses
                 .get()
-                .semijoin(analysis_start_clause_id)
+                .semijoin(analysis_start_clause_id.get())
                 .snd()
                 .map(Not::not)
         );
@@ -156,10 +157,11 @@ impl Solver {
                     }
                 })
         );
+        let analysis_clause_ids = analysis_clause_ids.save();
         assign!(
             analysis_new_lits = all_clauses
                 .get()
-                .semijoin(analysis_clause_ids)
+                .semijoin(analysis_clause_ids.get())
                 .snd()
                 .consolidate()
                 .map(Not::not)
@@ -270,9 +272,7 @@ impl Solver {
         );
 
         // External literals are assigned at Level::TOP with no clause cause
-        assign!(
-            external_assignments = external.map(|lit| (lit, Level::TOP, Cause::NoClause))
-        );
+        assign!(external_assignments = external.map(|lit| (lit, Level::TOP, Cause::NoClause)));
 
         assign!(
             all_new_assignments = decision_assignments
@@ -310,6 +310,11 @@ impl Solver {
             outputs: Outputs {
                 assigned: assigned.get().output(),
                 new_clause: new_clause.boxed().output_with_sink(),
+                analysis_clause_ids: analysis_clause_ids
+                    .get()
+                    .concat(analysis_start_clause_id.get())
+                    .boxed()
+                    .output(),
                 conflicts: conflicts.boxed().output_with_sink(),
                 this_level_assignments: this_level_assignments.boxed().output(),
             },
