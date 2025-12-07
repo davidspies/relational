@@ -7,8 +7,8 @@ use ahash::{AHashMap, RandomState};
 use either::Either;
 use relational::database::{CommitId, DatabaseBuilder};
 use relational::{
-    assign, assign_and_interrupt, assign_saved, create_input, create_persistent_input,
-    create_variable,
+    assign, assign_and_interrupt, assign_partition, assign_saved, create_input,
+    create_persistent_input, create_variable,
 };
 
 /// Seeded hash for deterministic ordering.
@@ -85,12 +85,13 @@ impl Solver {
                 .group_min()
         );
 
-        let (analysis_start_clause_id, analysis_start_var) = analysis
-            .map(|conflict| match conflict {
-                Conflict::EmptyClause(clause_id) => Either::Left(clause_id),
-                Conflict::DirectConflict(var) => Either::Right(var),
-            })
-            .partition();
+        assign_partition!(
+            (analysis_start_clause_id, analysis_start_var) =
+                analysis.map(|conflict| match conflict {
+                    Conflict::EmptyClause(clause_id) => Either::Left(clause_id),
+                    Conflict::DirectConflict(var) => Either::Right(var),
+                })
+        );
         assign!(
             analysis_start_var_lits = analysis_start_var.flat_map(|v| [Lit::pos(v), Lit::neg(v)])
         );
@@ -114,33 +115,35 @@ impl Solver {
         );
         create_variable!(db, analysis_lits_var, analysis_lits, Lit);
         assign!(analysis_lit_causes = causes.get().semijoin(analysis_lits));
-        let (on_level, below_level) = analysis_lit_causes
-            .cartesian_product(analysis_level)
-            .map(|(entry @ (lit, (level, _, _, _)), max_level)| {
-                if level == max_level {
-                    Either::Left(entry)
-                } else {
-                    Either::Right((!lit, level))
+        assign_partition!(
+            (on_level, below_level) = analysis_lit_causes.cartesian_product(analysis_level).map(
+                |(entry @ (lit, (level, _, _, _)), max_level)| {
+                    if level == max_level {
+                        Either::Left(entry)
+                    } else {
+                        Either::Right((!lit, level))
+                    }
                 }
-            })
-            .partition();
+            )
+        );
         assign_saved!(on_level = on_level);
         assign!(min_lit_on_level = on_level.get().swap().global_min().snd().consolidate());
-        let (analysis_clause_ids, level_retained) = on_level
-            .get()
-            .cartesian_product(min_lit_on_level)
-            .map(|((lit, (level, _, _, clause_id)), min_lit)| {
-                let retain = match level {
-                    Level::TOP => clause_id == ClauseId::DECISION,
-                    _ => lit == min_lit,
-                };
-                if retain {
-                    Either::Right((!lit, level))
-                } else {
-                    Either::Left(clause_id)
-                }
-            })
-            .partition();
+        assign_partition!(
+            (analysis_clause_ids, level_retained) = on_level
+                .get()
+                .cartesian_product(min_lit_on_level)
+                .map(|((lit, (level, _, _, clause_id)), min_lit)| {
+                    let retain = match level {
+                        Level::TOP => clause_id == ClauseId::DECISION,
+                        _ => lit == min_lit,
+                    };
+                    if retain {
+                        Either::Right((!lit, level))
+                    } else {
+                        Either::Left(clause_id)
+                    }
+                })
+        );
         assign!(
             analysis_new_lits = all_clauses
                 .get()

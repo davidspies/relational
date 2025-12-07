@@ -35,12 +35,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> SavedState<T, R> {
         }
         self.last_update_commit_id = current;
 
-        let consumer_queues = &self.consumer_queues;
-        self.upstream.foreach(|t, diff| {
-            for queue in consumer_queues {
-                queue.borrow_mut().update(t.clone(), diff);
-            }
-        });
+        self.upstream.dump_to_consumers(&self.consumer_queues);
     }
 }
 

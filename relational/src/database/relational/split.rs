@@ -27,10 +27,8 @@ impl<A: Eq + Hash, B: Eq + Hash, R: Op<(A, B)>> SplitState<A, B, R> {
         }
         self.last_update_commit_id = current;
 
-        self.upstream.foreach(|(a, b), diff| {
-            self.left_queue.update(a, diff);
-            self.right_queue.update(b, diff);
-        });
+        self.upstream
+            .dump_split(&mut self.left_queue, &mut self.right_queue);
     }
 }
 

@@ -79,12 +79,16 @@ impl<R> Relation<R> {
     /// Give this relation a name for debugging/visualization.
     /// Panics if the graph has already been finalized.
     pub fn named(self, name: impl Into<String>) -> Self {
+        self.set_name(name);
+        self
+    }
+
+    pub fn set_name(&self, name: impl Into<String>) {
         self.graph
             .borrow_mut()
             .as_mut()
             .expect("cannot name relation after build()")
             .set_name(self.node_id, name.into());
-        self
     }
 
     /// Override the op_type for this relation's graph node.
