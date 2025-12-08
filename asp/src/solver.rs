@@ -112,11 +112,10 @@ impl AspSolver {
                         self.add_bottom_clause(&blocking);
                         self.bottom_solver.backtrack(&mut self.db, Level::TOP);
                     } else {
-                        // Add loop constraint and backtrack to appropriate level
+                        // Add loop constraint and backtrack to asserting level
+                        let backtrack_level = self.compute_backtrack_level(&loop_clause);
                         self.add_bottom_clause(&loop_clause);
-                        // For now, restart from scratch
-                        // TODO: smart backtracking based on loop constraint level
-                        self.bottom_solver.backtrack(&mut self.db, Level::TOP);
+                        self.bottom_solver.backtrack(&mut self.db, backtrack_level);
                     }
                 }
             }
@@ -130,6 +129,24 @@ impl AspSolver {
         self.bottom_solver
             .add_clause(&mut self.db, self.next_bottom_clause_id, clause);
         self.next_bottom_clause_id += 1;
+    }
+
+    /// Compute the backtrack level for a learned clause.
+    /// Returns the second-highest decision level among the clause literals.
+    fn compute_backtrack_level(&self, clause: &Clause) -> Level {
+        // Get all levels for literals in the clause
+        // The clause contains literals that should become true, so we check the negation
+        let mut levels: Vec<Level> = clause
+            .iter()
+            .map(|&lit| self.bottom_solver.get_level(!lit).unwrap())
+            .collect();
+
+        // Sort descending to find second-highest
+        levels.sort_by(|a, b| b.cmp(a));
+        levels.dedup();
+
+        // Return second-highest level, or TOP if only one level
+        levels.get(1).copied().unwrap_or(Level::TOP)
     }
 
     /// Check if the current bottom assignment is minimal.

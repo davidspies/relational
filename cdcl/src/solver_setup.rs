@@ -313,6 +313,7 @@ impl Solver {
             outputs: Outputs {
                 assigned: assigned.get().output(),
                 assigned_saved: assigned,
+                assignment_levels: assignments.get().output_with_sink(),
                 new_clause: new_clause.boxed().output_with_sink(),
                 analysis_clause_ids: analysis_clause_ids
                     .get()

@@ -35,6 +35,8 @@ pub(super) struct Outputs {
     pub(crate) assigned: SavedOutput<Lit>,
     /// Saved relation for assigned literals - use `.get()` to get a relation for external use.
     pub(crate) assigned_saved: SavedRelation<Lit>,
+    /// Assignment levels: (literal, level) for each assigned literal.
+    pub(crate) assignment_levels: SavedOutput<(Lit, Level), L2Multiset<Lit, Level>>,
     /// Learned clause literals for conflict analysis: (literal, level).
     pub(crate) new_clause: Output<(Lit, Level)>,
     /// Clause IDs used during conflict analysis (for activity bumping).
@@ -195,5 +197,15 @@ impl Solver {
     /// Use `.get()` on the returned SavedRelation to get a Relation for external use.
     pub fn assigned_saved(&self) -> &SavedRelation<Lit> {
         &self.outputs.assigned_saved
+    }
+
+    /// Get the decision level at which a literal was assigned.
+    /// Returns None if the literal is not currently assigned.
+    pub fn get_level(&self, lit: Lit) -> Option<Level> {
+        let levels = self.outputs.assignment_levels.get();
+        let mut iter = levels.iter_values(&lit);
+        let level = iter.next().copied();
+        assert!(iter.next().is_none(), "Literal assigned at multiple levels");
+        level
     }
 }
