@@ -359,4 +359,22 @@ mod tests {
         let results = solve_asp(input);
         assert_eq!(results, vec![vec!["a", "b"]]);
     }
+
+    #[test]
+    fn test_choice_rule_forbidden() {
+        // {a}. :- a.
+        // Only {} is valid since a is forbidden
+        let input = "3 1 2 0 0\n1 1 1 0 2\n0\n2 a\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![Vec::<String>::new()]);
+    }
+
+    #[test]
+    fn test_choice_rule_required() {
+        // {a}. :- not a.
+        // Only {a} is valid since a is required
+        let input = "3 1 2 0 0\n1 1 1 1 2\n0\n2 a\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a"]]);
+    }
 }
