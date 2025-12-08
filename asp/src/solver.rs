@@ -118,7 +118,13 @@ impl AspSolver {
 
         let mut db = db_builder.build();
 
-        // Feed bottom assignments as external input
+        // Feed bottom assignments as unit clauses to constrain the top solver
+        let base_id = self.encoded.top_clauses.len() as u32;
+        for (i, (&var, &value)) in candidate.iter().enumerate() {
+            let lit = if value { Lit::pos(var) } else { Lit::neg(var) };
+            solver.add_clause(&mut db, base_id + i as u32, &[lit]);
+        }
+        // Also insert into external for the relational database
         for (&var, &value) in candidate.iter() {
             let lit = if value { Lit::pos(var) } else { Lit::neg(var) };
             external_inp.insert(lit);
@@ -147,7 +153,7 @@ impl AspSolver {
     /// Extract atoms that are in bottom but not in top (the difference).
     fn extract_difference(
         &self,
-        _bottom: &contiguous_data::HashMap<Var, bool>,
+        bottom: &contiguous_data::HashMap<Var, bool>,
         top_assignment: &contiguous_data::HashMap<Var, bool>,
     ) -> Vec<Atom> {
         let layout = &self.encoded.layout;
@@ -155,13 +161,15 @@ impl AspSolver {
 
         for atom_id in 2..=layout.num_atoms {
             let atom = Atom(atom_id);
-            let diminished_var = layout.diminished(atom);
+            let bottom_var = layout.bottom(atom);
+            let top_var = layout.top(atom);
 
-            // Check if this atom is diminished (true in bottom, false in top)
-            if let Some(&is_diminished) = top_assignment.get(&diminished_var) {
-                if is_diminished {
-                    difference.push(atom);
-                }
+            // Check if atom is true in bottom but false in top
+            let in_bottom = bottom.get(&bottom_var).copied().unwrap_or(false);
+            let in_top = top_assignment.get(&top_var).copied().unwrap_or(false);
+
+            if in_bottom && !in_top {
+                difference.push(atom);
             }
         }
 
@@ -173,13 +181,16 @@ impl AspSolver {
         let layout = &self.encoded.layout;
         let mut clause = Vec::new();
 
-        // For each true bottom atom, add its negation to the blocking clause
+        // Include every atom: negate true atoms, keep false atoms positive
+        // This blocks exactly this assignment (at least one must differ)
         for atom_id in 2..=layout.num_atoms {
             let atom = Atom(atom_id);
             let var = layout.bottom(atom);
             if let Some(&value) = candidate.get(&var) {
                 if value {
                     clause.push(Lit::neg(var));
+                } else {
+                    clause.push(Lit::pos(var));
                 }
             }
         }
