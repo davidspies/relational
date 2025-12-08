@@ -45,7 +45,7 @@ impl Solver {
         external: Relation<impl Op<Lit> + 'static>,
     ) -> Self {
         // === Input Relations ===
-        create_input!(db, clauses_inp, clauses, (ClauseId, Lit));
+        create_persistent_input!(db, clauses_inp, clauses, (ClauseId, Lit));
         create_persistent_input!(db, learned_inp, learned, (ClauseId, Lit));
         create_input!(db, mut levels_inp, levels, Level);
         create_input!(
@@ -312,6 +312,7 @@ impl Solver {
             },
             outputs: Outputs {
                 assigned: assigned.get().output(),
+                assigned_saved: assigned,
                 new_clause: new_clause.boxed().output_with_sink(),
                 analysis_clause_ids: analysis_clause_ids
                     .get()

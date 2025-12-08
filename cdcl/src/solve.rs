@@ -32,16 +32,12 @@ impl Solver {
         self.solve_with_proof(db, None)
     }
 
-    /// Solve with optional DRAT proof logging.
-    ///
-    /// Returns `Some(assignment)` if SAT, `None` if UNSAT.
-    pub fn solve_with_proof(
-        &mut self,
-        db: &mut Database,
-        proof: Option<&mut ProofWriter>,
-    ) -> SolveResult {
+    /// Solve but keep the decision stack on SAT (don't backtrack).
+    /// Returns true if SAT, false if UNSAT.
+    /// Use `get_assignment()` to get the current assignment after SAT.
+    pub fn solve_and_stay(&mut self, db: &mut Database) -> bool {
         let start = Instant::now();
-        let (result, stats) = self.solve_internal(db, proof);
+        let (result, stats) = self.solve_core(db, None);
         eprintln!(
             "c stats: {:.3}s decisions={} conflicts={} restarts={}",
             start.elapsed().as_secs_f64(),
@@ -52,16 +48,63 @@ impl Solver {
         result
     }
 
-    fn solve_internal(
+    /// Get the current assignment (all assigned literals).
+    pub fn get_assignment(&self) -> HashMap<Var, bool> {
+        self.outputs
+            .assigned
+            .get()
+            .iter()
+            .map(|&lit| (lit.var(), lit.is_positive()))
+            .collect()
+    }
+
+    /// Get the current decision level.
+    pub fn current_level(&self) -> Level {
+        self.state.current_level
+    }
+
+    /// Backtrack to a specific level (public for incremental solving).
+    pub fn backtrack(&mut self, db: &mut Database, level: Level) {
+        self.backtrack_to(db, level);
+    }
+
+    /// Solve with optional DRAT proof logging.
+    ///
+    /// Returns `Some(assignment)` if SAT, `None` if UNSAT.
+    pub fn solve_with_proof(
+        &mut self,
+        db: &mut Database,
+        proof: Option<&mut ProofWriter>,
+    ) -> SolveResult {
+        let start = Instant::now();
+        let (sat, stats) = self.solve_core(db, proof);
+        eprintln!(
+            "c stats: {:.3}s decisions={} conflicts={} restarts={}",
+            start.elapsed().as_secs_f64(),
+            stats.decisions,
+            stats.conflicts,
+            stats.restarts
+        );
+        if sat {
+            let assignment = self.get_assignment();
+            self.backtrack_to(db, Level::TOP);
+            Some(assignment)
+        } else {
+            None
+        }
+    }
+
+    /// Core solve loop. Returns (is_sat, stats). Does NOT backtrack on SAT.
+    fn solve_core(
         &mut self,
         db: &mut Database,
         mut proof: Option<&mut ProofWriter>,
-    ) -> (SolveResult, SolveStats) {
+    ) -> (bool, SolveStats) {
         let mut stats = SolveStats::default();
 
         // Check for empty clause (immediate UNSAT)
         if self.state.has_empty_clause {
-            return (None, stats);
+            return (false, stats);
         }
 
         let start = Instant::now();
@@ -95,16 +138,7 @@ impl Solver {
                         }
                         None => {
                             // All variables assigned, no conflict = SAT
-                            // Collect assignment before backtracking
-                            let assignment: HashMap<Var, bool> = self
-                                .outputs
-                                .assigned
-                                .get()
-                                .iter()
-                                .map(|&lit| (lit.var(), lit.is_positive()))
-                                .collect();
-                            self.backtrack_to(db, Level::TOP);
-                            return (Some(assignment), stats);
+                            return (true, stats);
                         }
                     }
                 }
@@ -143,7 +177,7 @@ impl Solver {
                         if let Some(ref mut p) = proof {
                             let _ = p.flush();
                         }
-                        return (None, stats);
+                        return (false, stats);
                     }
 
                     // Check if we should restart

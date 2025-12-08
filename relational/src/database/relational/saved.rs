@@ -7,6 +7,7 @@ use std::rc::Rc;
 use contiguous_data::{Diff, Multiset};
 
 use crate::database::commit_id::CommitId;
+use crate::database::relational::op::DynOp;
 
 use super::graph::{GraphBuilder, NodeId};
 use super::op::Op;
@@ -35,7 +36,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> SavedState<T, R> {
         }
         self.last_update_commit_id = current;
 
-        self.upstream.dump_to_consumers(&self.consumer_queues);
+        Op::dump_to_consumers(&mut self.upstream, &self.consumer_queues);
     }
 }
 
@@ -43,7 +44,7 @@ impl<T: Clone + Eq + Hash, R: Op<T>> SavedState<T, R> {
 ///
 /// Call `.get()` to obtain a relation that can be used in the dataflow graph.
 /// Each call to `.get()` returns a new consumer of the saved data.
-pub struct SavedRelation<T, R: Op<T>> {
+pub struct SavedRelation<T, R: Op<T> = Box<dyn DynOp<T>>> {
     state: Rc<RefCell<SavedState<T, R>>>,
 }
 

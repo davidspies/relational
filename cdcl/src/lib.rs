@@ -24,5 +24,7 @@ pub mod proof;
 mod tests;
 
 pub use cnf::Cnf;
+pub use relational::database::SavedRelation;
+pub use solve::SolveStats;
 pub use solver::Solver;
-pub use types::{Lit, Var};
+pub use types::{Level, Lit, Var};

@@ -1,7 +1,9 @@
 //! CDCL SAT Solver structure and methods.
 
 use contiguous_data::{HashMap, L2Multiset};
-use relational::database::{Database, InputHandle, Output, PersistentInputHandle, SavedOutput};
+use relational::database::{
+    Database, InputHandle, Output, PersistentInputHandle, SavedOutput, SavedRelation,
+};
 
 use super::clause_deletion::ClauseDeletion;
 use super::conflicts_sink::ConflictsSink;
@@ -15,8 +17,8 @@ type LearnedClausesOutput = Output<(ClauseId, Lit), L2Multiset<ClauseId, Lit>>;
 
 /// Input handles for the solver.
 pub(super) struct Inputs {
-    /// Original clauses: (clause_id, literal)
-    pub(crate) clauses: InputHandle<(ClauseId, Lit)>,
+    /// Original clauses: (clause_id, literal) - persistent to survive backtracking
+    pub(crate) clauses: PersistentInputHandle<(ClauseId, Lit)>,
     /// Learned clauses (persistent - survive backtracking)
     pub(crate) learned: PersistentInputHandle<(ClauseId, Lit)>,
     /// Decision levels - we insert the current level here
@@ -31,6 +33,8 @@ pub(super) struct Inputs {
 pub(super) struct Outputs {
     /// Assigned literals (derived from feedback variable).
     pub(crate) assigned: SavedOutput<Lit>,
+    /// Saved relation for assigned literals - use `.get()` to get a relation for external use.
+    pub(crate) assigned_saved: SavedRelation<Lit>,
     /// Learned clause literals for conflict analysis: (literal, level).
     pub(crate) new_clause: Output<(Lit, Level)>,
     /// Clause IDs used during conflict analysis (for activity bumping).
@@ -185,5 +189,11 @@ impl Solver {
             }
             db.commit();
         }
+    }
+
+    /// Get a reference to the saved assigned relation.
+    /// Use `.get()` on the returned SavedRelation to get a Relation for external use.
+    pub fn assigned_saved(&self) -> &SavedRelation<Lit> {
+        &self.outputs.assigned_saved
     }
 }

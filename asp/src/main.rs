@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         program.max_atom
     );
 
-    let solver = AspSolver::new(program);
+    let mut solver = AspSolver::new(program);
     let answer_sets = solver.solve();
 
     if answer_sets.is_empty() {

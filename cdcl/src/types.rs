@@ -87,7 +87,7 @@ pub struct Level(u32);
 
 impl Level {
     /// The top level (level 0) where unit clauses propagate.
-    pub(crate) const TOP: Level = Level(0);
+    pub const TOP: Level = Level(0);
 
     /// Create a new level.
     #[cfg(test)]

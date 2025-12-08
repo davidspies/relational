@@ -4,11 +4,12 @@
 //! - Bottom solver: finds candidate models using bottom clauses
 //! - Top solver: checks if a strictly smaller model exists using top clauses
 //! - External relation: bottom's assignments feed into top as external input
+//! - Both solvers share ONE database and retain learned clauses
 
-use cdcl::{Lit, Var};
+use cdcl::{Level, Lit, Var};
 use contiguous_data::HashSet;
 use relational::create_persistent_input;
-use relational::database::DatabaseBuilder;
+use relational::database::{Database, DatabaseBuilder};
 
 use crate::encoding::{Clause, EncodedProgram, encode_program, generate_loop_constraint};
 use crate::types::{Atom, Program};
@@ -16,53 +17,106 @@ use crate::types::{Atom, Program};
 /// An answer set (stable model).
 pub type AnswerSet = HashSet<Atom>;
 
-/// ASP Solver using two-solver architecture.
+/// ASP Solver using two-solver architecture with persistent state.
 pub struct AspSolver {
     program: Program,
     encoded: EncodedProgram,
+    db: Database,
+    bottom_solver: cdcl::Solver,
+    top_solver: cdcl::Solver,
+    next_bottom_clause_id: u32,
 }
 
 impl AspSolver {
     /// Create a new ASP solver for the given program.
     pub fn new(program: Program) -> Self {
         let encoded = encode_program(&program);
-        AspSolver { program, encoded }
+
+        let mut db_builder = DatabaseBuilder::new();
+
+        // Create empty external for bottom solver (no external assignments)
+        create_persistent_input!(db_builder, _bottom_external_inp, bottom_external, Lit);
+
+        // Variables for bottom solver: bottom atoms + active rules
+        let num_bottom_vars = encoded.layout.num_atoms + encoded.layout.num_rules;
+        let bottom_vars: HashSet<Var> = (1..=num_bottom_vars).map(Var::new).collect();
+        let bottom_solver = cdcl::Solver::new(&mut db_builder, &bottom_vars, bottom_external);
+
+        // Top solver uses bottom's assigned literals as external input
+        let top_external = bottom_solver.assigned_saved().get();
+
+        // Variables for top solver: all variables
+        let top_vars: HashSet<Var> = (1..=encoded.layout.total_vars())
+            .map(Var::new)
+            .collect();
+        let top_solver = cdcl::Solver::new(&mut db_builder, &top_vars, top_external);
+
+        let mut db = db_builder.build();
+        let mut bottom_solver = bottom_solver;
+        let mut top_solver = top_solver;
+
+        // Add bottom clauses
+        for (i, clause) in encoded.bottom_clauses.iter().enumerate() {
+            bottom_solver.add_clause(&mut db, i as u32, clause);
+        }
+        let next_bottom_clause_id = encoded.bottom_clauses.len() as u32;
+
+        // Add top clauses
+        for (i, clause) in encoded.top_clauses.iter().enumerate() {
+            top_solver.add_clause(&mut db, i as u32, clause);
+        }
+
+        AspSolver {
+            program,
+            encoded,
+            db,
+            bottom_solver,
+            top_solver,
+            next_bottom_clause_id,
+        }
     }
 
     /// Find all stable models of the program.
-    pub fn solve(&self) -> Vec<AnswerSet> {
+    pub fn solve(&mut self) -> Vec<AnswerSet> {
         let mut answer_sets = Vec::new();
-        let mut loop_constraints: Vec<Clause> = Vec::new();
 
         loop {
-            // Step 1: Solve bottom clauses to get a candidate
-            let candidate = match self.solve_bottom(&loop_constraints) {
-                Some(c) => c,
-                None => break, // No more candidates
-            };
+            // Step 1: Solve bottom to find a candidate (keep the decision stack)
+            if !self.bottom_solver.solve_and_stay(&mut self.db) {
+                break; // No more candidates - UNSAT
+            }
 
             // Step 2: Check if top solver finds a strictly smaller model
-            match self.check_minimality(&candidate) {
+            // (bottom's assignments are visible to top via external relation)
+            match self.check_minimality() {
                 MinimalityResult::IsMinimal => {
                     // Found a stable model!
-                    let answer_set = self.extract_answer_set(&candidate);
+                    let answer_set = self.extract_answer_set();
                     answer_sets.push(answer_set);
 
-                    // Add blocking clause to prevent finding same bottom model again
-                    let blocking = self.blocking_clause(&candidate);
-                    loop_constraints.push(blocking);
+                    // Add blocking clause to prevent finding same model again
+                    let blocking = self.blocking_clause();
+                    self.add_bottom_clause(&blocking);
+
+                    // Backtrack to try again
+                    self.bottom_solver.backtrack(&mut self.db, Level::TOP);
                 }
                 MinimalityResult::SmallerExists { difference } => {
-                    // Not stable - add loop constraint and try again
+                    // Not stable - add loop constraint
                     let loop_clause =
                         generate_loop_constraint(&difference, &self.program, &self.encoded.layout);
+
                     if loop_clause.is_empty() {
-                        // No supporting rules - this shouldn't happen with well-formed programs
-                        // Block this candidate and continue
-                        let blocking = self.blocking_clause(&candidate);
-                        loop_constraints.push(blocking);
+                        // No supporting rules - block this candidate
+                        let blocking = self.blocking_clause();
+                        self.add_bottom_clause(&blocking);
+                        self.bottom_solver.backtrack(&mut self.db, Level::TOP);
                     } else {
-                        loop_constraints.push(loop_clause);
+                        // Add loop constraint and backtrack to appropriate level
+                        self.add_bottom_clause(&loop_clause);
+                        // For now, restart from scratch
+                        // TODO: smart backtracking based on loop constraint level
+                        self.bottom_solver.backtrack(&mut self.db, Level::TOP);
                     }
                 }
             }
@@ -71,82 +125,30 @@ impl AspSolver {
         answer_sets
     }
 
-    /// Solve the bottom program to find a candidate model.
-    fn solve_bottom(
-        &self,
-        loop_constraints: &[Clause],
-    ) -> Option<contiguous_data::HashMap<Var, bool>> {
-        let mut db_builder = DatabaseBuilder::new();
-        create_persistent_input!(db_builder, _external_inp, external, Lit);
-
-        // Variables: bottom + active only (top and diminished are not in bottom solver)
-        let num_bottom_vars = self.encoded.layout.num_atoms + self.encoded.layout.num_rules;
-        let vars: HashSet<Var> = (1..=num_bottom_vars).map(Var::new).collect();
-        let mut solver = cdcl::Solver::new(&mut db_builder, &vars, external);
-
-        let mut db = db_builder.build();
-
-        // Add bottom clauses
-        for (i, clause) in self.encoded.bottom_clauses.iter().enumerate() {
-            solver.add_clause(&mut db, i as u32, clause);
-        }
-
-        // Add loop constraints from previous iterations
-        let base_id = self.encoded.bottom_clauses.len() as u32;
-        for (i, clause) in loop_constraints.iter().enumerate() {
-            solver.add_clause(&mut db, base_id + i as u32, clause);
-        }
-
-        solver.solve(&mut db)
+    /// Add a clause to the bottom solver.
+    fn add_bottom_clause(&mut self, clause: &Clause) {
+        self.bottom_solver
+            .add_clause(&mut self.db, self.next_bottom_clause_id, clause);
+        self.next_bottom_clause_id += 1;
     }
 
-    /// Check if the candidate is minimal (no strictly smaller model exists).
-    fn check_minimality(
-        &self,
-        candidate: &contiguous_data::HashMap<Var, bool>,
-    ) -> MinimalityResult {
-        let mut db_builder = DatabaseBuilder::new();
+    /// Check if the current bottom assignment is minimal.
+    fn check_minimality(&mut self) -> MinimalityResult {
+        // Top solver sees bottom's assignments via external relation
+        // Try to find a strictly smaller model
+        if self.top_solver.solve_and_stay(&mut self.db) {
+            // Found a smaller model - extract the difference
+            let bottom_assignment = self.bottom_solver.get_assignment();
+            let top_assignment = self.top_solver.get_assignment();
+            let difference = self.extract_difference(&bottom_assignment, &top_assignment);
 
-        // Create external input for the bottom assignments
-        create_persistent_input!(db_builder, external_inp, external, Lit);
+            // Backtrack top solver
+            self.top_solver.backtrack(&mut self.db, Level::TOP);
 
-        // All variables: bottom + active + top + diminished
-        let vars: HashSet<Var> = (1..=self.encoded.layout.total_vars())
-            .map(Var::new)
-            .collect();
-        let mut solver = cdcl::Solver::new(&mut db_builder, &vars, external);
-
-        let mut db = db_builder.build();
-
-        // Feed bottom assignments as unit clauses to constrain the top solver
-        let base_id = self.encoded.top_clauses.len() as u32;
-        for (i, (&var, &value)) in candidate.iter().enumerate() {
-            let lit = if value { Lit::pos(var) } else { Lit::neg(var) };
-            solver.add_clause(&mut db, base_id + i as u32, &[lit]);
-        }
-        // Also insert into external for the relational database
-        for (&var, &value) in candidate.iter() {
-            let lit = if value { Lit::pos(var) } else { Lit::neg(var) };
-            external_inp.insert(lit);
-        }
-        db.commit();
-
-        // Add top clauses
-        for (i, clause) in self.encoded.top_clauses.iter().enumerate() {
-            solver.add_clause(&mut db, i as u32, clause);
-        }
-
-        // Try to find a smaller model
-        match solver.solve(&mut db) {
-            Some(assignment) => {
-                // Found a smaller model - extract the difference
-                let difference = self.extract_difference(candidate, &assignment);
-                MinimalityResult::SmallerExists { difference }
-            }
-            None => {
-                // No smaller model - candidate is minimal
-                MinimalityResult::IsMinimal
-            }
+            MinimalityResult::SmallerExists { difference }
+        } else {
+            // No smaller model - candidate is minimal
+            MinimalityResult::IsMinimal
         }
     }
 
@@ -177,16 +179,16 @@ impl AspSolver {
     }
 
     /// Create a blocking clause to prevent finding the same bottom model again.
-    fn blocking_clause(&self, candidate: &contiguous_data::HashMap<Var, bool>) -> Clause {
+    fn blocking_clause(&self) -> Clause {
         let layout = &self.encoded.layout;
+        let assignment = self.bottom_solver.get_assignment();
         let mut clause = Vec::new();
 
         // Include every atom: negate true atoms, keep false atoms positive
-        // This blocks exactly this assignment (at least one must differ)
         for atom_id in 2..=layout.num_atoms {
             let atom = Atom(atom_id);
             let var = layout.bottom(atom);
-            if let Some(&value) = candidate.get(&var) {
+            if let Some(&value) = assignment.get(&var) {
                 if value {
                     clause.push(Lit::neg(var));
                 } else {
@@ -198,15 +200,16 @@ impl AspSolver {
         clause
     }
 
-    /// Extract the answer set from a candidate (atoms that are true in the model).
-    fn extract_answer_set(&self, candidate: &contiguous_data::HashMap<Var, bool>) -> AnswerSet {
+    /// Extract the answer set from the current bottom assignment.
+    fn extract_answer_set(&self) -> AnswerSet {
         let layout = &self.encoded.layout;
+        let assignment = self.bottom_solver.get_assignment();
         let mut answer_set = HashSet::default();
 
         for atom_id in 2..=layout.num_atoms {
             let atom = Atom(atom_id);
             let var = layout.bottom(atom);
-            if let Some(&value) = candidate.get(&var) {
+            if let Some(&value) = assignment.get(&var) {
                 if value && self.is_shown_atom(atom) {
                     answer_set.insert(atom);
                 }
@@ -250,7 +253,7 @@ mod tests {
     /// Helper to solve an ASP program and return sorted answer set names.
     fn solve_asp(input: &str) -> Vec<Vec<String>> {
         let program = parse_smodels(input).unwrap();
-        let solver = AspSolver::new(program);
+        let mut solver = AspSolver::new(program);
         let mut results: Vec<Vec<String>> = solver
             .solve()
             .into_iter()
