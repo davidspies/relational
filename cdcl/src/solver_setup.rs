@@ -6,6 +6,8 @@ use std::ops::Not;
 use ahash::RandomState;
 use contiguous_data::HashSet;
 use either::Either;
+use frunk::Generic;
+use frunk_utils::{impl_add, impl_mul_scalar, impl_sub};
 use relational::database::{CommitId, DatabaseBuilder, Op, Relation, SavedRelation};
 use relational::{
     assign, assign_and_interrupt, assign_partition, assign_saved, create_input,
@@ -150,17 +152,17 @@ impl Solver {
         assign!(
             false_weight_per_term = all_terms
                 .get()
-                .map(|(cid, lit, weight)| (lit, (cid, weight)))
+                .map(|(cid, lit, weight)| (lit, (cid, CountAndVal::new(weight))))
                 .semijoin(assigned.get().map(Not::not)) // falsified = negation is assigned
                 .snd()
                 .consolidate()
-                .group_sum()
         );
         // Add zero entries for constraints without falsified literals
-        assign!(false_weight_zero = all_constraint_ids.map(|cid| (cid, 0i64)));
+        // We need to use CountAndVal because `group_sum` doesn't emit zeros
+        assign!(false_weight_zero = all_constraint_ids.map(|cid| (cid, CountAndVal::new(0))));
         assign!(
             false_weight_per_constraint =
-                false_weight_per_term.concat(false_weight_zero).group_max()
+                false_weight_per_term.concat(false_weight_zero).group_sum()
         );
 
         // Remaining terms (unassigned): (cid, lit, weight)
@@ -178,7 +180,7 @@ impl Solver {
                 .join(total_weight_per_constraint)
                 .join(false_weight_per_constraint)
                 .map(|(cid, ((bound, total_w), false_w))| {
-                    let slack = total_w - false_w - bound;
+                    let slack = total_w - false_w.val - bound;
                     (cid, slack)
                 })
         );
@@ -376,3 +378,19 @@ fn conflict_analysis(
     assign!(new_clause = below_level.concat(level_retained));
     (analysis_constraint_ids, new_clause)
 }
+
+#[derive(Generic, Clone, PartialEq, Eq, Hash, Default)]
+struct CountAndVal {
+    count: i64,
+    val: i64,
+}
+
+impl CountAndVal {
+    fn new(val: i64) -> Self {
+        Self { count: 1, val }
+    }
+}
+
+impl_add!(CountAndVal, CountAndVal => CountAndVal);
+impl_sub!(CountAndVal, CountAndVal => CountAndVal);
+impl_mul_scalar!(CountAndVal, i64 => CountAndVal);
