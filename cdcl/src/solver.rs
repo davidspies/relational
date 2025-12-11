@@ -8,19 +8,22 @@ use relational::database::{
 use super::clause_deletion::ClauseDeletion;
 use super::conflicts_sink::ConflictsSink;
 use super::restart::RestartStrategy;
-use super::types::{ClauseId, Conflict, Level, Lit, Var};
+use super::types::{ConstraintId, Conflict, Level, Lit, Var, Weight};
 use super::vsids::Vsids;
 
 /// Type aliases for outputs with custom sinks.
 type ConflictsOutput = Output<Conflict, ConflictsSink>;
-type LearnedClausesOutput = Output<(ClauseId, Lit), L2Multiset<ClauseId, Lit>>;
 
 /// Input handles for the solver.
 pub(super) struct Inputs {
-    /// Original clauses: (clause_id, literal) - persistent to survive backtracking
-    pub(crate) clauses: PersistentInputHandle<(ClauseId, Lit)>,
-    /// Learned clauses (persistent - survive backtracking)
-    pub(crate) learned: PersistentInputHandle<(ClauseId, Lit)>,
+    /// PB constraint terms: (constraint_id, literal, weight) - persistent
+    pub(crate) terms: PersistentInputHandle<(ConstraintId, Lit, Weight)>,
+    /// PB constraint bounds: (constraint_id, bound) - persistent
+    pub(crate) bounds: PersistentInputHandle<(ConstraintId, Weight)>,
+    /// Learned constraint terms (persistent - survive backtracking)
+    pub(crate) learned_terms: PersistentInputHandle<(ConstraintId, Lit, Weight)>,
+    /// Learned constraint bounds (persistent - survive backtracking)
+    pub(crate) learned_bounds: PersistentInputHandle<(ConstraintId, Weight)>,
     /// Decision levels - we insert the current level here
     pub(crate) levels: InputHandle<Level>,
     /// Decision assignments (lit, level) - inserted directly for decisions
@@ -37,16 +40,18 @@ pub(super) struct Outputs {
     pub(crate) assigned_saved: SavedRelation<Lit>,
     /// Assignment levels: (literal, level) for each assigned literal.
     pub(crate) assignment_levels: SavedOutput<(Lit, Level), L2Multiset<Lit, Level>>,
-    /// Learned clause literals for conflict analysis: (literal, level).
+    /// Learned constraint literals for conflict analysis: (literal, level).
     pub(crate) new_clause: Output<(Lit, Level)>,
-    /// Clause IDs used during conflict analysis (for activity bumping).
-    pub(crate) analysis_clause_ids: Output<ClauseId>,
+    /// Constraint IDs used during conflict analysis (for activity bumping).
+    pub(crate) analysis_constraint_ids: Output<ConstraintId>,
     /// Conflicts detected during propagation.
     pub(crate) conflicts: ConflictsOutput,
     /// Assignments at the current decision level for VSIDS phase saving.
     pub(crate) this_level_assignments: Output<Lit>,
-    /// Learned clauses indexed by clause_id for deletion.
-    pub(crate) learned_clauses: LearnedClausesOutput,
+    /// Learned constraint terms for deletion.
+    pub(crate) learned_terms: Output<(ConstraintId, Lit, Weight)>,
+    /// Learned constraint bounds for deletion.
+    pub(crate) learned_bounds: Output<(ConstraintId, Weight)>,
 }
 
 /// Solver state that doesn't involve the dataflow.
@@ -73,17 +78,44 @@ pub struct Solver {
 }
 
 impl Solver {
-    /// Add an original clause to the solver.
+    /// Add a clause (PB constraint with all weights=1, bound=1) to the solver.
     pub fn add_clause(&mut self, db: &mut Database, id: u32, literals: &[Lit]) {
         // Empty clause means immediate UNSAT
         if literals.is_empty() {
             self.state.has_empty_clause = true;
             return;
         }
-        let clause_id = ClauseId::Original(id);
+        let cid = ConstraintId::Original(id);
         for &lit in literals {
-            self.inputs.clauses.insert((clause_id, lit));
+            self.inputs.terms.insert((cid, lit, 1));
         }
+        self.inputs.bounds.insert((cid, 1));
+        db.commit();
+    }
+
+    /// Add a PB constraint: sum of (lit * weight) >= bound.
+    pub fn add_pb_constraint(
+        &mut self,
+        db: &mut Database,
+        id: u32,
+        terms: &[(Lit, Weight)],
+        bound: Weight,
+    ) {
+        let cid = ConstraintId::Original(id);
+        // Check if trivially unsat (bound > sum of all weights)
+        let total_weight: Weight = terms.iter().map(|(_, w)| w).sum();
+        if bound > total_weight {
+            self.state.has_empty_clause = true;
+            return;
+        }
+        // Check if trivially sat (bound == 0)
+        if bound == 0 {
+            return; // Always satisfied, don't add
+        }
+        for &(lit, weight) in terms {
+            self.inputs.terms.insert((cid, lit, weight));
+        }
+        self.inputs.bounds.insert((cid, bound));
         db.commit();
     }
 
@@ -156,13 +188,15 @@ impl Solver {
     }
 
     /// Learn a clause with level information for LBD tracking.
-    pub(crate) fn learn_clause(&mut self, db: &mut Database, clause: &[(Lit, Level)]) -> ClauseId {
+    /// Learned clauses are PB constraints with all weights=1, bound=1.
+    pub(crate) fn learn_clause(&mut self, db: &mut Database, clause: &[(Lit, Level)]) -> ConstraintId {
         let id = self.state.next_learned_id;
         self.state.next_learned_id += 1;
-        let cid = ClauseId::Learned(id);
+        let cid = ConstraintId::Learned(id);
         for &(lit, _) in clause {
-            self.inputs.learned.insert((cid, lit));
+            self.inputs.learned_terms.insert((cid, lit, 1));
         }
+        self.inputs.learned_bounds.insert((cid, 1));
         if clause.is_empty() {
             self.state.has_empty_clause = true;
         } else {
@@ -179,15 +213,29 @@ impl Solver {
         self.state.restart.on_restart();
     }
 
-    /// Perform clause deletion if the learned clause database is too large.
+    /// Perform clause deletion if the learned constraint database is too large.
     pub(crate) fn maybe_delete_clauses(&mut self, db: &mut Database) {
         if self.state.clause_deletion.should_delete() {
             let to_delete = self.state.clause_deletion.select_for_deletion();
-            let learned_clauses = self.outputs.learned_clauses.get();
-            for clause_id in to_delete {
-                for &lit in learned_clauses.iter_values(&clause_id) {
-                    self.inputs.learned.delete((clause_id, lit));
-                }
+            let to_delete_set: std::collections::HashSet<_> = to_delete.iter().copied().collect();
+
+            // Collect terms and bounds to delete
+            let terms_to_delete: Vec<_> = self.outputs.learned_terms.get()
+                .iter()
+                .filter(|(cid, _, _)| to_delete_set.contains(cid))
+                .copied()
+                .collect();
+            let bounds_to_delete: Vec<_> = self.outputs.learned_bounds.get()
+                .iter()
+                .filter(|(cid, _)| to_delete_set.contains(cid))
+                .copied()
+                .collect();
+
+            for (cid, lit, weight) in terms_to_delete {
+                self.inputs.learned_terms.delete((cid, lit, weight));
+            }
+            for (cid, bound) in bounds_to_delete {
+                self.inputs.learned_bounds.delete((cid, bound));
             }
             db.commit();
         }

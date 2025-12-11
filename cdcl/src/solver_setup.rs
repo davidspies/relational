@@ -26,7 +26,7 @@ use crate::types::Conflict;
 use crate::vsids::Vsids;
 
 use super::solver::{Inputs, Outputs, Solver, State};
-use super::types::{Cause, ClauseId, Level, Lit, Var};
+use super::types::{Cause, ConstraintId, Level, Lit, Var, Weight};
 
 impl Solver {
     /// Create a new solver using the provided database builder.
@@ -44,8 +44,13 @@ impl Solver {
         external: Relation<impl Op<Lit> + 'static>,
     ) -> Self {
         // === Input Relations ===
-        create_persistent_input!(db, clauses_inp, clauses, (ClauseId, Lit));
-        create_persistent_input!(db, learned_inp, learned, (ClauseId, Lit));
+        // PB constraint terms: (constraint_id, literal, weight)
+        create_persistent_input!(db, terms_inp, terms, (ConstraintId, Lit, Weight));
+        // PB constraint bounds: (constraint_id, bound)
+        create_persistent_input!(db, bounds_inp, bounds, (ConstraintId, Weight));
+        // Learned constraints
+        create_persistent_input!(db, learned_terms_inp, learned_terms, (ConstraintId, Lit, Weight));
+        create_persistent_input!(db, learned_bounds_inp, learned_bounds, (ConstraintId, Weight));
         create_input!(db, mut levels_inp, levels, Level);
         create_input!(
             db,
@@ -59,11 +64,12 @@ impl Solver {
         assign_saved!(current_level = levels.global_max());
 
         // Save learned for output and concat
-        let learned = learned.save();
+        let learned_terms = learned_terms.save();
+        let learned_bounds = learned_bounds.save();
 
-        // All clauses (original + learned)
-        assign_saved!(all_clauses = clauses.concat(learned.get()));
-        assign!(all_clause_ids = all_clauses.get().fst().consolidate().distinct());
+        // All constraint terms and bounds (original + learned)
+        assign_saved!(all_terms = terms.concat(learned_terms.get()));
+        assign_saved!(all_bounds = bounds.concat(learned_bounds.get()));
 
         // === Feedback-based Unit Propagation ===
         // prep accumulates ((Lit, Level, Cause), CommitId) via feedback_with_id
@@ -98,25 +104,27 @@ impl Solver {
         );
 
         assign_partition!(
-            (analysis_start_clause_id, analysis_start_var) =
+            (analysis_start_constraint_id, analysis_start_var) =
                 analysis.map(|conflict| match conflict {
-                    Conflict::EmptyClause(clause_id) => Either::Left(clause_id),
+                    Conflict::UnsatConstraint(cid) => Either::Left(cid),
                     Conflict::DirectConflict(var) => Either::Right(var),
                 })
         );
-        let analysis_start_clause_id = analysis_start_clause_id.save();
+        let analysis_start_constraint_id = analysis_start_constraint_id.save();
         assign!(
             analysis_start_var_lits = analysis_start_var.flat_map(|v| [Lit::pos(v), Lit::neg(v)])
         );
+        // Get literals from conflicting constraint (negated, since they were falsified)
         assign!(
-            analysis_start_clause_lits = all_clauses
+            analysis_start_constraint_lits = all_terms
                 .get()
-                .semijoin(analysis_start_clause_id.get())
+                .map(|(cid, lit, _weight)| (cid, lit))
+                .semijoin(analysis_start_constraint_id.get())
                 .snd()
                 .map(Not::not)
         );
         assign_saved!(
-            analysis_start_lits = analysis_start_var_lits.concat(analysis_start_clause_lits)
+            analysis_start_lits = analysis_start_var_lits.concat(analysis_start_constraint_lits)
         );
         assign!(
             analysis_level = causes
@@ -142,29 +150,30 @@ impl Solver {
         let on_level = on_level.save();
         assign!(min_lit_on_level = on_level.get().swap().global_min().snd().consolidate());
         assign_partition!(
-            (analysis_clause_ids, level_retained) = on_level
+            (analysis_constraint_ids, level_retained) = on_level
                 .get()
                 .cartesian_product(min_lit_on_level)
                 .filter_map(|((lit, (level, _, _, cause)), min_lit)| {
                     let retain = match level {
-                        Level::TOP => cause == Cause::NoClause,
+                        Level::TOP => cause == Cause::NoConstraint,
                         _ => lit == min_lit,
                     };
                     if retain {
                         Some(Either::Right((!lit, level)))
                     } else {
                         match cause {
-                            Cause::NoClause => None,
-                            Cause::FromClause(clause_id) => Some(Either::Left(clause_id)),
+                            Cause::NoConstraint => None,
+                            Cause::FromConstraint(cid) => Some(Either::Left(cid)),
                         }
                     }
                 })
         );
-        let analysis_clause_ids = analysis_clause_ids.save();
+        let analysis_constraint_ids = analysis_constraint_ids.save();
         assign!(
-            analysis_new_lits = all_clauses
+            analysis_new_lits = all_terms
                 .get()
-                .semijoin(analysis_clause_ids.get())
+                .map(|(cid, lit, _weight)| (cid, lit))
+                .semijoin(analysis_constraint_ids.get())
                 .snd()
                 .consolidate()
                 .map(Not::not)
@@ -187,80 +196,124 @@ impl Solver {
                 .map(|lit| lit.var())
         );
 
-        assign_saved!(
-            satisfied_clause_ids = all_clauses
+        // === PB Constraint Propagation ===
+        // For each constraint, compute:
+        // - true_weight: sum of weights of satisfied literals
+        // - remaining: (constraint_id, lit, weight) for unassigned literals
+        // - slack = true_weight + remaining_weight - bound
+        // Conflict if slack < 0
+        // Propagate literal if slack < weight of that literal
+
+        // Get all constraint IDs from bounds
+        assign_saved!(all_constraint_ids = all_bounds.get().fst().consolidate());
+
+        // Weight contributed by satisfied literals: (cid, weight)
+        assign!(
+            true_weight_per_term = all_terms
                 .get()
-                .swap()
+                .map(|(cid, lit, weight)| (lit, (cid, weight)))
                 .semijoin(assigned.get())
                 .snd()
-                .consolidate()
         );
-
-        // A clause is satisfiable if it is satisfied or has at least one literal unassigned
+        // Sum true weights per constraint (only for constraints with satisfied literals)
+        assign_saved!(true_weight_nonzero = true_weight_per_term.group_sum());
+        // Add zero entries for constraints without satisfied literals
+        assign!(cids_with_true_weight = true_weight_nonzero.get().fst().consolidate());
         assign!(
-            remaining_clauses = all_clauses
+            true_weight_zero = all_constraint_ids
                 .get()
-                .antijoin(satisfied_clause_ids.get())
-                .consolidate()
+                .set_minus(cids_with_true_weight)
+                .map(|cid| (cid, 0i64))
         );
+        assign!(true_weight_per_constraint = true_weight_nonzero.get().concat(true_weight_zero));
 
+        // Remaining terms (unassigned and not falsified): (cid, lit, weight)
         assign_saved!(
-            reduced_clauses = remaining_clauses
-                .swap()
-                .antijoin(assigned.get().map(Not::not))
-                .swap()
-        );
-
-        assign!(
-            satisfiable_clause_ids = satisfied_clause_ids
+            remaining_terms = all_terms
                 .get()
-                .concat(reduced_clauses.get().fst())
-                .consolidate()
+                .map(|(cid, lit, weight)| (lit, (cid, weight)))
+                .antijoin(assigned.get())                          // not satisfied
+                .antijoin(assigned.get().map(Not::not))            // not falsified
+                .map(|(lit, (cid, weight))| (cid, lit, weight))
         );
 
-        // Empty clauses: Clauses which are no longer satisfiable
-        // Interrupt early when an empty clause is detected
+        // Sum remaining weights per constraint (only for constraints with remaining literals)
+        assign_saved!(remaining_weight_nonzero = remaining_terms
+            .get()
+            .map(|(cid, _lit, weight)| (cid, weight))
+            .group_sum()
+        );
+        // Add zero entries for constraints without remaining literals
+        assign!(cids_with_remaining_weight = remaining_weight_nonzero.get().fst().consolidate());
+        assign!(
+            remaining_weight_zero = all_constraint_ids
+                .get()
+                .set_minus(cids_with_remaining_weight)
+                .map(|cid| (cid, 0i64))
+        );
+        assign!(
+            remaining_weight_per_constraint =
+                remaining_weight_nonzero.get().concat(remaining_weight_zero)
+        );
+
+        // Compute slack per constraint: true_weight + remaining_weight - bound
+        // slack = (cid, slack_value) where slack_value can be negative
+        assign_saved!(
+            slack_per_constraint = all_bounds
+                .get()
+                .join(true_weight_per_constraint)
+                .join(remaining_weight_per_constraint)
+                .map(|(cid, ((bound, true_w), remaining_w))| {
+                    let slack = true_w + remaining_w - bound;
+                    (cid, slack)
+                })
+        );
+
+        // Conflict: constraints where slack < 0
         assign_and_interrupt!(
             db,
-            empty_clauses = all_clause_ids.set_minus(satisfiable_clause_ids)
-        );
-
-        assign!(
-            unit_clause_ids = reduced_clauses
+            unsat_constraints = slack_per_constraint
                 .get()
-                .fst()
-                .counts()
-                .filter_map(|(cid, count)| (count == 1).then_some(cid))
+                .filter_map(|(cid, slack)| (slack < 0).then_some(cid))
         );
 
-        // Unit clauses: exactly one remaining literal (must be assigned true)
-        assign!(units = reduced_clauses.get().semijoin(unit_clause_ids));
+        // Propagation: literals that must be true because slack < weight
+        // (cid, lit) where lit must be assigned true
+        assign!(
+            propagate_lits = remaining_terms
+                .get()
+                .map(|(cid, lit, weight)| (cid, (lit, weight)))
+                .join(slack_per_constraint.get())
+                .filter_map(|(cid, ((lit, weight), slack))| {
+                    (slack < weight).then_some((cid, lit))
+                })
+        );
 
         // === Set up the feedback loop ===
-        assign!(unit_with_level = units.cartesian_product(current_level.get()));
+        assign!(propagate_with_level = propagate_lits.cartesian_product(current_level.get()));
         assign!(
-            unit_lit_level_cause =
-                unit_with_level.map(|((cid, lit), level)| (lit, level, Cause::FromClause(cid)))
+            propagate_lit_level_cause = propagate_with_level
+                .map(|((cid, lit), level)| (lit, level, Cause::FromConstraint(cid)))
         );
 
-        // External literals are assigned at Level::TOP with no clause cause
-        assign!(external_assignments = external.map(|lit| (lit, Level::TOP, Cause::NoClause)));
+        // External literals are assigned at Level::TOP with no constraint cause
+        assign!(external_assignments = external.map(|lit| (lit, Level::TOP, Cause::NoConstraint)));
 
         assign!(
             all_new_assignments = decision_assignments
-                .map(|(lit, level)| (lit, level, Cause::NoClause))
-                .concat(unit_lit_level_cause)
+                .map(|(lit, level)| (lit, level, Cause::NoConstraint))
+                .concat(propagate_lit_level_cause)
                 .concat(external_assignments)
         );
 
         db.feedback_with_id(prep_var, all_new_assignments);
 
         // Combine both conflict types: direct conflicts (x and !x assigned)
-        // and empty clauses (all literals in a clause falsified)
+        // and unsatisfied constraints
         assign!(
             conflicts = conflict_vars
                 .map(Conflict::DirectConflict)
-                .concat(empty_clauses.map(Conflict::EmptyClause))
+                .concat(unsat_constraints.map(Conflict::UnsatConstraint))
         );
 
         assign!(
@@ -274,8 +327,10 @@ impl Solver {
         Solver {
             inputs: Inputs {
                 analysis: analysis_inp,
-                clauses: clauses_inp,
-                learned: learned_inp,
+                terms: terms_inp,
+                bounds: bounds_inp,
+                learned_terms: learned_terms_inp,
+                learned_bounds: learned_bounds_inp,
                 levels: levels_inp,
                 decision_assignments: decision_assignments_inp,
             },
@@ -284,14 +339,15 @@ impl Solver {
                 assigned_saved: assigned,
                 assignment_levels: assignments.get().output_with_sink(),
                 new_clause: new_clause.boxed().output_with_sink(),
-                analysis_clause_ids: analysis_clause_ids
+                analysis_constraint_ids: analysis_constraint_ids
                     .get()
-                    .concat(analysis_start_clause_id.get())
+                    .concat(analysis_start_constraint_id.get())
                     .boxed()
                     .output(),
                 conflicts: conflicts.boxed().output_with_sink(),
                 this_level_assignments: this_level_assignments.boxed().output(),
-                learned_clauses: learned.get().boxed().output_with_sink(),
+                learned_terms: learned_terms.get().boxed().output(),
+                learned_bounds: learned_bounds.get().boxed().output(),
             },
             state: State {
                 current_level: Level::TOP,
