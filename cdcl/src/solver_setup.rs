@@ -153,12 +153,13 @@ impl Solver {
                 .map(|(cid, lit, weight)| (lit, (cid, weight)))
                 .semijoin(assigned.get().map(Not::not)) // falsified = negation is assigned
                 .snd()
+                .group_sum()
         );
         // Add zero entries for constraints without falsified literals
         assign!(false_weight_zero = all_constraint_ids.map(|cid| (cid, 0i64)));
         assign!(
             false_weight_per_constraint =
-                false_weight_per_term.concat(false_weight_zero).group_sum()
+                false_weight_per_term.concat(false_weight_zero).group_max()
         );
 
         // Remaining terms (unassigned): (cid, lit, weight)
