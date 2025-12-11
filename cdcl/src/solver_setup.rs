@@ -64,6 +64,7 @@ impl Solver {
 
         // All clauses (original + learned)
         assign_saved!(all_clauses = clauses.concat(learned.get()));
+        assign!(all_clause_ids = all_clauses.get().fst().consolidate().distinct());
 
         // === Feedback-based Unit Propagation ===
         // prep accumulates ((Lit, Level, Cause), CommitId) via feedback_with_id
@@ -207,39 +208,40 @@ impl Solver {
             (ClauseId, Lit)
         );
 
-        assign_saved!(
-            grouped_watched_literals_satisfiable = hashed_clause_literals
-                .antijoin(removed_assignments)
-                .map(|((cid, lit), hash)| (cid, (hash, lit)))
-                .group_min_n::<_, _, 2>()
-        );
-
-        assign_saved!(
-            grouped_watched_literals = grouped_watched_literals_satisfiable
-                .get()
-                .antijoin(satisfied_clause_ids)
-        );
-
-        assign_saved!(
-            watched_literals = grouped_watched_literals
-                .get()
-                .flat_map(|(cid, arr)| arr.into_iter().map(move |(_, lit)| (cid, lit)))
-        );
-
-        // A clause is satisfiable if it is satisfied or has at least one watched literal unassigned
         assign!(
-            satisfiable_clause_ids = grouped_watched_literals_satisfiable
-                .get()
-                .fst()
-                .consolidate()
+            grouped_watched_literals_satisfiable = all_clause_ids
+                .map(|cid| (cid, WatchedEntry::ClauseMarker))
+                .concat(
+                    hashed_clause_literals
+                        .antijoin(removed_assignments)
+                        .map(|((cid, lit), hash)| (cid, WatchedEntry::WatchedLit(hash, lit)))
+                )
+                .group_min_n::<_, _, 3>()
         );
 
-        assign!(all_clause_ids = all_clauses.get().fst().consolidate());
+        assign_saved!(
+            grouped_watched_literals =
+                grouped_watched_literals_satisfiable.antijoin(satisfied_clause_ids)
+        );
+
         // Empty clauses: Clauses which are no longer satisfiable
         // Interrupt early when an empty clause is detected
         assign_and_interrupt!(
             db,
-            empty_clauses = all_clause_ids.set_minus(satisfiable_clause_ids)
+            empty_clauses = grouped_watched_literals
+                .get()
+                .filter_map(|(cid, lits)| (lits.len() == 1).then_some(cid))
+        );
+
+        assign_saved!(
+            watched_literals = grouped_watched_literals.get().flat_map(|(cid, arr)| arr
+                .into_iter()
+                .filter_map(move |entry| {
+                    match entry {
+                        WatchedEntry::ClauseMarker => None,
+                        WatchedEntry::WatchedLit(_, lit) => Some((cid, lit)),
+                    }
+                }))
         );
 
         // === Compute Units ===
@@ -262,7 +264,8 @@ impl Solver {
         assign!(
             units = grouped_watched_literals.get().filter_map(|(cid, arr)| {
                 let mut iter = arr.into_iter();
-                let (_hash, lit) = iter.next().unwrap();
+                assert!(iter.next().unwrap() == WatchedEntry::ClauseMarker);
+                let lit = iter.next()?.get_watched_lit();
                 iter.next().is_none().then_some((cid, lit))
             })
         );
@@ -332,6 +335,22 @@ impl Solver {
                 vsids: Vsids::new(vars),
                 has_empty_clause: false,
             },
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum WatchedEntry {
+    ClauseMarker,
+    WatchedLit(u64, Lit),
+}
+
+impl WatchedEntry {
+    #[track_caller]
+    fn get_watched_lit(self) -> Lit {
+        match self {
+            WatchedEntry::ClauseMarker => panic!("Called get_watched_lit on ClauseMarker"),
+            WatchedEntry::WatchedLit(_, lit) => lit,
         }
     }
 }
