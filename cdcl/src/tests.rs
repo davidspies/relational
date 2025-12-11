@@ -4,7 +4,7 @@ use contiguous_data::HashSet;
 use relational::create_persistent_input;
 use relational::database::DatabaseBuilder;
 
-use super::types::{Lit, Var};
+use super::types::{Lit, Var, Weight};
 use super::*;
 
 // Helper to create literals from raw i32
@@ -172,4 +172,98 @@ fn test_external_variable_unsat() {
         "x1 must be true when x2 is false"
     );
     assert_eq!(assignment2.get(&Var::new(2)), Some(&false));
+}
+
+#[test]
+fn test_pb_multi_propagation() {
+    // PB constraint: a + b + c >= 2 (at least 2 of 3 must be true)
+    // If we falsify a, then both b AND c must be true simultaneously
+    let mut db_builder = DatabaseBuilder::new();
+    create_persistent_input!(db_builder, _external_inp, external, Lit);
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2, 3]), external);
+    let mut db = db_builder.build();
+
+    // PB constraint: x1 + x2 + x3 >= 2
+    let terms: Vec<(Lit, Weight)> = vec![(lit(1), 1), (lit(2), 1), (lit(3), 1)];
+    solver.add_pb_constraint(&mut db, 0, &terms, 2);
+
+    // Force x1 = false via a unit clause
+    solver.add_clause(&mut db, 1, &[lit(-1)]);
+
+    // Now the PB constraint has slack = 0 + 2 - 2 = 0
+    // Both x2 and x3 should be propagated to true
+    let assignment = solver.solve(&mut db).expect("expected SAT");
+    assert_eq!(
+        assignment.get(&Var::new(1)),
+        Some(&false),
+        "x1 should be false"
+    );
+    assert_eq!(
+        assignment.get(&Var::new(2)),
+        Some(&true),
+        "x2 should be propagated to true"
+    );
+    assert_eq!(
+        assignment.get(&Var::new(3)),
+        Some(&true),
+        "x3 should be propagated to true"
+    );
+}
+
+#[test]
+fn test_pb_sequential_propagation_from_same_constraint() {
+    // C1: 2a + b + c + d >= 3
+    // C2: ¬d (unit clause)
+    // C3: ¬b (unit clause)
+    //
+    // Sequence:
+    // 1. C2 propagates ¬d
+    // 2. C1: slack = 0 + 4 - 3 = 1; for a with weight 2: 1 < 2, propagate a
+    // 3. C3 propagates ¬b
+    // 4. C1: slack = 2 + 1 - 3 = 0; for c with weight 1: 0 < 1, propagate c
+    //
+    // C1 is used twice for propagation!
+    let mut db_builder = DatabaseBuilder::new();
+    create_persistent_input!(db_builder, _external_inp, external, Lit);
+    let mut solver = Solver::new(&mut db_builder, &vars(&[1, 2, 3, 4]), external);
+    let mut db = db_builder.build();
+
+    // C1: 2*a + b + c + d >= 3
+    // Variables: a=1, b=2, c=3, d=4
+    let terms: Vec<(Lit, Weight)> = vec![
+        (lit(1), 2), // a with weight 2
+        (lit(2), 1), // b with weight 1
+        (lit(3), 1), // c with weight 1
+        (lit(4), 1), // d with weight 1
+    ];
+    solver.add_pb_constraint(&mut db, 0, &terms, 3);
+
+    // C2: ¬d (force d = false)
+    solver.add_clause(&mut db, 1, &[lit(-4)]);
+
+    // C3: ¬b (force b = false)
+    solver.add_clause(&mut db, 2, &[lit(-2)]);
+
+    let assignment = solver.solve(&mut db).expect("expected SAT");
+
+    assert_eq!(
+        assignment.get(&Var::new(4)),
+        Some(&false),
+        "d should be false"
+    );
+    assert_eq!(
+        assignment.get(&Var::new(2)),
+        Some(&false),
+        "b should be false"
+    );
+    assert_eq!(
+        assignment.get(&Var::new(1)),
+        Some(&true),
+        "a should be propagated to true by C1 (first use)"
+    );
+    assert_eq!(
+        assignment.get(&Var::new(3)),
+        Some(&true),
+        "c should be propagated to true by C1 (second use)"
+    );
 }
