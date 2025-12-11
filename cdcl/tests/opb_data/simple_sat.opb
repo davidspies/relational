@@ -1,0 +1,5 @@
+* Simple SAT test
+* x1 OR x2, x1 OR NOT x2 => x1 must be true
+* #variable= 2 #constraint= 2
++1 x1 +1 x2 >= 1 ;
++1 x1 +1 ~x2 >= 1 ;

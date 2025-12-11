@@ -267,3 +267,80 @@ fn test_pb_sequential_propagation_from_same_constraint() {
         "c should be propagated to true by C1 (second use)"
     );
 }
+
+// === OPB Parser Tests ===
+
+use super::opb::Opb;
+
+#[test]
+fn test_opb_parse_simple() {
+    let input = r#"
+* comment
+* #variable= 3 #constraint= 2
++1 x1 +1 x2 >= 1 ;
++1 x2 +1 x3 >= 1 ;
+"#;
+    let opb = Opb::parse(input).expect("parse failed");
+    assert_eq!(opb.num_vars(), 3);
+    assert_eq!(opb.num_constraints(), 2);
+}
+
+#[test]
+fn test_opb_parse_negation() {
+    // ~x1 means NOT x1
+    let input = r#"
+* #variable= 2 #constraint= 1
++1 ~x1 +1 x2 >= 1 ;
+"#;
+    let opb = Opb::parse(input).expect("parse failed");
+    assert_eq!(opb.num_constraints(), 1);
+    let (terms, bound) = &opb.constraints[0];
+    assert_eq!(*bound, 1);
+    // First term should be negated x1
+    assert!(!terms[0].0.is_positive());
+    assert_eq!(terms[0].0.var(), Var::new(1));
+}
+
+#[test]
+fn test_opb_solve_sat() {
+    // x1 + x2 >= 1 (at least one true)
+    let input = r#"
+* #variable= 2 #constraint= 1
++1 x1 +1 x2 >= 1 ;
+"#;
+    let opb = Opb::parse(input).expect("parse failed");
+    let result = opb.solve();
+    assert!(result.is_sat());
+}
+
+#[test]
+fn test_opb_solve_unsat() {
+    // x1 >= 1 AND ~x1 >= 1 (impossible)
+    let input = r#"
+* #variable= 1 #constraint= 2
++1 x1 >= 1 ;
++1 ~x1 >= 1 ;
+"#;
+    let opb = Opb::parse(input).expect("parse failed");
+    let result = opb.solve();
+    assert!(result.is_unsat());
+}
+
+#[test]
+fn test_opb_weighted_constraint() {
+    // 2*x1 + x2 + x3 >= 2 with x2=false, x3=false forces x1=true (needs weight 2)
+    let input = r#"
+* #variable= 3 #constraint= 3
++2 x1 +1 x2 +1 x3 >= 2 ;
++1 ~x2 >= 1 ;
++1 ~x3 >= 1 ;
+"#;
+    let opb = Opb::parse(input).expect("parse failed");
+    let result = opb.solve();
+    assert!(result.is_sat());
+    let assignment = result.assignment().unwrap();
+    // x1 must be true to satisfy the weighted constraint
+    assert_eq!(assignment.get(&Var::new(1)), Some(&true));
+    assert_eq!(assignment.get(&Var::new(2)), Some(&false));
+    assert_eq!(assignment.get(&Var::new(3)), Some(&false));
+}

@@ -1,4 +1,4 @@
-//! CDCL SAT Solver - reads DIMACS CNF files.
+//! CDCL SAT/PB Solver - reads DIMACS CNF and OPB files.
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -7,13 +7,13 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use cdcl::proof::ProofWriter;
-use cdcl::{Cnf, Var};
+use cdcl::{Cnf, Opb, Solver, Var};
 use clap::Parser;
 use consume_on_drop::ConsumeOnDrop;
-use contiguous_data::HashMap;
-use relational::database::{Graph, GraphHandle};
+use contiguous_data::{HashMap, HashSet};
+use relational::database::{Database, Graph, GraphHandle};
 
 static SVG_DUMP: Once = Once::new();
 
@@ -40,10 +40,10 @@ fn dump_graph_text(graph: &Graph, path: &Path) -> Result<()> {
 }
 
 #[derive(Parser)]
-#[command(about = "CDCL SAT Solver")]
+#[command(about = "CDCL SAT/PB Solver")]
 struct Args {
-    /// Input CNF file in DIMACS format
-    cnf_file: String,
+    /// Input file (CNF or OPB format, detected by extension)
+    input_file: String,
 
     /// Output SVG file for dataflow graph visualization
     #[arg(long)]
@@ -58,15 +58,26 @@ struct Args {
     proof: Option<PathBuf>,
 }
 
+/// Load a problem file and return solver components.
+fn load_problem(path: &str) -> Result<(Database, Solver, HashSet<Var>)> {
+    if path.ends_with(".opb") {
+        let opb = Opb::from_file(path)?;
+        Ok(opb.into_solver())
+    } else if path.ends_with(".cnf") {
+        let cnf = Cnf::from_file(path)?;
+        Ok(cnf.into_solver())
+    } else {
+        bail!("Unknown file extension. Use .cnf for DIMACS CNF or .opb for OPB format.")
+    }
+}
+
 fn main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
     let args = Args::parse();
 
-    let cnf = Cnf::from_file(&args.cnf_file).unwrap();
-
-    let (mut db, mut solver, _vars) = cnf.into_solver();
+    let (mut db, mut solver, _vars) = load_problem(&args.input_file).unwrap();
 
     let mut proof_writer = args
         .proof
