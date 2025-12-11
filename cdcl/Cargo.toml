@@ -15,6 +15,10 @@ contiguous_data = { path = "../contiguous_data" }
 ctrlc = "*"
 dhat = { version = "*", optional = true }
 either = "*"
+frunk = "*"
+frunk_core = "*"
+frunk_utils = "*"
+frunk_utils_derives = "*"
 priority-queue = "*"
 rand = "*"
 rand_chacha = "*"
