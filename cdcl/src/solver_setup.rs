@@ -153,7 +153,7 @@ impl Solver {
             (analysis_constraint_ids, level_retained) = on_level
                 .get()
                 .cartesian_product(min_lit_on_level)
-                .filter_map(|((lit, (level, _, _, cause)), min_lit)| {
+                .filter_map(|((lit, (level, commit_id, _, cause)), min_lit)| {
                     let retain = match level {
                         Level::TOP => cause == Cause::NoConstraint,
                         _ => lit == min_lit,
@@ -163,21 +163,27 @@ impl Solver {
                     } else {
                         match cause {
                             Cause::NoConstraint => None,
-                            Cause::FromConstraint(cid) => Some(Either::Left(cid)),
+                            // Include the commit_id as the cutoff for filtering
+                            Cause::FromConstraint(cid) => Some(Either::Left((cid, commit_id))),
                         }
                     }
                 })
         );
         let analysis_constraint_ids = analysis_constraint_ids.save();
+        // Get literals from constraints, but only those assigned BEFORE the explained literal
         assign!(
             analysis_new_lits = all_terms
                 .get()
-                .map(|(cid, lit, _weight)| (cid, lit))
-                .semijoin(analysis_constraint_ids.get())
-                .snd()
+                .map(|(cid, lit, _weight)| (cid, !lit))
+                .join(analysis_constraint_ids.get()) // (cid, (neg_lit, explain_commit_id))
+                .snd() // (neg_lit, explain_commit_id)
+                .join(causes.get().map(|(lit, (_, commit_id, _, _))| (lit, commit_id)))
+                // Now: (neg_lit, (explain_commit_id, lit_commit_id))
+                .filter_map(|(neg_lit, (explain_commit_id, lit_commit_id))| {
+                    // Only include if this literal was assigned BEFORE the explained literal
+                    (lit_commit_id < explain_commit_id).then_some(neg_lit)
+                })
                 .consolidate()
-                .map(Not::not)
-                .intersection(assigned.get())
         );
         db.feedback(
             analysis_lits_var,
@@ -341,6 +347,7 @@ impl Solver {
                 new_clause: new_clause.boxed().output_with_sink(),
                 analysis_constraint_ids: analysis_constraint_ids
                     .get()
+                    .fst() // Extract just the ConstraintId from (ConstraintId, CommitId)
                     .concat(analysis_start_constraint_id.get())
                     .boxed()
                     .output(),
