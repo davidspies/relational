@@ -10,6 +10,7 @@ mod clause_deletion;
 mod cnf;
 mod conflict_analysis;
 mod conflicts_sink;
+mod opb;
 mod queries;
 mod restart;
 mod solve;
@@ -24,7 +25,8 @@ pub mod proof;
 mod tests;
 
 pub use cnf::Cnf;
+pub use opb::Opb;
 pub use relational::database::SavedRelation;
 pub use solve::SolveStats;
 pub use solver::Solver;
-pub use types::{Level, Lit, Var};
+pub use types::{Level, Lit, Var, Weight};
