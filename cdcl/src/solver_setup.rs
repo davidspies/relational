@@ -153,6 +153,7 @@ impl Solver {
                 .map(|(cid, lit, weight)| (lit, (cid, weight)))
                 .semijoin(assigned.get().map(Not::not)) // falsified = negation is assigned
                 .snd()
+                .consolidate()
                 .group_sum()
         );
         // Add zero entries for constraints without falsified literals
