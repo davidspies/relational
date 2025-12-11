@@ -111,30 +111,32 @@ impl Level {
     }
 }
 
-/// A clause ID distinguishing original clauses from learned clauses.
+/// Weight in a PB constraint (i64 for compatibility with group_sum).
+pub type Weight = i64;
+
+/// A constraint ID distinguishing original constraints from learned ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum ClauseId {
-    /// An original clause from the input formula.
+pub(crate) enum ConstraintId {
+    /// An original constraint from the input formula.
     Original(u32),
-    /// A learned clause from conflict analysis.
+    /// A learned constraint from conflict analysis.
     Learned(u32),
 }
 
 /// The cause of a literal assignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Cause {
-    /// The literal was assigned without a clause (decision or external).
-    NoClause,
-    /// The literal was propagated from a clause.
-    FromClause(ClauseId),
+    /// The literal was assigned without a constraint (decision or external).
+    NoConstraint,
+    /// The literal was propagated from a constraint.
+    FromConstraint(ConstraintId),
 }
 
 /// A conflict detected during propagation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Conflict {
-    /// A clause has all its literals assigned false.
-    EmptyClause(ClauseId),
+    /// A constraint is violated (slack < 0).
+    UnsatConstraint(ConstraintId),
     /// Both a literal and its negation are assigned.
-    /// The variable is stored (the literal that was assigned both ways).
     DirectConflict(Var),
 }

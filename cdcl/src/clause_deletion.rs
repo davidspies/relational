@@ -1,25 +1,25 @@
-//! Clause deletion strategies for CDCL solver.
+//! Constraint deletion strategies for CDCL solver.
 //!
-//! Implements LBD (Literal Block Distance) based clause management.
-//! LBD is the number of distinct decision levels in a clause - lower is better.
+//! Implements LBD (Literal Block Distance) based constraint management.
+//! LBD is the number of distinct decision levels in a constraint - lower is better.
 
 use contiguous_data::HashMap;
 
-use crate::types::{ClauseId, Level, Lit};
+use crate::types::{ConstraintId, Level, Lit};
 
-/// Metadata tracked for each learned clause.
+/// Metadata tracked for each learned constraint.
 #[derive(Clone, Copy)]
-struct ClauseInfo {
+struct ConstraintInfo {
     /// LBD (Literal Block Distance) - number of distinct decision levels.
     lbd: u32,
-    /// Activity score - bumped when clause is used in conflict analysis.
+    /// Activity score - bumped when constraint is used in conflict analysis.
     activity: f64,
 }
 
-/// Manages learned clause deletion.
+/// Manages learned constraint deletion.
 pub(crate) struct ClauseDeletion {
-    /// Metadata for each learned clause.
-    clause_info: HashMap<ClauseId, ClauseInfo>,
+    /// Metadata for each learned constraint.
+    constraint_info: HashMap<ConstraintId, ConstraintInfo>,
     /// Maximum number of learned clauses before triggering deletion.
     max_clauses: usize,
     /// How much to grow max_clauses after each deletion.
@@ -33,10 +33,10 @@ pub(crate) struct ClauseDeletion {
 }
 
 impl ClauseDeletion {
-    /// Create a new clause deletion manager.
+    /// Create a new constraint deletion manager.
     pub(crate) fn new() -> Self {
         Self {
-            clause_info: HashMap::default(),
+            constraint_info: HashMap::default(),
             max_clauses: 2000,
             growth_factor: 1.1,
             activity_decay: 0.95,
@@ -45,45 +45,45 @@ impl ClauseDeletion {
         }
     }
 
-    /// Register a newly learned clause with its LBD.
-    pub(crate) fn on_learn(&mut self, clause_id: ClauseId, clause: &[(Lit, Level)]) {
+    /// Register a newly learned constraint with its LBD.
+    pub(crate) fn on_learn(&mut self, cid: ConstraintId, clause: &[(Lit, Level)]) {
         let lbd = compute_lbd(clause);
-        self.clause_info.insert(
-            clause_id,
-            ClauseInfo {
+        self.constraint_info.insert(
+            cid,
+            ConstraintInfo {
                 lbd,
                 activity: self.activity_inc,
             },
         );
     }
 
-    /// Bump activity for a clause used during conflict analysis.
-    pub(crate) fn bump_activity(&mut self, clause_id: ClauseId) {
-        if let Some(info) = self.clause_info.get_mut(&clause_id) {
+    /// Bump activity for a constraint used during conflict analysis.
+    pub(crate) fn bump_activity(&mut self, cid: ConstraintId) {
+        if let Some(info) = self.constraint_info.get_mut(&cid) {
             info.activity += self.activity_inc;
         }
     }
 
-    /// Decay all clause activities (call after each conflict).
+    /// Decay all constraint activities (call after each conflict).
     pub(crate) fn decay_activities(&mut self) {
         // Instead of decaying all, just increase the increment.
-        // This is equivalent but avoids iterating all clauses.
+        // This is equivalent but avoids iterating all constraints.
         self.activity_inc /= self.activity_decay;
     }
 
-    /// Check if clause deletion should be triggered.
+    /// Check if constraint deletion should be triggered.
     pub(crate) fn should_delete(&self) -> bool {
-        self.clause_info.len() > self.max_clauses
+        self.constraint_info.len() > self.max_clauses
     }
 
-    /// Select clauses to delete. Returns clause IDs to remove.
+    /// Select constraints to delete. Returns constraint IDs to remove.
     ///
-    /// Protects "glue" clauses (low LBD) and removes half of the rest,
-    /// prioritizing low-activity clauses.
-    pub(crate) fn select_for_deletion(&mut self) -> Vec<ClauseId> {
-        // Collect non-glue clauses
+    /// Protects "glue" constraints (low LBD) and removes half of the rest,
+    /// prioritizing low-activity constraints.
+    pub(crate) fn select_for_deletion(&mut self) -> Vec<ConstraintId> {
+        // Collect non-glue constraints
         let mut candidates: Vec<_> = self
-            .clause_info
+            .constraint_info
             .iter()
             .filter(|(_, info)| info.lbd > self.glue_threshold)
             .map(|(&cid, info)| (cid, info.activity))
@@ -92,7 +92,7 @@ impl ClauseDeletion {
         // Sort by activity (ascending - delete lowest activity first)
         candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
-        // Delete half of non-protected clauses
+        // Delete half of non-protected constraints
         let to_delete = candidates.len() / 2;
         let deleted: Vec<_> = candidates
             .into_iter()
@@ -102,7 +102,7 @@ impl ClauseDeletion {
 
         // Remove from our tracking
         for &cid in &deleted {
-            self.clause_info.remove(&cid);
+            self.constraint_info.remove(&cid);
         }
 
         // Grow the limit for next time
@@ -111,9 +111,9 @@ impl ClauseDeletion {
         deleted
     }
 
-    /// Number of learned clauses currently tracked.
+    /// Number of learned constraints currently tracked.
     pub(crate) fn len(&self) -> usize {
-        self.clause_info.len()
+        self.constraint_info.len()
     }
 }
 
