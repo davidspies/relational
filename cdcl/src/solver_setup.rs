@@ -136,7 +136,7 @@ impl Solver {
         // Propagate literal if slack < weight of that literal
 
         // Get all constraint IDs from bounds
-        assign!(all_constraint_ids = all_bounds.get().fst().consolidate());
+        assign!(all_constraint_ids = all_bounds.get().fst());
 
         // Total weight per constraint (static - only changes when constraints added)
         assign!(
@@ -323,7 +323,7 @@ fn conflict_analysis(
         )
     );
     let on_level = on_level.save();
-    assign!(min_lit_on_level = on_level.get().swap().global_min().snd().consolidate());
+    assign!(min_lit_on_level = on_level.get().swap().global_min().snd());
     assign_partition!(
         (analysis_constraint_ids, level_retained) = on_level
             .get()
@@ -360,7 +360,6 @@ fn conflict_analysis(
                 // Only include if this literal was assigned BEFORE the explained literal
                 (lit_commit_id < explain_commit_id).then_some(neg_lit)
             })
-            .consolidate()
     );
     db.feedback(
         analysis_lits_var,
