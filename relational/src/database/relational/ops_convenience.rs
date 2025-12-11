@@ -94,7 +94,7 @@ impl<R> Relation<R> {
     {
         self.join(right)
             .with_op_type("join_values")
-            .map_h(|(_k, (v1, v2))| (v1, v2))
+            .map_h(|(_k, vs)| vs)
     }
 
     /// Cartesian product - pairs every tuple from left with every tuple from right.
@@ -109,7 +109,7 @@ impl<R> Relation<R> {
         self.map_h(|t| ((), t))
             .join(right.map_h(|t| ((), t)))
             .with_op_type("cartesian_product")
-            .map_h(|((), (t1, t2))| (t1, t2))
+            .map_h(|((), ts)| ts)
     }
 
     /// Semijoin - filter left relation to only tuples that have a matching key in right.
@@ -234,7 +234,7 @@ impl<R> Relation<R> {
         F: Fn(&T) -> bool,
         T: Eq + Hash,
     {
-        self.flat_map(move |t| if pred(&t) { Some(t) } else { None })
+        self.flat_map(move |t| pred(&t).then_some(t))
             .with_op_type("filter")
     }
 
