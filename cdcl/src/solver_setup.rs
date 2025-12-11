@@ -377,7 +377,6 @@ fn conflict_analysis(
                     .get()
                     .map(|(lit, (_, commit_id, _, _))| (lit, commit_id))
             )
-            // Now: (neg_lit, (explain_commit_id, lit_commit_id))
             .filter_map(|(neg_lit, (explain_commit_id, lit_commit_id))| {
                 // Only include if this literal was assigned BEFORE the explained literal
                 (lit_commit_id < explain_commit_id).then_some(neg_lit)
