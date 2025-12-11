@@ -18,7 +18,6 @@ fn seeded_hash<T: Hash>(val: &T, seed: u64) -> u64 {
     build_hasher.hash_one(val)
 }
 
-const WATCH_SEED: u64 = 0x7a3b9c1d4e5f6028;
 const CAUSE_SEED: u64 = 0x1f2e3d4c5b6a7980;
 
 use crate::clause_deletion::ClauseDeletion;
@@ -188,87 +187,54 @@ impl Solver {
                 .map(|lit| lit.var())
         );
 
-        // === Watched Literals ===
-        // For each clause, select 2 literals deterministically using hash-based ordering.
-        // This gives us (clause_id, ArrayVec<(hash, lit), 2>).
-
-        assign!(
-            hashed_clause_literals = all_clauses.get().map(|entry| {
-                let hash = seeded_hash(&entry, WATCH_SEED);
-                (entry, hash)
-            })
+        assign_saved!(
+            satisfied_clause_ids = all_clauses
+                .get()
+                .swap()
+                .semijoin(assigned.get())
+                .snd()
+                .consolidate()
         );
 
-        create_variable!(db, satisfied_clause_ids_var, satisfied_clause_ids, ClauseId);
-
-        create_variable!(
-            db,
-            removed_assignments_var,
-            removed_assignments,
-            (ClauseId, Lit)
-        );
-
+        // A clause is satisfiable if it is satisfied or has at least one literal unassigned
         assign!(
-            grouped_watched_literals_satisfiable = all_clause_ids
-                .map(|cid| (cid, WatchedEntry::ClauseMarker))
-                .concat(
-                    hashed_clause_literals
-                        .antijoin(removed_assignments)
-                        .map(|((cid, lit), hash)| (cid, WatchedEntry::WatchedLit(hash, lit)))
-                )
-                .group_min_n::<_, _, 3>()
+            remaining_clauses = all_clauses
+                .get()
+                .antijoin(satisfied_clause_ids.get())
+                .consolidate()
         );
 
         assign_saved!(
-            grouped_watched_literals =
-                grouped_watched_literals_satisfiable.antijoin(satisfied_clause_ids)
+            reduced_clauses = remaining_clauses
+                .swap()
+                .antijoin(assigned.get().map(Not::not))
+                .swap()
+        );
+
+        assign!(
+            satisfiable_clause_ids = satisfied_clause_ids
+                .get()
+                .concat(reduced_clauses.get().fst())
+                .consolidate()
         );
 
         // Empty clauses: Clauses which are no longer satisfiable
         // Interrupt early when an empty clause is detected
         assign_and_interrupt!(
             db,
-            empty_clauses = grouped_watched_literals
-                .get()
-                .filter_map(|(cid, lits)| (lits.len() == 1).then_some(cid))
+            empty_clauses = all_clause_ids.set_minus(satisfiable_clause_ids)
         );
 
-        assign_saved!(
-            watched_literals = grouped_watched_literals.get().flat_map(|(cid, arr)| arr
-                .into_iter()
-                .filter_map(move |entry| {
-                    match entry {
-                        WatchedEntry::ClauseMarker => None,
-                        WatchedEntry::WatchedLit(_, lit) => Some((cid, lit)),
-                    }
-                }))
-        );
-
-        // === Compute Units ===
-        // Clauses with at least one true literal are satisfied
-        db.feedback(
-            satisfied_clause_ids_var,
-            watched_literals.get().swap().semijoin(assigned.get()).snd(),
-        );
-        // False literals must be removed to make room for new watched literals
-        db.feedback(
-            removed_assignments_var,
-            watched_literals
+        assign!(
+            unit_clause_ids = reduced_clauses
                 .get()
-                .swap()
-                .semijoin(assigned.get().map(Not::not))
-                .swap(),
+                .fst()
+                .counts()
+                .filter_map(|(cid, count)| (count == 1).then_some(cid))
         );
 
         // Unit clauses: exactly one remaining literal (must be assigned true)
-        assign!(
-            units = grouped_watched_literals.get().filter_map(|(cid, arr)| {
-                let mut iter = arr.into_iter();
-                assert!(iter.next().unwrap() == WatchedEntry::ClauseMarker);
-                let lit = iter.next()?.get_watched_lit();
-                iter.next().is_none().then_some((cid, lit))
-            })
-        );
+        assign!(units = reduced_clauses.get().semijoin(unit_clause_ids));
 
         // === Set up the feedback loop ===
         assign!(unit_with_level = units.cartesian_product(current_level.get()));
@@ -335,22 +301,6 @@ impl Solver {
                 vsids: Vsids::new(vars),
                 has_empty_clause: false,
             },
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum WatchedEntry {
-    ClauseMarker,
-    WatchedLit(u64, Lit),
-}
-
-impl WatchedEntry {
-    #[track_caller]
-    fn get_watched_lit(self) -> Lit {
-        match self {
-            WatchedEntry::ClauseMarker => panic!("Called get_watched_lit on ClauseMarker"),
-            WatchedEntry::WatchedLit(_, lit) => lit,
         }
     }
 }
