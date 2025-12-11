@@ -129,74 +129,54 @@ impl Solver {
 
         // === PB Constraint Propagation ===
         // For each constraint, compute:
-        // - true_weight: sum of weights of satisfied literals
-        // - remaining: (constraint_id, lit, weight) for unassigned literals
-        // - slack = true_weight + remaining_weight - bound
+        // - total_weight: sum of all weights (static, rarely changes)
+        // - false_weight: sum of weights of falsified literals (dynamic)
+        // - slack = total_weight - false_weight - bound
         // Conflict if slack < 0
         // Propagate literal if slack < weight of that literal
 
         // Get all constraint IDs from bounds
-        assign_saved!(all_constraint_ids = all_bounds.get().fst().consolidate());
+        assign!(all_constraint_ids = all_bounds.get().fst().consolidate());
 
-        // Weight contributed by satisfied literals: (cid, weight)
+        // Total weight per constraint (static - only changes when constraints added)
         assign!(
-            true_weight_per_term = all_terms
-                .get()
-                .map(|(cid, lit, weight)| (lit, (cid, weight)))
-                .semijoin(assigned.get())
-                .snd()
-        );
-        // Sum true weights per constraint (only for constraints with satisfied literals)
-        assign_saved!(true_weight_nonzero = true_weight_per_term.group_sum());
-        // Add zero entries for constraints without satisfied literals
-        assign!(cids_with_true_weight = true_weight_nonzero.get().fst().consolidate());
-        assign!(
-            true_weight_zero = all_constraint_ids
-                .get()
-                .set_minus(cids_with_true_weight)
-                .map(|cid| (cid, 0i64))
-        );
-        assign!(true_weight_per_constraint = true_weight_nonzero.get().concat(true_weight_zero));
-
-        // Remaining terms (unassigned and not falsified): (cid, lit, weight)
-        assign_saved!(
-            remaining_terms = all_terms
-                .get()
-                .map(|(cid, lit, weight)| (lit, (cid, weight)))
-                .antijoin(assigned.get()) // not satisfied
-                .antijoin(assigned.get().map(Not::not)) // not falsified
-                .map(|(lit, (cid, weight))| (cid, lit, weight))
-        );
-
-        // Sum remaining weights per constraint (only for constraints with remaining literals)
-        assign_saved!(
-            remaining_weight_nonzero = remaining_terms
+            total_weight_per_constraint = all_terms
                 .get()
                 .map(|(cid, _lit, weight)| (cid, weight))
                 .group_sum()
         );
-        // Add zero entries for constraints without remaining literals
-        assign!(cids_with_remaining_weight = remaining_weight_nonzero.get().fst().consolidate());
+
+        // Weight contributed by falsified literals: (cid, weight)
         assign!(
-            remaining_weight_zero = all_constraint_ids
+            false_weight_per_term = all_terms
                 .get()
-                .set_minus(cids_with_remaining_weight)
-                .map(|cid| (cid, 0i64))
+                .map(|(cid, lit, weight)| (lit, (cid, weight)))
+                .semijoin(assigned.get().map(Not::not)) // falsified = negation is assigned
+                .snd()
         );
+        // Add zero entries for constraints without falsified literals
+        assign!(false_weight_zero = all_constraint_ids.map(|cid| (cid, 0i64)));
         assign!(
-            remaining_weight_per_constraint =
-                remaining_weight_nonzero.get().concat(remaining_weight_zero)
+            false_weight_per_constraint =
+                false_weight_per_term.concat(false_weight_zero).group_sum()
         );
 
-        // Compute slack per constraint: true_weight + remaining_weight - bound
-        // slack = (cid, slack_value) where slack_value can be negative
+        // Remaining terms (unassigned): (cid, lit, weight)
+        assign!(
+            remaining_terms = all_terms
+                .get()
+                .map(|(cid, lit, weight)| (lit, (cid, weight)))
+                .antijoin(assigned.get().concat(assigned.get().map(Not::not)))
+        );
+
+        // Compute slack per constraint: total_weight - false_weight - bound
         assign_saved!(
             slack_per_constraint = all_bounds
                 .get()
-                .join(true_weight_per_constraint)
-                .join(remaining_weight_per_constraint)
-                .map(|(cid, ((bound, true_w), remaining_w))| {
-                    let slack = true_w + remaining_w - bound;
+                .join(total_weight_per_constraint)
+                .join(false_weight_per_constraint)
+                .map(|(cid, ((bound, total_w), false_w))| {
+                    let slack = total_w - false_w - bound;
                     (cid, slack)
                 })
         );
@@ -213,8 +193,7 @@ impl Solver {
         // (cid, lit) where lit must be assigned true
         assign!(
             propagate_lits = remaining_terms
-                .get()
-                .map(|(cid, lit, weight)| (cid, (lit, weight)))
+                .map(|(lit, (cid, weight))| (cid, (lit, weight)))
                 .join(slack_per_constraint.get())
                 .filter_map(|(cid, ((lit, weight), slack))| {
                     (slack < weight).then_some((cid, lit))
