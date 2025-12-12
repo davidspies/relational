@@ -11,6 +11,9 @@ use relational::database::{Database, DatabaseBuilder};
 use crate::types::{Lit, Weight};
 use crate::{Solver, Var};
 
+/// A PB constraint: (terms, bound) where terms are (literal, weight) pairs.
+type Constraint = (Vec<(Lit, Weight)>, Weight);
+
 /// A parsed OPB (Pseudo-Boolean) formula.
 #[derive(Debug, Clone)]
 pub struct Opb {
@@ -141,7 +144,7 @@ impl Opb {
 
 /// Parse a single OPB constraint line.
 /// Format: `+1 x1 -2 ~x2 >= 3 ;` or `+1 x1 -2 ~x2 = 3 ;`
-fn parse_constraint(line: &str) -> Result<Option<(Vec<(Lit, Weight)>, Weight)>> {
+fn parse_constraint(line: &str) -> Result<Option<Constraint>> {
     // Remove trailing semicolon
     let line = line.trim_end_matches(';').trim();
     if line.is_empty() {

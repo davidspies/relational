@@ -30,6 +30,9 @@ use crate::vsids::Vsids;
 use super::solver::{Inputs, Outputs, Solver, State};
 use super::types::{Cause, ConstraintId, Level, Lit, Var, Weight};
 
+/// Assignment info for a literal: (level, commit_id, decision_hash, cause).
+type AssignInfo = (Level, CommitId, u64, Cause);
+
 impl Solver {
     /// Create a new solver using the provided database builder.
     ///
@@ -278,7 +281,7 @@ impl Solver {
 fn conflict_analysis(
     db: &mut DatabaseBuilder,
     all_terms: &SavedRelation<(ConstraintId, Lit, Weight)>,
-    causes: &SavedRelation<(Lit, (Level, CommitId, u64, Cause))>,
+    causes: &SavedRelation<(Lit, AssignInfo)>,
     conflict: Relation<impl Op<Conflict> + 'static>,
 ) -> (
     Relation<impl Op<ConstraintId> + 'static>,
