@@ -124,6 +124,35 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     // Add constraint that false atom (atom 1) is always false in bottom
     bottom_clauses.push(vec![Lit::neg(layout.bottom(Atom(1)))]);
 
+    // Add supportedness constraints for each atom:
+    // ¬a_bottom ∨ r1_active ∨ r2_active ∨ ... (for all rules that derive a)
+    // This ensures every true atom has at least one active supporting rule
+    for atom_id in 2..=layout.num_atoms {
+        let atom = Atom(atom_id);
+        let mut supporting_rules = Vec::new();
+
+        for (rule_idx, rule) in program.rules.iter().enumerate() {
+            let derives_atom = match rule {
+                Rule::Basic(r) => r.head == atom,
+                Rule::Choice(r) => r.heads.contains(&atom),
+                Rule::Disjunctive(_) => false,
+            };
+            if derives_atom {
+                supporting_rules.push(rule_idx as u32);
+            }
+        }
+
+        // Only add constraint if there are supporting rules
+        // (atoms with no rules can never be true, which is handled by propagation)
+        if !supporting_rules.is_empty() {
+            let mut clause = vec![Lit::neg(layout.bottom(atom))];
+            for rule_idx in supporting_rules {
+                clause.push(Lit::pos(layout.active_bottom(rule_idx)));
+            }
+            bottom_clauses.push(clause);
+        }
+    }
+
     // Top solver constraints for each atom using PB constraint:
     // (¬a_top, 1) ∨ (a_bottom, 1) ∨ (¬a_diminished, 1) >= 2
     // This encodes: a_top → (a_bottom ∧ ¬a_diminished)

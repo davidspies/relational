@@ -90,6 +90,11 @@ impl AspSolver {
 
     /// Find all stable models of the program.
     pub fn solve(&mut self) -> Vec<AnswerSet> {
+        self.solve_n(0)
+    }
+
+    /// Find up to `limit` stable models (0 = unlimited).
+    pub fn solve_n(&mut self, limit: usize) -> Vec<AnswerSet> {
         let start = Instant::now();
         let mut answer_sets = Vec::new();
         let mut bottom_calls = 0u64;
@@ -97,6 +102,11 @@ impl AspSolver {
         let mut loop_constraints = 0u64;
 
         loop {
+            // Check if we've found enough models
+            if limit > 0 && answer_sets.len() >= limit {
+                break;
+            }
+
             // Step 1: Solve bottom to find a candidate (keep the decision stack)
             let (sat, _stats) = self.bottom_solver.solve_and_stay(&mut self.db);
             bottom_calls += 1;
