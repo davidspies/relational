@@ -9,7 +9,7 @@
 
 use cdcl::{Lit, Var, Weight};
 
-use crate::types::{Atom, BasicRule, ChoiceRule, Program, Rule};
+use crate::types::{Atom, BasicRule, ChoiceRule, Program, Rule, WeightedLit};
 
 /// A clause is a disjunction of literals.
 pub type Clause = Vec<Lit>;
@@ -154,19 +154,18 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     }
 }
 
-/// Encode a basic rule: h :- b1, b2, b3, not b4
+/// Encode a basic/weight rule: h :- #sum{w1:b1; w2:b2; w3:not b3; ...} >= bound
 ///
-/// Bottom clauses:
-/// - active_r_bottom ∨ ¬b1_bottom ∨ ¬b2_bottom ∨ ¬b3_bottom ∨ b4_bottom
-/// - h_bottom ∨ ¬active_r_bottom
+/// Bottom PB constraint 1 (activation): body satisfied → rule active
+/// (active_r, sum_weights - bound + 1) ∨ (¬b1, w1) ∨ (¬b2, w2) ∨ (b3, w3) ... >= (sum - bound + 1)
 ///
-/// Bottom PB constraint (replaces reverse implication clauses):
-/// - (¬active_r_bottom, N) ∨ (b1_bottom, 1) ∨ ... ∨ (¬b4_bottom, 1) >= N
-///   where N = |body|
+/// Bottom PB constraint 2 (reverse implication): rule active → body satisfied
+/// (¬active_r, bound) ∨ (b1, w1) ∨ (b2, w2) ∨ (¬b3, w3) ... >= bound
 ///
-/// Top clauses:
-/// - ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ¬b3_top
-/// - ¬h_bottom ∨ h_top ∨ ¬active_r_top
+/// Bottom clause: h ∨ ¬active_r
+///
+/// Top clause 1: ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ...
+/// Top clause 2: ¬h_bottom ∨ h_top ∨ ¬active_r_top
 fn encode_basic_rule(
     rule: &BasicRule,
     rule_idx: u32,
@@ -178,29 +177,41 @@ fn encode_basic_rule(
     let active_bottom = layout.active_bottom(rule_idx);
     let active_top = layout.active_top(rule_idx);
 
-    // Bottom clause 1: active_r_bottom ∨ ¬b1_bottom ∨ ... ∨ b4_bottom (negated body)
-    // This says: if body is satisfied, rule must be active
-    let mut activation_clause = vec![Lit::pos(active_bottom)];
-    for &atom in &rule.pos_body {
-        activation_clause.push(Lit::neg(layout.bottom(atom)));
-    }
-    for &atom in &rule.neg_body {
-        activation_clause.push(Lit::pos(layout.bottom(atom)));
-    }
-    bottom_clauses.push(activation_clause);
+    // Calculate sum of weights
+    let sum_weights: Weight = rule.body.iter().map(|lit| lit.weight).sum();
+    let bound = rule.bound;
 
-    // Bottom PB constraint: reverse implication - if active, body must be satisfied
-    // (¬active_r_bottom, N) ∨ (b1_bottom, 1) ∨ ... ∨ (¬b4_bottom, 1) >= N
-    let body_size = (rule.pos_body.len() + rule.neg_body.len()) as Weight;
-    if body_size > 0 {
-        let mut terms = vec![(Lit::neg(active_bottom), body_size)];
-        for &atom in &rule.pos_body {
-            terms.push((Lit::pos(layout.bottom(atom)), 1));
+    // Activation weight: sum - bound + 1
+    // This ensures: if body is satisfied (sum >= bound), then rule must be active
+    let activation_weight = sum_weights - bound + 1;
+
+    if !rule.body.is_empty() {
+        // Bottom PB constraint 1 (activation): body satisfied → rule active
+        // (active_r, activation_weight) ∨ (negated body literals with weights) >= activation_weight
+        let mut activation_terms = vec![(Lit::pos(active_bottom), activation_weight)];
+        for lit in &rule.body {
+            // Negate the literal for the activation constraint
+            let cdcl_lit = if lit.positive {
+                Lit::neg(layout.bottom(lit.atom))
+            } else {
+                Lit::pos(layout.bottom(lit.atom))
+            };
+            activation_terms.push((cdcl_lit, lit.weight));
         }
-        for &atom in &rule.neg_body {
-            terms.push((Lit::neg(layout.bottom(atom)), 1));
+        bottom_pb_constraints.push((activation_terms, activation_weight));
+
+        // Bottom PB constraint 2 (reverse implication): rule active → body satisfied
+        // (¬active_r, bound) ∨ (body literals with weights) >= bound
+        let mut reverse_terms = vec![(Lit::neg(active_bottom), bound)];
+        for lit in &rule.body {
+            let cdcl_lit = if lit.positive {
+                Lit::pos(layout.bottom(lit.atom))
+            } else {
+                Lit::neg(layout.bottom(lit.atom))
+            };
+            reverse_terms.push((cdcl_lit, lit.weight));
         }
-        bottom_pb_constraints.push((terms, body_size));
+        bottom_pb_constraints.push((reverse_terms, bound));
     }
 
     // Bottom clause: h_bottom ∨ ¬active_r_bottom
@@ -218,11 +229,13 @@ fn encode_basic_rule(
 
     // Top clause 1: ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ...
     // If bottom rule is active and positive body satisfied in top, then top rule is active
+    // Note: only positive body atoms are included in the reduct
     let mut reduct_clause = vec![Lit::neg(active_bottom), Lit::pos(active_top)];
-    for &atom in &rule.pos_body {
-        reduct_clause.push(Lit::neg(layout.top(atom)));
+    for lit in &rule.body {
+        if lit.positive {
+            reduct_clause.push(Lit::neg(layout.top(lit.atom)));
+        }
     }
-    // Note: negative body atoms are NOT included in the reduct
     top_clauses.push(reduct_clause);
 
     // Top clause 2: ¬h_bottom ∨ h_top ∨ ¬active_r_top
@@ -239,19 +252,12 @@ fn encode_basic_rule(
     }
 }
 
-/// Encode a choice rule: {h1, h2, ...} :- b1, b2, b3, not b4
+/// Encode a choice rule: {h1, h2, ...} :- #sum{w1:b1; w2:b2; ...} >= bound
 ///
-/// Bottom clauses (same as basic, but WITHOUT head implication):
-/// - active_r_bottom ∨ ¬b1_bottom ∨ ¬b2_bottom ∨ ¬b3_bottom ∨ b4_bottom
-///   (No h_bottom ∨ ¬active_r_bottom - heads are optional in choice rules)
+/// Same as basic rule but WITHOUT head implication clause
+/// (heads are optional in choice rules)
 ///
-/// Bottom PB constraint (replaces reverse implication clauses):
-/// - (¬active_r_bottom, N) ∨ (b1_bottom, 1) ∨ ... ∨ (¬b4_bottom, 1) >= N
-///   where N = |body|
-///
-/// Top clauses:
-/// - ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ¬b3_top
-/// - ¬hi_bottom ∨ hi_top ∨ ¬active_r_top (for each head)
+/// Top clauses include: ¬hi_bottom ∨ hi_top ∨ ¬active_r_top (for each head)
 fn encode_choice_rule(
     rule: &ChoiceRule,
     rule_idx: u32,
@@ -263,36 +269,48 @@ fn encode_choice_rule(
     let active_bottom = layout.active_bottom(rule_idx);
     let active_top = layout.active_top(rule_idx);
 
-    // Bottom clause 1: active_r_bottom ∨ ¬b1_bottom ∨ ... ∨ b4_bottom (negated body)
-    let mut activation_clause = vec![Lit::pos(active_bottom)];
-    for &atom in &rule.pos_body {
-        activation_clause.push(Lit::neg(layout.bottom(atom)));
-    }
-    for &atom in &rule.neg_body {
-        activation_clause.push(Lit::pos(layout.bottom(atom)));
-    }
-    bottom_clauses.push(activation_clause);
+    // Calculate sum of weights
+    let sum_weights: Weight = rule.body.iter().map(|lit| lit.weight).sum();
+    let bound = rule.bound;
 
-    // Bottom PB constraint: reverse implication - if active, body must be satisfied
-    // (¬active_r_bottom, N) ∨ (b1_bottom, 1) ∨ ... ∨ (¬b4_bottom, 1) >= N
-    let body_size = (rule.pos_body.len() + rule.neg_body.len()) as Weight;
-    if body_size > 0 {
-        let mut terms = vec![(Lit::neg(active_bottom), body_size)];
-        for &atom in &rule.pos_body {
-            terms.push((Lit::pos(layout.bottom(atom)), 1));
+    // Activation weight: sum - bound + 1
+    let activation_weight = sum_weights - bound + 1;
+
+    if !rule.body.is_empty() {
+        // Bottom PB constraint 1 (activation): body satisfied → rule active
+        let mut activation_terms = vec![(Lit::pos(active_bottom), activation_weight)];
+        for lit in &rule.body {
+            let cdcl_lit = if lit.positive {
+                Lit::neg(layout.bottom(lit.atom))
+            } else {
+                Lit::pos(layout.bottom(lit.atom))
+            };
+            activation_terms.push((cdcl_lit, lit.weight));
         }
-        for &atom in &rule.neg_body {
-            terms.push((Lit::neg(layout.bottom(atom)), 1));
+        bottom_pb_constraints.push((activation_terms, activation_weight));
+
+        // Bottom PB constraint 2 (reverse implication): rule active → body satisfied
+        let mut reverse_terms = vec![(Lit::neg(active_bottom), bound)];
+        for lit in &rule.body {
+            let cdcl_lit = if lit.positive {
+                Lit::pos(layout.bottom(lit.atom))
+            } else {
+                Lit::neg(layout.bottom(lit.atom))
+            };
+            reverse_terms.push((cdcl_lit, lit.weight));
         }
-        bottom_pb_constraints.push((terms, body_size));
+        bottom_pb_constraints.push((reverse_terms, bound));
     }
 
     // NOTE: No h_bottom ∨ ¬active_r_bottom clause - heads are OPTIONAL in choice rules
 
     // Top clause 1: ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ...
+    // Only positive body atoms are included in the reduct
     let mut reduct_clause = vec![Lit::neg(active_bottom), Lit::pos(active_top)];
-    for &atom in &rule.pos_body {
-        reduct_clause.push(Lit::neg(layout.top(atom)));
+    for lit in &rule.body {
+        if lit.positive {
+            reduct_clause.push(Lit::neg(layout.top(lit.atom)));
+        }
     }
     top_clauses.push(reduct_clause);
 
@@ -329,7 +347,10 @@ pub fn generate_loop_constraint(
                 // Check if head is in difference
                 if diff_set.contains(&r.head) {
                     // Check that no positive body atom is in difference
-                    let body_in_diff = r.pos_body.iter().any(|a| diff_set.contains(a));
+                    let body_in_diff = r
+                        .body
+                        .iter()
+                        .any(|lit| lit.positive && diff_set.contains(&lit.atom));
                     if !body_in_diff {
                         supporting_rules.push(rule_idx as u32);
                     }
@@ -340,7 +361,10 @@ pub fn generate_loop_constraint(
                 let head_in_diff = r.heads.iter().any(|h| diff_set.contains(h));
                 if head_in_diff {
                     // Check that no positive body atom is in difference
-                    let body_in_diff = r.pos_body.iter().any(|a| diff_set.contains(a));
+                    let body_in_diff = r
+                        .body
+                        .iter()
+                        .any(|lit| lit.positive && diff_set.contains(&lit.atom));
                     if !body_in_diff {
                         supporting_rules.push(rule_idx as u32);
                     }
