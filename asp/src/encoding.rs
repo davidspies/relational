@@ -7,12 +7,15 @@
 //! - Atoms 1..N → x_top (var N+2R+1..N+2R+N)
 //! - Atoms 1..N → x_diminished (var N+2R+N+1..N+2R+2N)
 
-use cdcl::{Lit, Var};
+use cdcl::{Lit, Var, Weight};
 
 use crate::types::{Atom, BasicRule, ChoiceRule, Program, Rule};
 
 /// A clause is a disjunction of literals.
 pub type Clause = Vec<Lit>;
+
+/// A PB constraint: sum of (lit * weight) >= bound.
+pub type PBConstraint = (Vec<(Lit, Weight)>, Weight);
 
 /// Variable layout for the ASP encoding.
 #[derive(Debug, Clone)]
@@ -70,25 +73,45 @@ pub struct EncodedProgram {
     pub layout: VarLayout,
     /// Clauses for the bottom solver only.
     pub bottom_clauses: Vec<Clause>,
+    /// PB constraints for the bottom solver.
+    pub bottom_pb_constraints: Vec<PBConstraint>,
     /// Clauses for the top solver (includes constraints on top/diminished vars).
     pub top_clauses: Vec<Clause>,
+    /// PB constraints for the top solver.
+    pub top_pb_constraints: Vec<PBConstraint>,
 }
 
 /// Encode an ASP program for the two-solver architecture.
 pub fn encode_program(program: &Program) -> EncodedProgram {
     let layout = VarLayout::new(program);
     let mut bottom_clauses = Vec::new();
+    let mut bottom_pb_constraints = Vec::new();
     let mut top_clauses = Vec::new();
+    let mut top_pb_constraints = Vec::new();
 
     // Encode each rule
     for (rule_idx, rule) in program.rules.iter().enumerate() {
         let rule_idx = rule_idx as u32;
         match rule {
             Rule::Basic(r) => {
-                encode_basic_rule(r, rule_idx, &layout, &mut bottom_clauses, &mut top_clauses);
+                encode_basic_rule(
+                    r,
+                    rule_idx,
+                    &layout,
+                    &mut bottom_clauses,
+                    &mut bottom_pb_constraints,
+                    &mut top_clauses,
+                );
             }
             Rule::Choice(r) => {
-                encode_choice_rule(r, rule_idx, &layout, &mut bottom_clauses, &mut top_clauses);
+                encode_choice_rule(
+                    r,
+                    rule_idx,
+                    &layout,
+                    &mut bottom_clauses,
+                    &mut bottom_pb_constraints,
+                    &mut top_clauses,
+                );
             }
             Rule::Disjunctive(_) => {
                 panic!("Disjunctive rules not yet supported");
@@ -99,27 +122,17 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     // Add constraint that false atom (atom 1) is always false in bottom
     bottom_clauses.push(vec![Lit::neg(layout.bottom(Atom(1)))]);
 
-    // Top solver constraints for each atom
+    // Top solver constraints for each atom using PB constraint:
+    // (¬a_top, 1) ∨ (a_bottom, 1) ∨ (¬a_diminished, 1) >= 2
+    // This encodes: a_top → (a_bottom ∧ ¬a_diminished)
     for atom_id in 2..=layout.num_atoms {
         let atom = Atom(atom_id);
-
-        // ¬a_top ∨ a_bottom (top implies bottom - subset constraint)
-        top_clauses.push(vec![
-            Lit::neg(layout.top(atom)),
-            Lit::pos(layout.bottom(atom)),
-        ]);
-
-        // ¬a_diminished ∨ ¬a_top (diminished means not in top)
-        top_clauses.push(vec![
-            Lit::neg(layout.diminished(atom)),
-            Lit::neg(layout.top(atom)),
-        ]);
-
-        // ¬a_diminished ∨ a_bottom (diminished means in bottom)
-        top_clauses.push(vec![
-            Lit::neg(layout.diminished(atom)),
-            Lit::pos(layout.bottom(atom)),
-        ]);
+        let terms = vec![
+            (Lit::neg(layout.top(atom)), 1),
+            (Lit::pos(layout.bottom(atom)), 1),
+            (Lit::neg(layout.diminished(atom)), 1),
+        ];
+        top_pb_constraints.push((terms, 2));
     }
 
     // At least one atom must be diminished (strict subset)
@@ -135,7 +148,9 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     EncodedProgram {
         layout,
         bottom_clauses,
+        bottom_pb_constraints,
         top_clauses,
+        top_pb_constraints,
     }
 }
 
@@ -143,9 +158,11 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
 ///
 /// Bottom clauses:
 /// - active_r_bottom ∨ ¬b1_bottom ∨ ¬b2_bottom ∨ ¬b3_bottom ∨ b4_bottom
-/// - ¬active_r_bottom ∨ bi_bottom (for each positive body atom)
-/// - ¬active_r_bottom ∨ ¬ci_bottom (for each negative body atom)
 /// - h_bottom ∨ ¬active_r_bottom
+///
+/// Bottom PB constraint (replaces reverse implication clauses):
+/// - (¬active_r_bottom, N) ∨ (b1_bottom, 1) ∨ ... ∨ (¬b4_bottom, 1) >= N
+///   where N = |body|
 ///
 /// Top clauses:
 /// - ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ¬b3_top
@@ -155,6 +172,7 @@ fn encode_basic_rule(
     rule_idx: u32,
     layout: &VarLayout,
     bottom_clauses: &mut Vec<Clause>,
+    bottom_pb_constraints: &mut Vec<PBConstraint>,
     top_clauses: &mut Vec<Clause>,
 ) {
     let active_bottom = layout.active_bottom(rule_idx);
@@ -171,14 +189,18 @@ fn encode_basic_rule(
     }
     bottom_clauses.push(activation_clause);
 
-    // Bottom clauses 2..N: reverse implication - if active, body must be satisfied
-    // ¬active_r_bottom ∨ bi_bottom for each positive body atom
-    for &atom in &rule.pos_body {
-        bottom_clauses.push(vec![Lit::neg(active_bottom), Lit::pos(layout.bottom(atom))]);
-    }
-    // ¬active_r_bottom ∨ ¬ci_bottom for each negative body atom
-    for &atom in &rule.neg_body {
-        bottom_clauses.push(vec![Lit::neg(active_bottom), Lit::neg(layout.bottom(atom))]);
+    // Bottom PB constraint: reverse implication - if active, body must be satisfied
+    // (¬active_r_bottom, N) ∨ (b1_bottom, 1) ∨ ... ∨ (¬b4_bottom, 1) >= N
+    let body_size = (rule.pos_body.len() + rule.neg_body.len()) as Weight;
+    if body_size > 0 {
+        let mut terms = vec![(Lit::neg(active_bottom), body_size)];
+        for &atom in &rule.pos_body {
+            terms.push((Lit::pos(layout.bottom(atom)), 1));
+        }
+        for &atom in &rule.neg_body {
+            terms.push((Lit::neg(layout.bottom(atom)), 1));
+        }
+        bottom_pb_constraints.push((terms, body_size));
     }
 
     // Bottom clause: h_bottom ∨ ¬active_r_bottom
@@ -221,9 +243,11 @@ fn encode_basic_rule(
 ///
 /// Bottom clauses (same as basic, but WITHOUT head implication):
 /// - active_r_bottom ∨ ¬b1_bottom ∨ ¬b2_bottom ∨ ¬b3_bottom ∨ b4_bottom
-/// - ¬active_r_bottom ∨ bi_bottom (for each positive body atom)
-/// - ¬active_r_bottom ∨ ¬ci_bottom (for each negative body atom)
 ///   (No h_bottom ∨ ¬active_r_bottom - heads are optional in choice rules)
+///
+/// Bottom PB constraint (replaces reverse implication clauses):
+/// - (¬active_r_bottom, N) ∨ (b1_bottom, 1) ∨ ... ∨ (¬b4_bottom, 1) >= N
+///   where N = |body|
 ///
 /// Top clauses:
 /// - ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ¬b3_top
@@ -233,6 +257,7 @@ fn encode_choice_rule(
     rule_idx: u32,
     layout: &VarLayout,
     bottom_clauses: &mut Vec<Clause>,
+    bottom_pb_constraints: &mut Vec<PBConstraint>,
     top_clauses: &mut Vec<Clause>,
 ) {
     let active_bottom = layout.active_bottom(rule_idx);
@@ -248,12 +273,18 @@ fn encode_choice_rule(
     }
     bottom_clauses.push(activation_clause);
 
-    // Bottom clauses: reverse implication - if active, body must be satisfied
-    for &atom in &rule.pos_body {
-        bottom_clauses.push(vec![Lit::neg(active_bottom), Lit::pos(layout.bottom(atom))]);
-    }
-    for &atom in &rule.neg_body {
-        bottom_clauses.push(vec![Lit::neg(active_bottom), Lit::neg(layout.bottom(atom))]);
+    // Bottom PB constraint: reverse implication - if active, body must be satisfied
+    // (¬active_r_bottom, N) ∨ (b1_bottom, 1) ∨ ... ∨ (¬b4_bottom, 1) >= N
+    let body_size = (rule.pos_body.len() + rule.neg_body.len()) as Weight;
+    if body_size > 0 {
+        let mut terms = vec![(Lit::neg(active_bottom), body_size)];
+        for &atom in &rule.pos_body {
+            terms.push((Lit::pos(layout.bottom(atom)), 1));
+        }
+        for &atom in &rule.neg_body {
+            terms.push((Lit::neg(layout.bottom(atom)), 1));
+        }
+        bottom_pb_constraints.push((terms, body_size));
     }
 
     // NOTE: No h_bottom ∨ ¬active_r_bottom clause - heads are OPTIONAL in choice rules
@@ -387,15 +418,18 @@ mod tests {
         };
 
         let mut bottom = Vec::new();
+        let mut bottom_pb = Vec::new();
         let mut top = Vec::new();
-        encode_basic_rule(&rule, 0, &layout, &mut bottom, &mut top);
+        encode_basic_rule(&rule, 0, &layout, &mut bottom, &mut bottom_pb, &mut top);
 
-        // Bottom should have 4 clauses:
+        // Bottom should have 2 clauses:
         // 1. active_bottom_0 ∨ ¬b_bottom ∨ c_bottom
-        // 2. ¬active_bottom_0 ∨ b_bottom
-        // 3. ¬active_bottom_0 ∨ ¬c_bottom
-        // 4. h_bottom ∨ ¬active_bottom_0
-        assert_eq!(bottom.len(), 4);
+        // 2. h_bottom ∨ ¬active_bottom_0
+        assert_eq!(bottom.len(), 2);
+
+        // Bottom should have 1 PB constraint:
+        // (¬active_bottom_0, 2) ∨ (b_bottom, 1) ∨ (¬c_bottom, 1) >= 2
+        assert_eq!(bottom_pb.len(), 1);
 
         // Top should have 2 clauses:
         // 1. ¬active_bottom_0 ∨ active_top_0 ∨ ¬b_top
