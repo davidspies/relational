@@ -66,6 +66,22 @@ impl<R> Relation<R> {
             .map_h(|((), v)| v)
     }
 
+    /// Inner join two relations on matching keys.
+    /// Both inputs must be (K, V) tuples. Output is (K, (V1, V2)) tuples.
+    /// Implemented as left_join followed by filter to remove None values.
+    pub fn join<K, V1, V2, RR>(self, right: Relation<RR>) -> Relation<impl Op<(K, (V1, V2))>>
+    where
+        R: Op<(K, V1)>,
+        K: Clone + Eq + Hash,
+        V1: Clone + Eq + Hash,
+        V2: Clone + Eq + Hash,
+        RR: Op<(K, V2)>,
+    {
+        self.left_join(right)
+            .with_op_type("join")
+            .filter_map_h(|(k, (v1, opt_v2))| opt_v2.map(|v2| (k, (v1, v2))))
+    }
+
     /// Join two relations and discard the key.
     /// Both inputs must be `(K, V)` tuples. Output is `(V1, V2)` pairs.
     pub fn join_values<K, V1, V2, RR>(self, right: Relation<RR>) -> Relation<impl Op<(V1, V2)>>
@@ -109,6 +125,23 @@ impl<R> Relation<R> {
         self.join(right.map_h(|k| (k, ())))
             .with_op_type("semijoin")
             .map_h(|(k, (v, ()))| (k, v))
+    }
+
+    /// Left lookup - for each key in self, look up a value in right.
+    /// Input: self is `K`, right is `(K, V)`.
+    /// Output: `(K, Option<V>)` - Some(V) if key exists in right, None otherwise.
+    /// A key appears in output iff it appears in self (the left/key relation).
+    pub fn left_lookup<K, V, RR>(self, right: Relation<RR>) -> Relation<impl Op<(K, Option<V>)>>
+    where
+        R: Op<K>,
+        K: Clone + Eq + Hash,
+        V: Clone + Eq + Hash,
+        RR: Op<(K, V)>,
+    {
+        self.map_h(|k| (k, ()))
+            .left_join(right)
+            .with_op_type("left_lookup")
+            .map_h(|(k, ((), opt_v))| (k, opt_v))
     }
 
     /// Set difference (self - right).
