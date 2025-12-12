@@ -101,6 +101,7 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
                     &mut bottom_clauses,
                     &mut bottom_pb_constraints,
                     &mut top_clauses,
+                    &mut top_pb_constraints,
                 );
             }
             Rule::Choice(r) => {
@@ -111,6 +112,7 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
                     &mut bottom_clauses,
                     &mut bottom_pb_constraints,
                     &mut top_clauses,
+                    &mut top_pb_constraints,
                 );
             }
             Rule::Disjunctive(_) => {
@@ -164,8 +166,8 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
 ///
 /// Bottom clause: h ∨ ¬active_r
 ///
-/// Top clause 1: ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ...
-/// Top clause 2: ¬h_bottom ∨ h_top ∨ ¬active_r_top
+/// Top PB constraint: (¬active_r_bottom, bound) ∨ (active_r_top, bound) ∨ (¬b1_top, w1) ∨ ... >= bound
+/// Top clause: ¬h_bottom ∨ h_top ∨ ¬active_r_top
 fn encode_basic_rule(
     rule: &BasicRule,
     rule_idx: u32,
@@ -173,6 +175,7 @@ fn encode_basic_rule(
     bottom_clauses: &mut Vec<Clause>,
     bottom_pb_constraints: &mut Vec<PBConstraint>,
     top_clauses: &mut Vec<Clause>,
+    top_pb_constraints: &mut Vec<PBConstraint>,
 ) {
     let active_bottom = layout.active_bottom(rule_idx);
     let active_top = layout.active_top(rule_idx);
@@ -229,16 +232,23 @@ fn encode_basic_rule(
         bottom_clauses.push(vec![Lit::neg(active_bottom)]);
     }
 
-    // Top clause 1: ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ...
-    // If bottom rule is active and positive body satisfied in top, then top rule is active
-    // Note: only positive body atoms are included in the reduct
-    let mut reduct_clause = vec![Lit::neg(active_bottom), Lit::pos(active_top)];
+    // Top PB constraint: same structure as bottom activation constraint
+    // (¬active_r_bottom, activation_weight) ∨ (active_r_top, activation_weight) ∨ (negated body) >= activation_weight
+    // This ensures: if bottom rule is active and body is satisfied in top, then top rule is active
+    let mut reduct_terms = vec![
+        (Lit::neg(active_bottom), activation_weight),
+        (Lit::pos(active_top), activation_weight),
+    ];
     for lit in &rule.body {
-        if lit.positive {
-            reduct_clause.push(Lit::neg(layout.top(lit.atom)));
-        }
+        // Same negation logic as bottom activation constraint
+        let cdcl_lit = if lit.positive {
+            Lit::neg(layout.top(lit.atom))
+        } else {
+            Lit::pos(layout.top(lit.atom))
+        };
+        reduct_terms.push((cdcl_lit, lit.weight));
     }
-    top_clauses.push(reduct_clause);
+    top_pb_constraints.push((reduct_terms, activation_weight));
 
     // Top clause 2: ¬h_bottom ∨ h_top ∨ ¬active_r_top
     // If head is true in bottom and top rule is active, head must be true in top
@@ -267,6 +277,7 @@ fn encode_choice_rule(
     _bottom_clauses: &mut Vec<Clause>,
     bottom_pb_constraints: &mut Vec<PBConstraint>,
     top_clauses: &mut Vec<Clause>,
+    top_pb_constraints: &mut Vec<PBConstraint>,
 ) {
     let active_bottom = layout.active_bottom(rule_idx);
     let active_top = layout.active_top(rule_idx);
@@ -308,17 +319,22 @@ fn encode_choice_rule(
 
     // NOTE: No h_bottom ∨ ¬active_r_bottom clause - heads are OPTIONAL in choice rules
 
-    // Top clause 1: ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ...
-    // Only positive body atoms are included in the reduct
-    let mut reduct_clause = vec![Lit::neg(active_bottom), Lit::pos(active_top)];
+    // Top PB constraint: same structure as bottom activation constraint
+    let mut reduct_terms = vec![
+        (Lit::neg(active_bottom), activation_weight),
+        (Lit::pos(active_top), activation_weight),
+    ];
     for lit in &rule.body {
-        if lit.positive {
-            reduct_clause.push(Lit::neg(layout.top(lit.atom)));
-        }
+        let cdcl_lit = if lit.positive {
+            Lit::neg(layout.top(lit.atom))
+        } else {
+            Lit::pos(layout.top(lit.atom))
+        };
+        reduct_terms.push((cdcl_lit, lit.weight));
     }
-    top_clauses.push(reduct_clause);
+    top_pb_constraints.push((reduct_terms, activation_weight));
 
-    // Top clause 2: ¬hi_bottom ∨ hi_top ∨ ¬active_r_top (for each head)
+    // Top clause: ¬hi_bottom ∨ hi_top ∨ ¬active_r_top (for each head)
     for &head in &rule.heads {
         top_clauses.push(vec![
             Lit::neg(layout.bottom(head)),
@@ -453,7 +469,8 @@ mod tests {
         let mut bottom = Vec::new();
         let mut bottom_pb = Vec::new();
         let mut top = Vec::new();
-        encode_basic_rule(&rule, 0, &layout, &mut bottom, &mut bottom_pb, &mut top);
+        let mut top_pb = Vec::new();
+        encode_basic_rule(&rule, 0, &layout, &mut bottom, &mut bottom_pb, &mut top, &mut top_pb);
 
         // Bottom should have 1 clause:
         // h_bottom ∨ ¬active_bottom_0
@@ -464,9 +481,12 @@ mod tests {
         // 2. Reverse: (¬active, 2) ∨ (b, 1) ∨ (¬c, 1) >= 2
         assert_eq!(bottom_pb.len(), 2);
 
-        // Top should have 2 clauses:
-        // 1. ¬active_bottom_0 ∨ active_top_0 ∨ ¬b_top
-        // 2. ¬h_bottom ∨ h_top ∨ ¬active_top_0
-        assert_eq!(top.len(), 2);
+        // Top should have 1 clause:
+        // ¬h_bottom ∨ h_top ∨ ¬active_top_0
+        assert_eq!(top.len(), 1);
+
+        // Top should have 1 PB constraint:
+        // (¬active_bottom, 1) ∨ (active_top, 1) ∨ (¬b_top, 1) ∨ (c_top, 1) >= 1
+        assert_eq!(top_pb.len(), 1);
     }
 }

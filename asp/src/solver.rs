@@ -6,6 +6,8 @@
 //! - External relation: bottom's assignments feed into top as external input
 //! - Both solvers share ONE database and retain learned clauses
 
+use std::time::Instant;
+
 use cdcl::{Level, Lit, Var};
 use contiguous_data::HashSet;
 use relational::create_persistent_input;
@@ -88,17 +90,23 @@ impl AspSolver {
 
     /// Find all stable models of the program.
     pub fn solve(&mut self) -> Vec<AnswerSet> {
+        let start = Instant::now();
         let mut answer_sets = Vec::new();
+        let mut bottom_calls = 0u64;
+        let mut top_calls = 0u64;
+        let mut loop_constraints = 0u64;
 
         loop {
             // Step 1: Solve bottom to find a candidate (keep the decision stack)
-            if !self.bottom_solver.solve_and_stay(&mut self.db) {
+            let (sat, _stats) = self.bottom_solver.solve_and_stay(&mut self.db);
+            bottom_calls += 1;
+            if !sat {
                 break; // No more candidates - UNSAT
             }
 
             // Step 2: Check if top solver finds a strictly smaller model
             // (bottom's assignments are visible to top via external relation)
-            match self.check_minimality() {
+            match self.check_minimality(&mut top_calls) {
                 MinimalityResult::IsMinimal => {
                     // Found a stable model!
                     let answer_set = self.extract_answer_set();
@@ -123,6 +131,7 @@ impl AspSolver {
                         self.bottom_solver.backtrack(&mut self.db, Level::TOP);
                     } else {
                         // Add loop constraint and backtrack to asserting level
+                        loop_constraints += 1;
                         let backtrack_level = self.compute_backtrack_level(&loop_clause);
                         self.add_bottom_clause(&loop_clause);
                         self.bottom_solver.backtrack(&mut self.db, backtrack_level);
@@ -131,6 +140,14 @@ impl AspSolver {
             }
         }
 
+        eprintln!(
+            "c asp: {:.3}s models={} bottom_calls={} top_calls={} loop_constraints={}",
+            start.elapsed().as_secs_f64(),
+            answer_sets.len(),
+            bottom_calls,
+            top_calls,
+            loop_constraints
+        );
         answer_sets
     }
 
@@ -146,9 +163,10 @@ impl AspSolver {
     fn compute_backtrack_level(&self, clause: &Clause) -> Level {
         // Get all levels for literals in the clause
         // The clause contains literals that should become true, so we check the negation
+        // Note: some literals may be unassigned (e.g., supporting rule variables)
         let mut levels: Vec<Level> = clause
             .iter()
-            .map(|&lit| self.bottom_solver.get_level(!lit).unwrap())
+            .filter_map(|&lit| self.bottom_solver.get_level(!lit))
             .collect();
 
         // Sort descending to find second-highest
@@ -160,10 +178,12 @@ impl AspSolver {
     }
 
     /// Check if the current bottom assignment is minimal.
-    fn check_minimality(&mut self) -> MinimalityResult {
+    fn check_minimality(&mut self, top_calls: &mut u64) -> MinimalityResult {
         // Top solver sees bottom's assignments via external relation
         // Try to find a strictly smaller model
-        if self.top_solver.solve_and_stay(&mut self.db) {
+        let (sat, _stats) = self.top_solver.solve_and_stay(&mut self.db);
+        *top_calls += 1;
+        if sat {
             // Found a smaller model - extract the difference
             let bottom_assignment = self.bottom_solver.get_assignment();
             let top_assignment = self.top_solver.get_assignment();
