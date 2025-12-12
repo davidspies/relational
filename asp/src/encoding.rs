@@ -224,7 +224,7 @@ fn encode_basic_rule(
 /// - ¬active_r_bottom ∨ bi_bottom (for each positive body atom)
 /// - ¬active_r_bottom ∨ ¬ci_bottom (for each negative body atom)
 ///
-/// (No h_bottom ∨ ¬active_r_bottom - heads are optional in choice rules)
+///   (No h_bottom ∨ ¬active_r_bottom - heads are optional in choice rules)
 ///
 /// Top clauses:
 /// - ¬active_r_bottom ∨ active_r_top ∨ ¬b1_top ∨ ¬b2_top ∨ ¬b3_top
