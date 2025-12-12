@@ -8,7 +8,7 @@ use relational::database::{
 use super::clause_deletion::ClauseDeletion;
 use super::conflicts_sink::ConflictsSink;
 use super::restart::RestartStrategy;
-use super::types::{ConstraintId, Conflict, Level, Lit, Var, Weight};
+use super::types::{Conflict, ConstraintId, Level, Lit, Var, Weight};
 use super::vsids::Vsids;
 
 /// Type aliases for outputs with custom sinks.
@@ -189,7 +189,11 @@ impl Solver {
 
     /// Learn a clause with level information for LBD tracking.
     /// Learned clauses are PB constraints with all weights=1, bound=1.
-    pub(crate) fn learn_clause(&mut self, db: &mut Database, clause: &[(Lit, Level)]) -> ConstraintId {
+    pub(crate) fn learn_clause(
+        &mut self,
+        db: &mut Database,
+        clause: &[(Lit, Level)],
+    ) -> ConstraintId {
         let id = self.state.next_learned_id;
         self.state.next_learned_id += 1;
         let cid = ConstraintId::Learned(id);
@@ -220,12 +224,18 @@ impl Solver {
             let to_delete_set: std::collections::HashSet<_> = to_delete.iter().copied().collect();
 
             // Collect terms and bounds to delete
-            let terms_to_delete: Vec<_> = self.outputs.learned_terms.get()
+            let terms_to_delete: Vec<_> = self
+                .outputs
+                .learned_terms
+                .get()
                 .iter()
                 .filter(|(cid, _, _)| to_delete_set.contains(cid))
                 .copied()
                 .collect();
-            let bounds_to_delete: Vec<_> = self.outputs.learned_bounds.get()
+            let bounds_to_delete: Vec<_> = self
+                .outputs
+                .learned_bounds
+                .get()
                 .iter()
                 .filter(|(cid, _)| to_delete_set.contains(cid))
                 .copied()

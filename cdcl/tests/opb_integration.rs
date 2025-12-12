@@ -69,7 +69,11 @@ fn test_weighted_sat() {
             }
         })
         .sum();
-    assert!(weighted_sum >= 4, "Weighted sum must be >= 4, got {}", weighted_sum);
+    assert!(
+        weighted_sum >= 4,
+        "Weighted sum must be >= 4, got {}",
+        weighted_sum
+    );
 }
 
 #[test]

@@ -70,18 +70,19 @@ impl Opb {
             // Skip empty lines and comments
             if line.is_empty() || line.starts_with('*') {
                 // Check for header in comment: * #variable= N #constraint= M
-                if let Some(rest) = line.strip_prefix('*') {
-                    if let Some(pos) = rest.find("#variable=") {
-                        let after = rest[pos + 10..].trim_start();
-                        if let Some(end) = after.find(|c: char| !c.is_ascii_digit()) {
-                            if let Ok(n) = after[..end].parse() {
-                                num_vars = n;
-                            }
-                        } else if let Ok(n) = after.parse() {
+                if let Some(rest) = line.strip_prefix('*')
+                    && let Some(pos) = rest.find("#variable=")
+                {
+                    let after = rest[pos + 10..].trim_start();
+                    if let Some(end) = after.find(|c: char| !c.is_ascii_digit()) {
+                        if let Ok(n) = after[..end].parse() {
                             num_vars = n;
                         }
+                    } else if let Ok(n) = after.parse() {
+                        num_vars = n;
                     }
                 }
+
                 continue;
             }
 
@@ -96,7 +97,10 @@ impl Opb {
             }
         }
 
-        Ok(Opb { num_vars, constraints })
+        Ok(Opb {
+            num_vars,
+            constraints,
+        })
     }
 
     /// Solve the OPB formula.
@@ -155,7 +159,10 @@ fn parse_constraint(line: &str) -> Result<Option<(Vec<(Lit, Weight)>, Weight)>> 
         bail!("no relational operator in constraint: {line}");
     };
 
-    let bound: Weight = rhs.trim().parse().with_context(|| format!("invalid bound: {rhs}"))?;
+    let bound: Weight = rhs
+        .trim()
+        .parse()
+        .with_context(|| format!("invalid bound: {rhs}"))?;
     let terms = parse_terms(lhs)?;
 
     // Convert based on operator
@@ -190,7 +197,9 @@ fn parse_terms(s: &str) -> Result<Vec<(Lit, Weight)>> {
             .with_context(|| format!("invalid coefficient: {coef_str}"))?;
 
         // Parse variable
-        let var_str = tokens.next().with_context(|| "expected variable after coefficient")?;
+        let var_str = tokens
+            .next()
+            .with_context(|| "expected variable after coefficient")?;
         let (negated, var_name) = if let Some(rest) = var_str.strip_prefix('~') {
             (true, rest)
         } else {
@@ -205,7 +214,11 @@ fn parse_terms(s: &str) -> Result<Vec<(Lit, Weight)>> {
             .with_context(|| format!("invalid variable number: {var_name}"))?;
 
         let var = Var::new(var_num);
-        let lit = if negated { Lit::neg(var) } else { Lit::pos(var) };
+        let lit = if negated {
+            Lit::neg(var)
+        } else {
+            Lit::pos(var)
+        };
 
         terms.push((lit, coef));
     }

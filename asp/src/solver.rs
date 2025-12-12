@@ -46,9 +46,7 @@ impl AspSolver {
         let top_external = bottom_solver.assigned_saved().get();
 
         // Variables for top solver: all variables
-        let top_vars: HashSet<Var> = (1..=encoded.layout.total_vars())
-            .map(Var::new)
-            .collect();
+        let top_vars: HashSet<Var> = (1..=encoded.layout.total_vars()).map(Var::new).collect();
         let top_solver = cdcl::Solver::new(&mut db_builder, &top_vars, top_external);
 
         let mut db = db_builder.build();
@@ -226,10 +224,11 @@ impl AspSolver {
         for atom_id in 2..=layout.num_atoms {
             let atom = Atom(atom_id);
             let var = layout.bottom(atom);
-            if let Some(&value) = assignment.get(&var) {
-                if value && self.is_shown_atom(atom) {
-                    answer_set.insert(atom);
-                }
+            if let Some(&value) = assignment.get(&var)
+                && value
+                && self.is_shown_atom(atom)
+            {
+                answer_set.insert(atom);
             }
         }
 
