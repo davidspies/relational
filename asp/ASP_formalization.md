@@ -1,15 +1,15 @@
-Basic rule handling:
+Basic/Cardinality/Weight rule handling:
 
 Initially, the bottom solver is solving the ASP program _nearly_ naively encoded as SAT with no supportedness constraints. It contains the variables x_bottom for each atom x in the ASP program, and active_r_bottom for each rule r in the ASP program. So if you have a rule r which says:
 
-h :- b1, b2, b3, not b4.
+h :- #sum{1 : b1 ; 2 : b2 ; 3 : b3 ; 5 : not b4} >= 6.
 
 We'll encode that as:
 
-active_r_bottom v not b1_bottom v not b2_bottom v not b3_bottom v b4_bottom
+(active_r_bottom, ((1 + 2 + 3 + 5) - 6 + 1)) v (not b1_bottom, 1) v (not b2_bottom, 2) v (not b3_bottom, 3) v (b4_bottom, 5) >= ((1 + 2 + 3 + 5) - 6 + 1)
 
-Also a PB constraint
-(not active_r_bottom, 4) v (b1_bottom, 1) v (b2_bottom, 1) v (b3_bottom, 1) v (not b4_bottom, 1) >= 4
+Also the constraint
+(not active_r_bottom, 6) v (b1_bottom, 1) v (b2_bottom, 2) v (b3_bottom, 3) v (not b4_bottom, 5) >= 6
 
 h_bottom v not active_r_bottom
 

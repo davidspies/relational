@@ -1,5 +1,7 @@
 //! ASP types for atoms, rules, and programs.
 
+pub use cdcl::Weight;
+
 /// An atom ID (non-zero positive integer in smodels).
 /// Atom 1 is reserved for "false" (contradiction).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -50,28 +52,60 @@ impl Lit {
     }
 }
 
-/// A basic rule: head :- body
+/// A weighted literal: atom with a weight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WeightedLit {
+    pub atom: Atom,
+    pub positive: bool,
+    pub weight: Weight,
+}
+
+impl WeightedLit {
+    pub fn pos(atom: Atom, weight: Weight) -> Self {
+        Self {
+            atom,
+            positive: true,
+            weight,
+        }
+    }
+
+    pub fn neg(atom: Atom, weight: Weight) -> Self {
+        Self {
+            atom,
+            positive: false,
+            weight,
+        }
+    }
+}
+
+/// A basic/weight rule: head :- body
+/// For basic rules, all weights are 1 and bound = body_size.
+/// For cardinality rules, all weights are 1.
+/// For weight rules, weights can vary.
 #[derive(Debug, Clone)]
 pub struct BasicRule {
     pub head: Atom,
-    pub pos_body: Vec<Atom>,
-    pub neg_body: Vec<Atom>,
+    pub body: Vec<WeightedLit>,
+    /// The bound/threshold for the body to be satisfied.
+    pub bound: Weight,
 }
 
 /// A choice rule: {heads} :- body
 #[derive(Debug, Clone)]
 pub struct ChoiceRule {
     pub heads: Vec<Atom>,
-    pub pos_body: Vec<Atom>,
-    pub neg_body: Vec<Atom>,
+    pub body: Vec<WeightedLit>,
+    /// The bound/threshold for the body to be satisfied.
+    pub bound: Weight,
 }
 
 /// A disjunctive rule: head1 | head2 | ... :- body
 #[derive(Debug, Clone)]
 pub struct DisjunctiveRule {
     pub heads: Vec<Atom>,
-    pub pos_body: Vec<Atom>,
-    pub neg_body: Vec<Atom>,
+    pub body: Vec<WeightedLit>,
+    /// The bound/threshold for the body to be satisfied.
+    pub bound: Weight,
 }
 
 /// A rule in the program.

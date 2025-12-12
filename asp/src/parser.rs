@@ -1,6 +1,6 @@
 //! Parser for smodels/lparse format.
 
-use crate::types::{Atom, BasicRule, ChoiceRule, DisjunctiveRule, Program, Rule};
+use crate::types::{Atom, BasicRule, ChoiceRule, DisjunctiveRule, Program, Rule, WeightedLit};
 
 /// Parse a program in smodels format.
 pub fn parse_smodels(input: &str) -> Result<Program, String> {
@@ -43,11 +43,17 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
                 // Basic rule: 1 head body_count neg_count body_lits...
                 let rule = parse_basic_rule(&parts)?;
                 max_atom = max_atom.max(rule.head.0);
-                for &atom in &rule.pos_body {
-                    max_atom = max_atom.max(atom.0);
+                for lit in &rule.body {
+                    max_atom = max_atom.max(lit.atom.0);
                 }
-                for &atom in &rule.neg_body {
-                    max_atom = max_atom.max(atom.0);
+                program.rules.push(Rule::Basic(rule));
+            }
+            2 => {
+                // Cardinality rule: 2 head body_count neg_count bound body_lits...
+                let rule = parse_cardinality_rule(&parts)?;
+                max_atom = max_atom.max(rule.head.0);
+                for lit in &rule.body {
+                    max_atom = max_atom.max(lit.atom.0);
                 }
                 program.rules.push(Rule::Basic(rule));
             }
@@ -57,13 +63,19 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
                 for &atom in &rule.heads {
                     max_atom = max_atom.max(atom.0);
                 }
-                for &atom in &rule.pos_body {
-                    max_atom = max_atom.max(atom.0);
-                }
-                for &atom in &rule.neg_body {
-                    max_atom = max_atom.max(atom.0);
+                for lit in &rule.body {
+                    max_atom = max_atom.max(lit.atom.0);
                 }
                 program.rules.push(Rule::Choice(rule));
+            }
+            5 => {
+                // Weight rule: 5 head bound body_count neg_count lits... weights...
+                let rule = parse_weight_rule(&parts)?;
+                max_atom = max_atom.max(rule.head.0);
+                for lit in &rule.body {
+                    max_atom = max_atom.max(lit.atom.0);
+                }
+                program.rules.push(Rule::Basic(rule));
             }
             8 => {
                 // Disjunctive rule: 8 head_count heads... body_count neg_count body_lits...
@@ -71,11 +83,8 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
                 for &atom in &rule.heads {
                     max_atom = max_atom.max(atom.0);
                 }
-                for &atom in &rule.pos_body {
-                    max_atom = max_atom.max(atom.0);
-                }
-                for &atom in &rule.neg_body {
-                    max_atom = max_atom.max(atom.0);
+                for lit in &rule.body {
+                    max_atom = max_atom.max(lit.atom.0);
                 }
                 program.rules.push(Rule::Disjunctive(rule));
             }
@@ -138,8 +147,7 @@ fn parse_basic_rule(parts: &[&str]) -> Result<BasicRule, String> {
         ));
     }
 
-    let mut neg_body = Vec::with_capacity(neg_count);
-    let mut pos_body = Vec::with_capacity(body_count - neg_count);
+    let mut body = Vec::with_capacity(body_count);
 
     for (i, &part) in parts[4..4 + body_count].iter().enumerate() {
         let atom = Atom(
@@ -147,17 +155,108 @@ fn parse_basic_rule(parts: &[&str]) -> Result<BasicRule, String> {
                 .map_err(|e| format!("Invalid body literal: {e}"))?,
         );
         if i < neg_count {
-            neg_body.push(atom);
+            body.push(WeightedLit::neg(atom, 1));
         } else {
-            pos_body.push(atom);
+            body.push(WeightedLit::pos(atom, 1));
         }
     }
 
+    // For basic rules, bound = body_count (all must be satisfied)
     Ok(BasicRule {
         head,
-        pos_body,
-        neg_body,
+        body,
+        bound: body_count as i64,
     })
+}
+
+fn parse_cardinality_rule(parts: &[&str]) -> Result<BasicRule, String> {
+    // Format: 2 head body_count neg_count bound body_lits...
+    if parts.len() < 5 {
+        return Err("Cardinality rule too short".to_string());
+    }
+
+    let head = Atom(parts[1].parse().map_err(|e| format!("Invalid head: {e}"))?);
+    let body_count: usize = parts[2]
+        .parse()
+        .map_err(|e| format!("Invalid body count: {e}"))?;
+    let neg_count: usize = parts[3]
+        .parse()
+        .map_err(|e| format!("Invalid neg count: {e}"))?;
+    let bound: i64 = parts[4]
+        .parse()
+        .map_err(|e| format!("Invalid bound: {e}"))?;
+
+    if parts.len() < 5 + body_count {
+        return Err(format!(
+            "Body too short: expected {body_count} literals, got {}",
+            parts.len() - 5
+        ));
+    }
+
+    let mut body = Vec::with_capacity(body_count);
+
+    for (i, &part) in parts[5..5 + body_count].iter().enumerate() {
+        let atom = Atom(
+            part.parse()
+                .map_err(|e| format!("Invalid body literal: {e}"))?,
+        );
+        if i < neg_count {
+            body.push(WeightedLit::neg(atom, 1));
+        } else {
+            body.push(WeightedLit::pos(atom, 1));
+        }
+    }
+
+    Ok(BasicRule { head, body, bound })
+}
+
+fn parse_weight_rule(parts: &[&str]) -> Result<BasicRule, String> {
+    // Format: 5 head bound body_count neg_count lits... weights...
+    if parts.len() < 5 {
+        return Err("Weight rule too short".to_string());
+    }
+
+    let head = Atom(parts[1].parse().map_err(|e| format!("Invalid head: {e}"))?);
+    let bound: i64 = parts[2]
+        .parse()
+        .map_err(|e| format!("Invalid bound: {e}"))?;
+    let body_count: usize = parts[3]
+        .parse()
+        .map_err(|e| format!("Invalid body count: {e}"))?;
+    let neg_count: usize = parts[4]
+        .parse()
+        .map_err(|e| format!("Invalid neg count: {e}"))?;
+
+    // Need body_count literals + body_count weights
+    if parts.len() < 5 + body_count * 2 {
+        return Err(format!(
+            "Weight rule too short: expected {} literals and {} weights",
+            body_count, body_count
+        ));
+    }
+
+    let lits_start = 5;
+    let weights_start = 5 + body_count;
+    let mut body = Vec::with_capacity(body_count);
+
+    for i in 0..body_count {
+        let atom = Atom(
+            parts[lits_start + i]
+                .parse()
+                .map_err(|e| format!("Invalid body literal: {e}"))?,
+        );
+        let weight: i64 = parts[weights_start + i]
+            .parse()
+            .map_err(|e| format!("Invalid weight: {e}"))?;
+
+        if i < neg_count {
+            body.push(WeightedLit::neg(atom, weight));
+        } else {
+            body.push(WeightedLit::pos(atom, weight));
+        }
+    }
+
+    Ok(BasicRule { head, body, bound })
 }
 
 fn parse_choice_rule(parts: &[&str]) -> Result<ChoiceRule, String> {
@@ -203,8 +302,7 @@ fn parse_choice_rule(parts: &[&str]) -> Result<ChoiceRule, String> {
         ));
     }
 
-    let mut neg_body = Vec::with_capacity(neg_count);
-    let mut pos_body = Vec::with_capacity(body_count - neg_count);
+    let mut body = Vec::with_capacity(body_count);
 
     for (i, &part) in parts[body_lits_start..body_lits_start + body_count]
         .iter()
@@ -215,16 +313,16 @@ fn parse_choice_rule(parts: &[&str]) -> Result<ChoiceRule, String> {
                 .map_err(|e| format!("Invalid body literal: {e}"))?,
         );
         if i < neg_count {
-            neg_body.push(atom);
+            body.push(WeightedLit::neg(atom, 1));
         } else {
-            pos_body.push(atom);
+            body.push(WeightedLit::pos(atom, 1));
         }
     }
 
     Ok(ChoiceRule {
         heads,
-        pos_body,
-        neg_body,
+        body,
+        bound: body_count as i64,
     })
 }
 
@@ -272,8 +370,7 @@ fn parse_disjunctive_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
         ));
     }
 
-    let mut neg_body = Vec::with_capacity(neg_count);
-    let mut pos_body = Vec::with_capacity(body_count - neg_count);
+    let mut body = Vec::with_capacity(body_count);
 
     for (i, &part) in parts[body_lits_start..body_lits_start + body_count]
         .iter()
@@ -284,16 +381,16 @@ fn parse_disjunctive_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
                 .map_err(|e| format!("Invalid body literal: {e}"))?,
         );
         if i < neg_count {
-            neg_body.push(atom);
+            body.push(WeightedLit::neg(atom, 1));
         } else {
-            pos_body.push(atom);
+            body.push(WeightedLit::pos(atom, 1));
         }
     }
 
     Ok(DisjunctiveRule {
         heads,
-        pos_body,
-        neg_body,
+        body,
+        bound: body_count as i64,
     })
 }
 
