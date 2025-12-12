@@ -8,10 +8,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ASP_BIN="${SCRIPT_DIR}/../target/release/asp"
 
-if [ ! -f "$ASP_BIN" ]; then
-    echo "Error: asp binary not found. Run 'cargo build --release -p asp' first." >&2
-    exit 1
-fi
+# Build before running
+cargo build --release -p asp --quiet
 
 if [ -n "$1" ]; then
     # File argument provided

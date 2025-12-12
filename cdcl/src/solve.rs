@@ -33,19 +33,10 @@ impl Solver {
     }
 
     /// Solve but keep the decision stack on SAT (don't backtrack).
-    /// Returns true if SAT, false if UNSAT.
+    /// Returns (is_sat, stats).
     /// Use `get_assignment()` to get the current assignment after SAT.
-    pub fn solve_and_stay(&mut self, db: &mut Database) -> bool {
-        let start = Instant::now();
-        let (result, stats) = self.solve_core(db, None);
-        eprintln!(
-            "c stats: {:.3}s decisions={} conflicts={} restarts={}",
-            start.elapsed().as_secs_f64(),
-            stats.decisions,
-            stats.conflicts,
-            stats.restarts
-        );
-        result
+    pub fn solve_and_stay(&mut self, db: &mut Database) -> (bool, SolveStats) {
+        self.solve_core(db, None)
     }
 
     /// Get the current assignment (all assigned literals).

@@ -2,14 +2,16 @@ Basic/Cardinality/Weight rule handling:
 
 Initially, the bottom solver is solving the ASP program _nearly_ naively encoded as SAT with no supportedness constraints. It contains the variables x_bottom for each atom x in the ASP program, and active_r_bottom for each rule r in the ASP program. So if you have a rule r which says:
 
-h :- #sum{1 : b1 ; 2 : b2 ; 3 : b3 ; 5 : not b4} >= 6.
+h :- #sum{1 : b1 ; 2 : b2 ; 3 : b3 ; 4 : not b4} >= 3.
 
 We'll encode that as:
 
-(active_r_bottom, ((1 + 2 + 3 + 5) - 6 + 1)) v (not b1_bottom, 1) v (not b2_bottom, 2) v (not b3_bottom, 3) v (b4_bottom, 5) >= ((1 + 2 + 3 + 5) - 6 + 1)
+(active_r_bottom, ((1 + 2 + 3 + 4) - 3 + 1)) v (not b1_bottom, 1) v (not b2_bottom, 2) v (not b3_bottom, 3) v (b4_bottom, 4) >= ((1 + 2 + 3 + 4) - 3 + 1)
+
+i.e.: (active_r_bottom, 8) v (not b1_bottom, 1) v (not b2_bottom, 2) v (not b3_bottom, 3) v (b4_bottom, 4) >= 8
 
 Also the constraint
-(not active_r_bottom, 6) v (b1_bottom, 1) v (b2_bottom, 2) v (b3_bottom, 3) v (not b4_bottom, 5) >= 6
+(not active_r_bottom, 3) v (b1_bottom, 1) v (b2_bottom, 2) v (b3_bottom, 3) v (not b4_bottom, 4) >= 3
 
 h_bottom v not active_r_bottom
 
@@ -23,9 +25,14 @@ We also have a single clause enforcing that our subset is strict:
 
 a_diminished v b_diminished v c_diminished...
 
-If a rule is active, then its positive part must be satisfied in the reduct
+If a rule is active, then its body must be satisfied in the reduct. We use the same activation weight structure as the bottom constraint:
 
-not active_r_bottom v active_r_top v not b1_top v not b2_top v not b3_top (we can omit b4, because it's not positive)
+(not active_r_bottom, activation_weight) v (active_r_top, activation_weight) v (not b1_top, w1) v (not b2_top, w2) v (not b3_top, w3) v (b4_top, w4) >= activation_weight
+
+For the example `h :- #sum{1:b1; 2:b2; 3:b3; 4:not b4} >= 3`, activation_weight = (1+2+3+4) - 3 + 1 = 8, so:
+(not active_r_bottom, 8) v (active_r_top, 8) v (not b1_top, 1) v (not b2_top, 2) v (not b3_top, 3) v (b4_top, 4) >= 8
+
+The head propagation clause:
 not h_bottom v h_top v not active_r_top
 
 Now suppose that we find a solution, let's say {w_top, x_top} are the true variables, and that the bottom solution was {w_bottom, x_bottom, y_bottom, z_bottom}. In that case, we want to take the difference and add in the loop constraint to the bottom solver and re-solve. In this case that's {y, z}.
