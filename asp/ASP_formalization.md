@@ -1,4 +1,4 @@
-To do this incrementally, let's start with just basic rules. No disjunction, no choice rules, no weight bodies, nothing else.
+Basic rule handling:
 
 Initially, the bottom solver is solving the ASP program _nearly_ naively encoded as SAT with no supportedness constraints. It contains the variables x_bottom for each atom x in the ASP program, and active_r_bottom for each rule r in the ASP program. So if you have a rule r which says:
 
@@ -8,20 +8,16 @@ We'll encode that as:
 
 active_r_bottom v not b1_bottom v not b2_bottom v not b3_bottom v b4_bottom
 
-not active_r_bottom v b1_bottom
-not active_r_bottom v b2_bottom
-not active_r_bottom v b3_bottom
-not active_r_bottom v not b4_bottom
+Also a PB constraint
+(not active_r_bottom, 4) v (b1_bottom, 1) v (b2_bottom, 1) v (b3_bottom, 1) v (not b4_bottom, 1) >= 4
 
 h_bottom v not active_r_bottom
 
 We export that as the external relation (both the bottom variables and the rule activeness variables).
 
-The _top_ solver has two more variables for each ASP atom, x_top and x_diminished, and one for each rule, active_r_top. These aren't external, they're free in the top solver, but come with the following constraints:
+The _top_ solver has two more variables for each ASP atom, x_top and x_diminished, and one for each rule, active_r_top. These aren't external, they're free in the top solver, but come with the following PB constraint:
 
-not a_top v a_bottom
-not a_diminished v not a_top
-not a_diminished v a_bottom
+(not a_top, 1) v (a_bottom, 1) v (not a_diminished, 1) >= 2
 
 We also have a single clause enforcing that our subset is strict:
 
@@ -42,6 +38,6 @@ and re-run it until we get to where the bottom solver returns SAT and the top so
 
 Choice rules are almost the same as basic rules, with just one minor change.
 
-We don't include line 16
+We don't include line 14
 
-Also we have a line 33 rule _for each head_ (since choice rules are allowed multiple heads)
+Also we have a line 29 rule _for each head_ (since choice rules are allowed multiple heads)

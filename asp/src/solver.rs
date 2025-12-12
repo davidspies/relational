@@ -57,11 +57,23 @@ impl AspSolver {
         for (i, clause) in encoded.bottom_clauses.iter().enumerate() {
             bottom_solver.add_clause(&mut db, i as u32, clause);
         }
-        let next_bottom_clause_id = encoded.bottom_clauses.len() as u32;
+        let mut next_id = encoded.bottom_clauses.len() as u32;
+
+        // Add bottom PB constraints
+        for (i, (terms, bound)) in encoded.bottom_pb_constraints.iter().enumerate() {
+            bottom_solver.add_pb_constraint(&mut db, next_id + i as u32, terms, *bound);
+        }
+        next_id += encoded.bottom_pb_constraints.len() as u32;
 
         // Add top clauses
         for (i, clause) in encoded.top_clauses.iter().enumerate() {
             top_solver.add_clause(&mut db, i as u32, clause);
+        }
+
+        // Add top PB constraints
+        let top_pb_id_offset = encoded.top_clauses.len() as u32;
+        for (i, (terms, bound)) in encoded.top_pb_constraints.iter().enumerate() {
+            top_solver.add_pb_constraint(&mut db, top_pb_id_offset + i as u32, terms, *bound);
         }
 
         AspSolver {
@@ -70,7 +82,7 @@ impl AspSolver {
             db,
             bottom_solver,
             top_solver,
-            next_bottom_clause_id,
+            next_bottom_clause_id: next_id,
         }
     }
 
