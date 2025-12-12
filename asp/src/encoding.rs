@@ -9,7 +9,7 @@
 
 use cdcl::{Lit, Var, Weight};
 
-use crate::types::{Atom, BasicRule, ChoiceRule, Program, Rule, WeightedLit};
+use crate::types::{Atom, BasicRule, ChoiceRule, Program, Rule};
 
 /// A clause is a disjunction of literals.
 pub type Clause = Vec<Lit>;
@@ -262,7 +262,7 @@ fn encode_choice_rule(
     rule: &ChoiceRule,
     rule_idx: u32,
     layout: &VarLayout,
-    bottom_clauses: &mut Vec<Clause>,
+    _bottom_clauses: &mut Vec<Clause>,
     bottom_pb_constraints: &mut Vec<PBConstraint>,
     top_clauses: &mut Vec<Clause>,
 ) {
@@ -395,6 +395,7 @@ pub fn generate_loop_constraint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::WeightedLit;
 
     #[test]
     fn test_var_layout() {
@@ -430,10 +431,14 @@ mod tests {
     #[test]
     fn test_encode_basic_rule() {
         // h :- b, not c  (atoms: h=2, b=3, c=4)
+        // This is a basic rule with weights all 1 and bound = 2
         let rule = BasicRule {
             head: Atom(2),
-            pos_body: vec![Atom(3)],
-            neg_body: vec![Atom(4)],
+            body: vec![
+                WeightedLit::pos(Atom(3), 1),
+                WeightedLit::neg(Atom(4), 1),
+            ],
+            bound: 2,
         };
 
         let layout = VarLayout {
@@ -446,18 +451,18 @@ mod tests {
         let mut top = Vec::new();
         encode_basic_rule(&rule, 0, &layout, &mut bottom, &mut bottom_pb, &mut top);
 
-        // Bottom should have 2 clauses:
-        // 1. active_bottom_0 ∨ ¬b_bottom ∨ c_bottom
-        // 2. h_bottom ∨ ¬active_bottom_0
-        assert_eq!(bottom.len(), 2);
+        // Bottom should have 1 clause:
+        // h_bottom ∨ ¬active_bottom_0
+        assert_eq!(bottom.len(), 1);
 
-        // Bottom should have 1 PB constraint:
-        // (¬active_bottom_0, 2) ∨ (b_bottom, 1) ∨ (¬c_bottom, 1) >= 2
-        assert_eq!(bottom_pb.len(), 1);
+        // Bottom should have 2 PB constraints:
+        // 1. Activation: (active, 1) ∨ (¬b, 1) ∨ (c, 1) >= 1
+        // 2. Reverse: (¬active, 2) ∨ (b, 1) ∨ (¬c, 1) >= 2
+        assert_eq!(bottom_pb.len(), 2);
 
         // Top should have 2 clauses:
         // 1. ¬active_bottom_0 ∨ active_top_0 ∨ ¬b_top
-        // 2. h_top ∨ ¬active_top_0
+        // 2. ¬h_bottom ∨ h_top ∨ ¬active_top_0
         assert_eq!(top.len(), 2);
     }
 }
