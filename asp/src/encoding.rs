@@ -185,23 +185,25 @@ fn encode_basic_rule(
     // This ensures: if body is satisfied (sum >= bound), then rule must be active
     let activation_weight = sum_weights - bound + 1;
 
-    if !rule.body.is_empty() {
-        // Bottom PB constraint 1 (activation): body satisfied → rule active
-        // (active_r, activation_weight) ∨ (negated body literals with weights) >= activation_weight
-        let mut activation_terms = vec![(Lit::pos(active_bottom), activation_weight)];
-        for lit in &rule.body {
-            // Negate the literal for the activation constraint
-            let cdcl_lit = if lit.positive {
-                Lit::neg(layout.bottom(lit.atom))
-            } else {
-                Lit::pos(layout.bottom(lit.atom))
-            };
-            activation_terms.push((cdcl_lit, lit.weight));
-        }
-        bottom_pb_constraints.push((activation_terms, activation_weight));
+    // Bottom PB constraint 1 (activation): body satisfied → rule active
+    // (active_r, activation_weight) ∨ (negated body literals with weights) >= activation_weight
+    // For facts (empty body), this becomes (active_r, 1) >= 1, forcing the rule active
+    let mut activation_terms = vec![(Lit::pos(active_bottom), activation_weight)];
+    for lit in &rule.body {
+        // Negate the literal for the activation constraint
+        let cdcl_lit = if lit.positive {
+            Lit::neg(layout.bottom(lit.atom))
+        } else {
+            Lit::pos(layout.bottom(lit.atom))
+        };
+        activation_terms.push((cdcl_lit, lit.weight));
+    }
+    bottom_pb_constraints.push((activation_terms, activation_weight));
 
-        // Bottom PB constraint 2 (reverse implication): rule active → body satisfied
-        // (¬active_r, bound) ∨ (body literals with weights) >= bound
+    // Bottom PB constraint 2 (reverse implication): rule active → body satisfied
+    // (¬active_r, bound) ∨ (body literals with weights) >= bound
+    // Only needed if bound > 0 (otherwise trivially satisfied)
+    if bound > 0 {
         let mut reverse_terms = vec![(Lit::neg(active_bottom), bound)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
@@ -276,20 +278,22 @@ fn encode_choice_rule(
     // Activation weight: sum - bound + 1
     let activation_weight = sum_weights - bound + 1;
 
-    if !rule.body.is_empty() {
-        // Bottom PB constraint 1 (activation): body satisfied → rule active
-        let mut activation_terms = vec![(Lit::pos(active_bottom), activation_weight)];
-        for lit in &rule.body {
-            let cdcl_lit = if lit.positive {
-                Lit::neg(layout.bottom(lit.atom))
-            } else {
-                Lit::pos(layout.bottom(lit.atom))
-            };
-            activation_terms.push((cdcl_lit, lit.weight));
-        }
-        bottom_pb_constraints.push((activation_terms, activation_weight));
+    // Bottom PB constraint 1 (activation): body satisfied → rule active
+    // For choice rules with empty body, this forces the rule active
+    let mut activation_terms = vec![(Lit::pos(active_bottom), activation_weight)];
+    for lit in &rule.body {
+        let cdcl_lit = if lit.positive {
+            Lit::neg(layout.bottom(lit.atom))
+        } else {
+            Lit::pos(layout.bottom(lit.atom))
+        };
+        activation_terms.push((cdcl_lit, lit.weight));
+    }
+    bottom_pb_constraints.push((activation_terms, activation_weight));
 
-        // Bottom PB constraint 2 (reverse implication): rule active → body satisfied
+    // Bottom PB constraint 2 (reverse implication): rule active → body satisfied
+    // Only needed if bound > 0
+    if bound > 0 {
         let mut reverse_terms = vec![(Lit::neg(active_bottom), bound)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
@@ -455,8 +459,8 @@ mod tests {
         // h_bottom ∨ ¬active_bottom_0
         assert_eq!(bottom.len(), 1);
 
-        // Bottom should have 2 PB constraints:
-        // 1. Activation: (active, 1) ∨ (¬b, 1) ∨ (c, 1) >= 1
+        // Bottom should have 2 PB constraints (body size 2, bound 2):
+        // 1. Activation: (active, 1) ∨ (¬b, 1) ∨ (c, 1) >= 1 (sum=2, bound=2, weight=1)
         // 2. Reverse: (¬active, 2) ∨ (b, 1) ∨ (¬c, 1) >= 2
         assert_eq!(bottom_pb.len(), 2);
 
