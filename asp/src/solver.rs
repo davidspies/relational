@@ -6,6 +6,7 @@
 //! - External relation: candidate's assignments feed into check as external input
 //! - Both solvers share ONE database and retain learned clauses
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use cdcl::{Level, Lit, Var};
@@ -27,12 +28,21 @@ pub struct AspSolver {
     cand_solver: cdcl::Solver,
     check_solver: cdcl::Solver,
     next_cand_clause_id: u32,
+    /// Fast lookup: atom → symbol name
+    atom_names: HashMap<Atom, String>,
 }
 
 impl AspSolver {
     /// Create a new ASP solver for the given program.
     pub fn new(program: Program) -> Self {
         let encoded = encode_program(&program);
+
+        // Build atom→name index for fast lookups
+        let atom_names: HashMap<Atom, String> = program
+            .symbols
+            .iter()
+            .map(|(atom, name)| (*atom, name.clone()))
+            .collect();
 
         let mut db_builder = DatabaseBuilder::new();
 
@@ -85,6 +95,7 @@ impl AspSolver {
             cand_solver,
             check_solver,
             next_cand_clause_id: next_id,
+            atom_names,
         }
     }
 
@@ -289,16 +300,12 @@ impl AspSolver {
 
     /// Check if an atom should be shown in output.
     fn is_shown_atom(&self, atom: Atom) -> bool {
-        self.program.symbols.iter().any(|(a, _)| *a == atom)
+        self.atom_names.contains_key(&atom)
     }
 
     /// Get atom name from symbol table.
     pub fn atom_name(&self, atom: Atom) -> Option<&str> {
-        self.program
-            .symbols
-            .iter()
-            .find(|(a, _)| *a == atom)
-            .map(|(_, name)| name.as_str())
+        self.atom_names.get(&atom).map(|s| s.as_str())
     }
 }
 
