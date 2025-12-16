@@ -6,16 +6,31 @@
 //! - Rules 0..R-1 → active_r_check (var N+R+1..N+2R)
 //! - Atoms 1..N → x_check (var N+2R+1..N+2R+N)
 //! - Atoms 1..N → x_dim (var N+2R+N+1..N+2R+2N)
+//! - Non-choice rules → used_r_cand (var N+2R+2N+1..N+2R+2N+NC)
+//! - Non-choice rule heads → active_r_h_cand (var N+2R+2N+NC+1..N+2R+2N+NC+TH)
+//!
+//! Where NC = number of non-choice rules, TH = total heads across non-choice rules.
 
 use cdcl::{Lit, Var, Weight};
 
-use crate::types::{Atom, BasicRule, ChoiceRule, Program, Rule};
+use crate::types::{Atom, BasicRule, ChoiceRule, DisjunctiveRule, Program, Rule};
 
 /// A clause is a disjunction of literals.
 pub type Clause = Vec<Lit>;
 
 /// A PB constraint: sum of (lit * weight) >= bound.
 pub type PBConstraint = (Vec<(Lit, Weight)>, Weight);
+
+/// Per-rule info for non-choice rules (basic or disjunctive).
+#[derive(Debug, Clone)]
+struct NonChoiceRuleInfo {
+    /// Index among non-choice rules (for used_cand offset)
+    non_choice_idx: u32,
+    /// Number of heads
+    num_heads: u32,
+    /// Starting offset for head variables
+    head_var_start: u32,
+}
 
 /// Variable layout for the ASP encoding.
 #[derive(Debug, Clone)]
@@ -24,15 +39,57 @@ pub struct VarLayout {
     pub num_atoms: u32,
     /// Number of rules (R)
     pub num_rules: u32,
+    /// Number of non-choice rules
+    num_non_choice: u32,
+    /// Total head variables across all non-choice rules
+    total_head_vars: u32,
+    /// Info for each rule: Some(info) for non-choice, None for choice
+    rule_info: Vec<Option<NonChoiceRuleInfo>>,
 }
 
 impl VarLayout {
     pub fn new(program: &Program) -> Self {
         let num_atoms = program.max_atom;
         let num_rules = program.rules.len() as u32;
+
+        let mut rule_info = Vec::with_capacity(program.rules.len());
+        let mut non_choice_idx = 0u32;
+        let mut head_var_offset = 0u32;
+
+        for rule in &program.rules {
+            match rule {
+                Rule::Basic(r) => {
+                    let num_heads = if r.head.is_false() { 0 } else { 1 };
+                    rule_info.push(Some(NonChoiceRuleInfo {
+                        non_choice_idx,
+                        num_heads,
+                        head_var_start: head_var_offset,
+                    }));
+                    non_choice_idx += 1;
+                    head_var_offset += num_heads;
+                }
+                Rule::Disjunctive(r) => {
+                    let num_heads = r.heads.len() as u32;
+                    rule_info.push(Some(NonChoiceRuleInfo {
+                        non_choice_idx,
+                        num_heads,
+                        head_var_start: head_var_offset,
+                    }));
+                    non_choice_idx += 1;
+                    head_var_offset += num_heads;
+                }
+                Rule::Choice(_) => {
+                    rule_info.push(None);
+                }
+            }
+        }
+
         VarLayout {
             num_atoms,
             num_rules,
+            num_non_choice: non_choice_idx,
+            total_head_vars: head_var_offset,
+            rule_info,
         }
     }
 
@@ -61,10 +118,58 @@ impl VarLayout {
         Var::new(self.num_atoms + 2 * self.num_rules + self.num_atoms + atom.0)
     }
 
+    /// Base offset for used_cand variables
+    fn used_cand_base(&self) -> u32 {
+        self.num_atoms + 2 * self.num_rules + 2 * self.num_atoms + 1
+    }
+
+    /// Get the used_r_cand variable for a non-choice rule.
+    /// Panics if rule_idx is a choice rule.
+    pub fn used_cand(&self, rule_idx: u32) -> Var {
+        let info = self.rule_info[rule_idx as usize]
+            .as_ref()
+            .expect("used_cand called on choice rule");
+        Var::new(self.used_cand_base() + info.non_choice_idx)
+    }
+
+    /// Base offset for active_head_cand variables
+    fn active_head_cand_base(&self) -> u32 {
+        self.used_cand_base() + self.num_non_choice
+    }
+
+    /// Get the active_r_h_cand variable for a specific head of a non-choice rule.
+    /// head_idx is 0-based index into the rule's heads.
+    /// Panics if rule_idx is a choice rule.
+    pub fn active_head_cand(&self, rule_idx: u32, head_idx: u32) -> Var {
+        let info = self.rule_info[rule_idx as usize]
+            .as_ref()
+            .expect("active_head_cand called on choice rule");
+        assert!(head_idx < info.num_heads);
+        Var::new(self.active_head_cand_base() + info.head_var_start + head_idx)
+    }
+
+    /// Check if a rule is a non-choice rule (basic or disjunctive).
+    pub fn is_non_choice(&self, rule_idx: u32) -> bool {
+        self.rule_info[rule_idx as usize].is_some()
+    }
+
+    /// Get the number of heads for a non-choice rule.
+    pub fn num_heads(&self, rule_idx: u32) -> u32 {
+        self.rule_info[rule_idx as usize]
+            .as_ref()
+            .map(|info| info.num_heads)
+            .unwrap_or(0)
+    }
+
     /// Total number of variables.
     pub fn total_vars(&self) -> u32 {
-        // cand: N, active_cand: R, active_check: R, check: N, dim: N
-        self.num_atoms + 2 * self.num_rules + self.num_atoms + self.num_atoms
+        // cand: N, active_cand: R, active_check: R, check: N, dim: N,
+        // used_cand: NC, active_head_cand: TH
+        self.num_atoms
+            + 2 * self.num_rules
+            + 2 * self.num_atoms
+            + self.num_non_choice
+            + self.total_head_vars
     }
 }
 
@@ -115,8 +220,16 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
                     &mut check_pb_constraints,
                 );
             }
-            Rule::Disjunctive(_) => {
-                panic!("Disjunctive rules not yet supported");
+            Rule::Disjunctive(r) => {
+                encode_disjunctive_rule(
+                    r,
+                    rule_idx,
+                    &layout,
+                    &mut cand_clauses,
+                    &mut cand_pb_constraints,
+                    &mut check_clauses,
+                    &mut check_pb_constraints,
+                );
             }
         }
     }
@@ -124,10 +237,10 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     // Add constraint that false atom (atom 1) is always false in candidate solver
     cand_clauses.push(vec![Lit::neg(layout.cand(Atom(1)))]);
 
-    // Add single-atom loop constraints for each atom (Constraint 8 initialization)
+    // Add single-atom loop constraints for each atom (Constraint 13 initialization)
     for atom_id in 2..=layout.num_atoms {
-        let clause = generate_loop_constraint(&[Atom(atom_id)], program, &layout);
-        cand_clauses.push(clause);
+        let pb_constraint = generate_loop_constraint(&[Atom(atom_id)], program, &layout);
+        cand_pb_constraints.push(pb_constraint);
     }
 
     // Check solver constraints for each atom using PB constraint (Constraint 4):
@@ -170,14 +283,20 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
 /// Candidate Constraint 2 (body falsification when inactive):
 /// t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
 ///
-/// Candidate Constraint 3 (head propagation):
-/// h_cand ∨ ¬active_r_cand
+/// Candidate Constraint 3 (head requirement): h_cand ∨ ¬active_r_cand
 ///
-/// Check Constraint 6 (reduct body satisfaction):
+/// Candidate Constraint 4 (used implies active): ¬used_r_cand ∨ active_r_cand
+///
+/// Candidate Constraint 5 (head selection): ¬active_r_h_cand + used_r_cand >= 1
+///
+/// Candidate Constraint 6 (exclusive head): trivially satisfied for single-head rules
+///
+/// Candidate Constraint 7 (head propagation): h_cand ∨ ¬active_r_h_cand
+///
+/// Check Constraint 10 (reduct body satisfaction):
 /// W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
 ///
-/// Check Constraint 7 (reduct head propagation):
-/// ¬h_cand ∨ h_check ∨ ¬active_r_check
+/// Check Constraint 11 (reduct head implication): h_check ∨ ¬active_r_check
 fn encode_basic_rule(
     rule: &BasicRule,
     rule_idx: u32,
@@ -229,20 +348,39 @@ fn encode_basic_rule(
         cand_pb_constraints.push((constraint2_terms, bound));
     }
 
-    // Constraint 3 (head propagation): h_cand ∨ ¬active_r_cand
+    // Constraint 3 (head requirement): h_cand ∨ ¬active_r_cand
     if !rule.head.is_false() {
         cand_clauses.push(vec![
             Lit::pos(layout.cand(rule.head)),
             Lit::neg(active_cand),
+        ]);
+
+        // Additional constraints for non-choice rules with a real head
+        let used_cand = layout.used_cand(rule_idx);
+        let active_head_cand = layout.active_head_cand(rule_idx, 0);
+
+        // Constraint 4 (used implies active): ¬used_r_cand ∨ active_r_cand
+        cand_clauses.push(vec![Lit::neg(used_cand), Lit::pos(active_cand)]);
+
+        // Constraint 5 (head selection): ¬active_r_h_cand + used_r_cand >= 1
+        // For single head, this is a clause
+        cand_clauses.push(vec![Lit::neg(active_head_cand), Lit::pos(used_cand)]);
+
+        // Constraint 6 (exclusive head): trivially satisfied when n=1
+
+        // Constraint 7 (head propagation): h_cand ∨ ¬active_r_h_cand
+        cand_clauses.push(vec![
+            Lit::pos(layout.cand(rule.head)),
+            Lit::neg(active_head_cand),
         ]);
     } else {
         // Constraint rule: if active, contradiction → ¬active_r_cand
         cand_clauses.push(vec![Lit::neg(active_cand)]);
     }
 
-    // Constraint 6 (reduct body satisfaction):
+    // Constraint 10 (reduct body satisfaction):
     // W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
-    let mut constraint6_terms = vec![
+    let mut constraint10_terms = vec![
         (Lit::neg(active_cand), falsification_weight),
         (Lit::pos(active_check), falsification_weight),
     ];
@@ -252,14 +390,13 @@ fn encode_basic_rule(
         } else {
             Lit::pos(layout.check(lit.atom))
         };
-        constraint6_terms.push((cdcl_lit, lit.weight));
+        constraint10_terms.push((cdcl_lit, lit.weight));
     }
-    check_pb_constraints.push((constraint6_terms, falsification_weight));
+    check_pb_constraints.push((constraint10_terms, falsification_weight));
 
-    // Constraint 7 (reduct head propagation): ¬h_cand ∨ h_check ∨ ¬active_r_check
+    // Constraint 11 (reduct head implication): h_check ∨ ¬active_r_check
     if !rule.head.is_false() {
         check_clauses.push(vec![
-            Lit::neg(layout.cand(rule.head)),
             Lit::pos(layout.check(rule.head)),
             Lit::neg(active_check),
         ]);
@@ -339,7 +476,7 @@ fn encode_choice_rule(
     }
     check_pb_constraints.push((constraint6_terms, falsification_weight));
 
-    // Constraint 7 (reduct head propagation): ¬h_cand ∨ h_check ∨ ¬active_r_check (for each head)
+    // Constraint 12 (reduct head propagation): ¬h_cand ∨ h_check ∨ ¬active_r_check (for each head)
     for &head in &rule.heads {
         check_clauses.push(vec![
             Lit::neg(layout.cand(head)),
@@ -349,71 +486,236 @@ fn encode_choice_rule(
     }
 }
 
-/// Generate a loop constraint for the candidate solver (Constraint 8).
+/// Encode a disjunctive rule: h1 | h2 | ... :- #sum{w1:b1; w2:b2; ...} >= bound
+///
+/// Candidate Constraint 1 (body satisfaction when active):
+/// W_r · active_r_cand + Σ w_i · ¬b_i_cand + Σ u_j · c_j_cand >= W_r
+///
+/// Candidate Constraint 2 (body falsification when inactive):
+/// t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
+///
+/// Candidate Constraint 3 (head requirement): Σ h_cand + ¬active_r_cand >= 1
+///
+/// Candidate Constraint 4 (used implies active): ¬used_r_cand ∨ active_r_cand
+///
+/// Candidate Constraint 5 (head selection): Σ ¬active_r_h_cand + used_r_cand >= n
+///
+/// Candidate Constraint 6 (exclusive head): Σ ¬h_cand + (n-1)·¬used_r_cand >= n-1
+///
+/// Candidate Constraint 7 (head propagation): h_cand ∨ ¬active_r_h_cand (for each head)
+///
+/// Check Constraint 10 (reduct body satisfaction):
+/// W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
+///
+/// Check Constraint 11 (reduct head implication): Σ h_check + ¬active_r_check >= 1
+fn encode_disjunctive_rule(
+    rule: &DisjunctiveRule,
+    rule_idx: u32,
+    layout: &VarLayout,
+    cand_clauses: &mut Vec<Clause>,
+    cand_pb_constraints: &mut Vec<PBConstraint>,
+    check_clauses: &mut Vec<Clause>,
+    check_pb_constraints: &mut Vec<PBConstraint>,
+) {
+    let active_cand = layout.active_cand(rule_idx);
+    let active_check = layout.active_check(rule_idx);
+    let n = rule.heads.len() as Weight;
+
+    // Calculate sum of weights
+    let sum_weights: Weight = rule.body.iter().map(|lit| lit.weight).sum();
+    let bound = rule.bound;
+
+    // Falsification weight: W_r = sum - bound + 1
+    let falsification_weight = sum_weights - bound + 1;
+
+    // Constraint 1 (body satisfaction when active):
+    // W_r · active_r_cand + Σ w_i · ¬b_i_cand + Σ u_j · c_j_cand >= W_r
+    let mut constraint1_terms = vec![(Lit::pos(active_cand), falsification_weight)];
+    for lit in &rule.body {
+        let cdcl_lit = if lit.positive {
+            Lit::neg(layout.cand(lit.atom))
+        } else {
+            Lit::pos(layout.cand(lit.atom))
+        };
+        constraint1_terms.push((cdcl_lit, lit.weight));
+    }
+    cand_pb_constraints.push((constraint1_terms, falsification_weight));
+
+    // Constraint 2 (body falsification when inactive):
+    // t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
+    if bound > 0 {
+        let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
+        for lit in &rule.body {
+            let cdcl_lit = if lit.positive {
+                Lit::pos(layout.cand(lit.atom))
+            } else {
+                Lit::neg(layout.cand(lit.atom))
+            };
+            constraint2_terms.push((cdcl_lit, lit.weight));
+        }
+        cand_pb_constraints.push((constraint2_terms, bound));
+    }
+
+    // Handle integrity constraints (no heads) vs disjunctive rules (with heads)
+    if rule.heads.is_empty() {
+        // Integrity constraint: if active, contradiction → ¬active_r_cand
+        cand_clauses.push(vec![Lit::neg(active_cand)]);
+        // Constraint 10: ¬active_r_check (if it were active, we'd need a head)
+        check_clauses.push(vec![Lit::neg(active_check)]);
+    } else {
+        let used_cand = layout.used_cand(rule_idx);
+
+        // Constraint 3 (head requirement): Σ h_cand + ¬active_r_cand >= 1
+        // This is a clause: h1 ∨ h2 ∨ ... ∨ ¬active_r
+        let mut constraint3_clause: Vec<Lit> = rule
+            .heads
+            .iter()
+            .map(|&h| Lit::pos(layout.cand(h)))
+            .collect();
+        constraint3_clause.push(Lit::neg(active_cand));
+        cand_clauses.push(constraint3_clause);
+
+        // Constraint 4 (used implies active): ¬used_r_cand ∨ active_r_cand
+        cand_clauses.push(vec![Lit::neg(used_cand), Lit::pos(active_cand)]);
+
+        // Constraint 5 (head selection): Σ ¬active_r_h_cand + used_r_cand >= n
+        let mut constraint5_terms: Vec<(Lit, Weight)> = (0..rule.heads.len())
+            .map(|head_idx| {
+                (
+                    Lit::neg(layout.active_head_cand(rule_idx, head_idx as u32)),
+                    1,
+                )
+            })
+            .collect();
+        constraint5_terms.push((Lit::pos(used_cand), n));
+        cand_pb_constraints.push((constraint5_terms, n));
+
+        // Constraint 6 (exclusive head): Σ ¬h_cand + (n-1)·¬used_r_cand >= n-1
+        // Only needed if n > 1
+        if n > 1 {
+            let mut constraint6_terms: Vec<(Lit, Weight)> = rule
+                .heads
+                .iter()
+                .map(|&h| (Lit::neg(layout.cand(h)), 1))
+                .collect();
+            constraint6_terms.push((Lit::neg(used_cand), n - 1));
+            cand_pb_constraints.push((constraint6_terms, n - 1));
+        }
+
+        // Constraint 7 (head propagation): h_cand ∨ ¬active_r_h_cand (for each head)
+        for (head_idx, &head) in rule.heads.iter().enumerate() {
+            cand_clauses.push(vec![
+                Lit::pos(layout.cand(head)),
+                Lit::neg(layout.active_head_cand(rule_idx, head_idx as u32)),
+            ]);
+        }
+
+        // Constraint 10 (reduct body satisfaction):
+        // W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
+        let mut constraint10_terms = vec![
+            (Lit::neg(active_cand), falsification_weight),
+            (Lit::pos(active_check), falsification_weight),
+        ];
+        for lit in &rule.body {
+            let cdcl_lit = if lit.positive {
+                Lit::neg(layout.check(lit.atom))
+            } else {
+                Lit::pos(layout.check(lit.atom))
+            };
+            constraint10_terms.push((cdcl_lit, lit.weight));
+        }
+        check_pb_constraints.push((constraint10_terms, falsification_weight));
+
+        // Constraint 11 (reduct head implication): Σ h_check + ¬active_r_check >= 1
+        // This is a clause: h1_check ∨ h2_check ∨ ... ∨ ¬active_r_check
+        let mut constraint11_clause: Vec<Lit> = rule
+            .heads
+            .iter()
+            .map(|&h| Lit::pos(layout.check(h)))
+            .collect();
+        constraint11_clause.push(Lit::neg(active_check));
+        check_clauses.push(constraint11_clause);
+    }
+}
+
+/// Generate a loop constraint for the candidate solver (Constraint 13).
 ///
 /// Given an unfounded set U (atoms in candidate but not in check model),
-/// find external support rules and require at least one to be active.
+/// find external support and require at least one to be active.
 ///
-/// Clause: Σ ¬x_cand (for x ∈ U) + Σ active_r_cand (for external r) >= 1
+/// PB: Σ ¬x_cand (x ∈ U) + Σ n · active_r,h_cand (external (r,h)) >= n
+/// where n = |U|.
+///
+/// For choice rules, use active_r_cand directly.
+/// For non-choice rules, use active_r,h_cand for each head h in U.
 pub fn generate_loop_constraint(
     unfounded_set: &[Atom],
     program: &Program,
     layout: &VarLayout,
-) -> Clause {
-    // Find external support rules: rules r where heads(r) ∩ U ≠ ∅ but body⁺(r) ∩ U = ∅
+) -> PBConstraint {
+    let n = unfounded_set.len() as Weight;
     let u_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
 
-    let mut external_rules = Vec::new();
+    let mut terms: Vec<(Lit, Weight)> = Vec::new();
 
+    // Negated unfounded atoms (each with weight 1)
+    for &atom in unfounded_set {
+        terms.push((Lit::neg(layout.cand(atom)), 1));
+    }
+
+    // Find external support for each rule
     for (rule_idx, rule) in program.rules.iter().enumerate() {
+        let rule_idx = rule_idx as u32;
         match rule {
             Rule::Basic(r) => {
-                // Check if head is in unfounded set
+                // Check if head is in unfounded set and body doesn't depend on U
                 if u_set.contains(&r.head) {
-                    // Check that no positive body atom is in unfounded set
                     let body_in_u = r
                         .body
                         .iter()
                         .any(|lit| lit.positive && u_set.contains(&lit.atom));
                     if !body_in_u {
-                        external_rules.push(rule_idx as u32);
+                        // Use active_head_cand for this single head (head_idx = 0)
+                        terms.push((Lit::pos(layout.active_head_cand(rule_idx, 0)), n));
                     }
                 }
             }
             Rule::Choice(r) => {
-                // Check if any head is in unfounded set
+                // For choice rules, check if any head is in U and body doesn't depend on U
                 let head_in_u = r.heads.iter().any(|h| u_set.contains(h));
                 if head_in_u {
-                    // Check that no positive body atom is in unfounded set
                     let body_in_u = r
                         .body
                         .iter()
                         .any(|lit| lit.positive && u_set.contains(&lit.atom));
                     if !body_in_u {
-                        external_rules.push(rule_idx as u32);
+                        // Use active_r_cand (choice rules don't have per-head vars)
+                        terms.push((Lit::pos(layout.active_cand(rule_idx)), n));
                     }
                 }
             }
-            Rule::Disjunctive(_) => {
-                panic!("Disjunctive rules not yet supported");
+            Rule::Disjunctive(r) => {
+                // Check that body doesn't depend on U
+                let body_in_u = r
+                    .body
+                    .iter()
+                    .any(|lit| lit.positive && u_set.contains(&lit.atom));
+                if !body_in_u {
+                    // For each head in U, add active_r,h_cand with weight n
+                    for (head_idx, &head) in r.heads.iter().enumerate() {
+                        if u_set.contains(&head) {
+                            terms.push((
+                                Lit::pos(layout.active_head_cand(rule_idx, head_idx as u32)),
+                                n,
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
 
-    // Build clause: Σ ¬x_cand + Σ active_r_cand >= 1
-    let mut clause = Vec::new();
-
-    // Negated unfounded atoms
-    for &atom in unfounded_set {
-        clause.push(Lit::neg(layout.cand(atom)));
-    }
-
-    // External rules must have at least one active
-    for rule_idx in external_rules {
-        clause.push(Lit::pos(layout.active_cand(rule_idx)));
-    }
-
-    clause
+    (terms, n)
 }
 
 #[cfg(test)]
@@ -421,13 +723,33 @@ mod tests {
     use super::*;
     use crate::types::WeightedLit;
 
+    fn make_program(rules: Vec<Rule>, max_atom: u32) -> Program {
+        Program {
+            rules,
+            symbols: Vec::new(),
+            max_atom,
+        }
+    }
+
     #[test]
     fn test_var_layout() {
-        // 3 atoms, 2 rules
-        let layout = VarLayout {
-            num_atoms: 3,
-            num_rules: 2,
-        };
+        // 3 atoms, 2 basic rules with single heads
+        let program = make_program(
+            vec![
+                Rule::Basic(BasicRule {
+                    head: Atom(2),
+                    body: vec![],
+                    bound: 0,
+                }),
+                Rule::Basic(BasicRule {
+                    head: Atom(3),
+                    body: vec![],
+                    bound: 0,
+                }),
+            ],
+            3,
+        );
+        let layout = VarLayout::new(&program);
 
         // cand: 1, 2, 3
         assert_eq!(layout.cand(Atom(1)).raw(), 1);
@@ -449,7 +771,17 @@ mod tests {
         assert_eq!(layout.dim(Atom(1)).raw(), 11);
         assert_eq!(layout.dim(Atom(3)).raw(), 13);
 
-        assert_eq!(layout.total_vars(), 13);
+        // used_cand for 2 non-choice rules: 14, 15
+        assert_eq!(layout.used_cand(0).raw(), 14);
+        assert_eq!(layout.used_cand(1).raw(), 15);
+
+        // active_head_cand: each rule has 1 head, so: 16, 17
+        assert_eq!(layout.active_head_cand(0, 0).raw(), 16);
+        assert_eq!(layout.active_head_cand(1, 0).raw(), 17);
+
+        // Total: 3 atoms + 2 active_cand + 2 active_check + 3 check + 3 dim
+        //        + 2 used_cand + 2 active_head_cand = 17
+        assert_eq!(layout.total_vars(), 17);
     }
 
     #[test]
@@ -465,10 +797,8 @@ mod tests {
             bound: 2,
         };
 
-        let layout = VarLayout {
-            num_atoms: 4,
-            num_rules: 1,
-        };
+        let program = make_program(vec![Rule::Basic(rule.clone())], 4);
+        let layout = VarLayout::new(&program);
 
         let mut cand = Vec::new();
         let mut cand_pb = Vec::new();
@@ -476,21 +806,21 @@ mod tests {
         let mut check_pb = Vec::new();
         encode_basic_rule(&rule, 0, &layout, &mut cand, &mut cand_pb, &mut check, &mut check_pb);
 
-        // Candidate solver should have 1 clause (Constraint 3):
-        // h_cand ∨ ¬active_cand_0
-        assert_eq!(cand.len(), 1);
+        // Candidate solver should have 4 clauses:
+        // Constraint 3: h_cand ∨ ¬active_cand_0
+        // Constraint 4: ¬used_cand ∨ active_cand
+        // Constraint 5: ¬active_head_cand ∨ used_cand
+        // Constraint 7: h_cand ∨ ¬active_head_cand
+        assert_eq!(cand.len(), 4);
 
-        // Candidate solver should have 2 PB constraints (Constraints 1 and 2):
-        // 1. Body satisfaction: (active, 1) + (¬b, 1) + (c, 1) >= 1
-        // 2. Body falsification: (¬active, 2) + (b, 1) + (¬c, 1) >= 2
+        // Candidate solver should have 2 PB constraints (Constraints 1 and 2)
         assert_eq!(cand_pb.len(), 2);
 
-        // Check solver should have 1 clause (Constraint 7):
-        // ¬h_cand ∨ h_check ∨ ¬active_check_0
+        // Check solver should have 1 clause (Constraint 11):
+        // h_check ∨ ¬active_check_0
         assert_eq!(check.len(), 1);
 
-        // Check solver should have 1 PB constraint (Constraint 6):
-        // (¬active_cand, 1) + (active_check, 1) + (¬b_check, 1) + (c_check, 1) >= 1
+        // Check solver should have 1 PB constraint (Constraint 10)
         assert_eq!(check_pb.len(), 1);
     }
 }

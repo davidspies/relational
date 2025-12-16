@@ -131,10 +131,13 @@ impl AspSolver {
                 }
                 MinimalityResult::SmallerExists { unfounded_set } => {
                     // Not stable - add loop constraint
-                    let loop_clause =
+                    let (terms, bound) =
                         generate_loop_constraint(&unfounded_set, &self.program, &self.encoded.layout);
 
-                    if loop_clause.is_empty() {
+                    // Check if there's any external support (terms beyond the negated atoms)
+                    let has_external_support = terms.len() > unfounded_set.len();
+
+                    if !has_external_support {
                         // No external support rules - block this candidate
                         let blocking = self.blocking_clause();
                         self.add_cand_clause(&blocking);
@@ -142,8 +145,8 @@ impl AspSolver {
                     } else {
                         // Add loop constraint and backtrack to asserting level
                         loop_constraints += 1;
-                        let backtrack_level = self.compute_backtrack_level(&loop_clause);
-                        self.add_cand_clause(&loop_clause);
+                        let backtrack_level = self.compute_backtrack_level_pb(&terms);
+                        self.add_cand_pb_constraint(&terms, bound);
                         self.cand_solver.backtrack(&mut self.db, backtrack_level);
                     }
                 }
@@ -168,15 +171,22 @@ impl AspSolver {
         self.next_cand_clause_id += 1;
     }
 
-    /// Compute the backtrack level for a learned clause.
-    /// Returns the second-highest decision level among the clause literals.
-    fn compute_backtrack_level(&self, clause: &Clause) -> Level {
-        // Get all levels for literals in the clause
-        // The clause contains literals that should become true, so we check the negation
+    /// Add a PB constraint to the candidate solver.
+    fn add_cand_pb_constraint(&mut self, terms: &[(Lit, cdcl::Weight)], bound: cdcl::Weight) {
+        self.cand_solver
+            .add_pb_constraint(&mut self.db, self.next_cand_clause_id, terms, bound);
+        self.next_cand_clause_id += 1;
+    }
+
+    /// Compute the backtrack level for a learned PB constraint.
+    /// Returns the second-highest decision level among the constraint literals.
+    fn compute_backtrack_level_pb(&self, terms: &[(Lit, cdcl::Weight)]) -> Level {
+        // Get all levels for literals in the constraint
+        // The constraint contains literals that should become true, so we check the negation
         // Note: some literals may be unassigned (e.g., supporting rule variables)
-        let mut levels: Vec<Level> = clause
+        let mut levels: Vec<Level> = terms
             .iter()
-            .filter_map(|&lit| self.cand_solver.get_level(!lit))
+            .filter_map(|&(lit, _)| self.cand_solver.get_level(!lit))
             .collect();
 
         // Sort descending to find second-highest
@@ -448,5 +458,53 @@ mod tests {
         let input = "3 1 2 0 0\n1 1 1 1 2\n0\n2 a\n0\n";
         let results = solve_asp(input);
         assert_eq!(results, vec![vec!["a"]]);
+    }
+
+    #[test]
+    fn test_disjunctive_simple() {
+        // a | b.
+        // Two answer sets: {a} and {b}
+        // Format: 8 num_heads h1 h2 num_pos num_neg body_lits...
+        let input = "8 2 2 3 0 0\n0\n2 a\n3 b\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a"], vec!["b"]]);
+    }
+
+    #[test]
+    fn test_disjunctive_with_body() {
+        // a | b :- c. c.
+        // Two answer sets: {a, c} and {b, c}
+        // Rule 1: 8 2 2 3 1 0 4 (a | b :- c)
+        // Rule 2: 1 4 0 0 (c.)
+        let input = "8 2 2 3 1 0 4\n1 4 0 0\n0\n2 a\n3 b\n4 c\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a", "c"], vec!["b", "c"]]);
+    }
+
+    #[test]
+    fn test_disjunctive_with_constraint() {
+        // a | b. :- a.
+        // Only {b} is valid since a is forbidden
+        let input = "8 2 2 3 0 0\n1 1 1 0 2\n0\n2 a\n3 b\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["b"]]);
+    }
+
+    #[test]
+    fn test_disjunctive_three_heads() {
+        // a | b | c.
+        // Three answer sets: {a}, {b}, {c}
+        let input = "8 3 2 3 4 0 0\n0\n2 a\n3 b\n4 c\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a"], vec!["b"], vec!["c"]]);
+    }
+
+    #[test]
+    fn test_disjunctive_with_default_negation() {
+        // a | b. c :- not a.
+        // Two answer sets: {a} and {b, c}
+        let input = "8 2 2 3 0 0\n1 4 1 1 2\n0\n2 a\n3 b\n4 c\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results, vec![vec!["a"], vec!["b", "c"]]);
     }
 }
