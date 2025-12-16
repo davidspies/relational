@@ -1,35 +1,30 @@
-//! ASP solver using two CDCL SAT solvers.
+//! ASP solver using RoundingSat PB solver.
 //!
 //! Architecture:
 //! - Candidate solver: finds candidate answer sets
 //! - Check solver: checks if a strictly smaller model exists (unfounded set detection)
-//! - External relation: candidate's assignments feed into check as external input
-//! - Both solvers share ONE database and retain learned clauses
+//! - Both solvers are created once; constraints are added incrementally to cand_solver,
+//!   and check_solver uses assumptions for the candidate assignment.
 
 use std::collections::HashMap;
 use std::time::Instant;
 
-use cdcl::{Level, Lit, Var};
 use contiguous_data::HashSet;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
-use relational::create_persistent_input;
-use relational::database::{Database, DatabaseBuilder};
+use roundingsat::{SolveResult, Solver};
 
-use crate::encoding::{Clause, EncodedProgram, encode_program, generate_loop_constraint};
+use crate::encoding::{Clause, EncodedProgram, Var, neg, pos};
+use crate::encoding::{encode_program, generate_loop_constraint};
 use crate::types::{Atom, Program};
 
 /// An answer set (stable model).
 pub type AnswerSet = HashSet<Atom>;
 
-/// ASP Solver using two-solver architecture with persistent state.
+/// ASP Solver using RoundingSat PB solver.
 pub struct AspSolver {
     program: Program,
     encoded: EncodedProgram,
-    db: Database,
-    cand_solver: cdcl::Solver,
-    check_solver: cdcl::Solver,
-    next_cand_clause_id: u32,
     /// Fast lookup: atom → symbol name
     atom_names: HashMap<Atom, String>,
     /// Seeded RNG for deterministic behavior
@@ -48,57 +43,9 @@ impl AspSolver {
             .map(|(atom, name)| (*atom, name.clone()))
             .collect();
 
-        let mut db_builder = DatabaseBuilder::new();
-
-        // Create empty external for candidate solver (no external assignments)
-        create_persistent_input!(db_builder, _cand_external_inp, cand_external, Lit);
-
-        // Variables for candidate solver: cand atoms + active rules
-        let num_cand_vars = encoded.layout.num_atoms + encoded.layout.num_rules;
-        let cand_vars: HashSet<Var> = (1..=num_cand_vars).map(Var::new).collect();
-        let cand_solver = cdcl::Solver::new(&mut db_builder, &cand_vars, cand_external);
-
-        // Check solver uses candidate's assigned literals as external input
-        let check_external = cand_solver.assigned_saved().get();
-
-        // Variables for check solver: all variables
-        let check_vars: HashSet<Var> = (1..=encoded.layout.total_vars()).map(Var::new).collect();
-        let check_solver = cdcl::Solver::new(&mut db_builder, &check_vars, check_external);
-
-        let mut db = db_builder.build();
-        let mut cand_solver = cand_solver;
-        let mut check_solver = check_solver;
-
-        // Add candidate clauses
-        for (i, clause) in encoded.cand_clauses.iter().enumerate() {
-            cand_solver.add_clause(&mut db, i as u32, clause);
-        }
-        let mut next_id = encoded.cand_clauses.len() as u32;
-
-        // Add candidate PB constraints
-        for (i, (terms, bound)) in encoded.cand_pb_constraints.iter().enumerate() {
-            cand_solver.add_pb_constraint(&mut db, next_id + i as u32, terms, *bound);
-        }
-        next_id += encoded.cand_pb_constraints.len() as u32;
-
-        // Add check clauses
-        for (i, clause) in encoded.check_clauses.iter().enumerate() {
-            check_solver.add_clause(&mut db, i as u32, clause);
-        }
-
-        // Add check PB constraints
-        let check_pb_id_offset = encoded.check_clauses.len() as u32;
-        for (i, (terms, bound)) in encoded.check_pb_constraints.iter().enumerate() {
-            check_solver.add_pb_constraint(&mut db, check_pb_id_offset + i as u32, terms, *bound);
-        }
-
         AspSolver {
             program,
             encoded,
-            db,
-            cand_solver,
-            check_solver,
-            next_cand_clause_id: next_id,
             atom_names,
             rng: StdRng::seed_from_u64(42),
         }
@@ -131,7 +78,11 @@ impl AspSolver {
         let mut count = 0usize;
         let mut cand_calls = 0u64;
         let mut check_calls = 0u64;
-        let mut loop_constraints = 0u64;
+        let mut loop_constraints_added = 0u64;
+
+        // Create both solvers once
+        let mut cand_solver = self.create_cand_solver();
+        let mut check_solver = self.create_check_solver();
 
         loop {
             // NECESSARY: limit=0 means unlimited, limit>0 means stop after that many
@@ -147,33 +98,35 @@ impl AspSolver {
                     count,
                     cand_calls,
                     check_calls,
-                    loop_constraints
+                    loop_constraints_added
                 );
                 last_stats = Instant::now();
             }
 
-            // Step 1: Solve candidate to find a candidate answer set
-            let (sat, _stats) = self.cand_solver.solve_and_stay(&mut self.db);
+            // Step 1: Solve candidate solver
+            let result = cand_solver.solve();
             cand_calls += 1;
-            if !sat {
-                break; // No more candidates - UNSAT
+
+            if result != SolveResult::Sat {
+                break; // No more candidates
             }
 
-            // Step 2: Check if check solver finds a strictly smaller model (unfounded set)
-            // (candidate's assignments are visible to check via external relation)
-            match self.check_minimality(&mut check_calls) {
+            // Get candidate assignment
+            let cand_assignment = self.extract_cand_assignment(&cand_solver);
+
+            // Step 2: Check if this candidate is a stable model
+            match self.check_minimality(&cand_assignment, &mut check_solver, &mut check_calls) {
                 MinimalityResult::IsMinimal => {
                     // Found a stable model!
-                    let answer_set = self.extract_answer_set();
+                    let answer_set = self.extract_answer_set(&cand_assignment);
                     on_answer(answer_set);
                     count += 1;
 
                     // Add blocking clause to prevent finding same model again
-                    let blocking = self.blocking_clause();
-                    self.add_cand_clause(&blocking);
-
-                    // Backtrack to try again
-                    self.cand_solver.backtrack(&mut self.db, Level::TOP);
+                    let blocking = self.create_blocking_clause(&cand_assignment);
+                    if cand_solver.add_clause(&blocking).is_err() {
+                        break; // No more models possible
+                    }
                 }
                 MinimalityResult::SmallerExists { unfounded_set } => {
                     // Pick a random atom from the unfounded set to assert
@@ -182,25 +135,26 @@ impl AspSolver {
                     let chosen_atom = unfounded_set[idx];
 
                     // Not stable - add loop constraint
-                    // Use the live assignment to detect stealing heads
-                    // Scope the assignment borrow to avoid conflict with mutable borrows later
-                    let (terms, bound) = {
-                        let assignment = self.cand_solver.get_assignment();
-                        generate_loop_constraint(
-                            chosen_atom,
-                            &unfounded_set,
-                            &self.program,
-                            &self.encoded.layout,
-                            &*assignment,
-                            &mut self.rng,
-                        )
-                    };
+                    // Use the current assignment to detect stealing heads
+                    let (terms, bound) = generate_loop_constraint(
+                        chosen_atom,
+                        &unfounded_set,
+                        &self.program,
+                        &self.encoded.layout,
+                        &cand_assignment,
+                        &mut self.rng,
+                    );
 
-                    loop_constraints += 1;
+                    loop_constraints_added += 1;
 
-                    let backtrack_level = self.compute_backtrack_level_pb(&terms);
-                    self.add_cand_pb_constraint(&terms, bound);
-                    self.cand_solver.backtrack(&mut self.db, backtrack_level);
+                    // Add loop constraint to candidate solver
+                    let (lits, coefs): (Vec<i32>, Vec<i32>) = terms.iter().copied().unzip();
+                    if cand_solver
+                        .add_pb_constraint(&lits, &coefs, bound as i64)
+                        .is_err()
+                    {
+                        break; // No more models possible
+                    }
                 }
             }
         }
@@ -211,72 +165,119 @@ impl AspSolver {
             count,
             cand_calls,
             check_calls,
-            loop_constraints
+            loop_constraints_added
         );
     }
 
-    /// Add a clause to the candidate solver.
-    fn add_cand_clause(&mut self, clause: &Clause) {
-        self.cand_solver
-            .add_clause(&mut self.db, self.next_cand_clause_id, clause);
-        self.next_cand_clause_id += 1;
+    /// Create the candidate solver with base constraints.
+    fn create_cand_solver(&self) -> Solver {
+        let layout = &self.encoded.layout;
+        let num_vars = layout.total_vars();
+
+        let mut solver = Solver::new().expect("Failed to create solver");
+        solver.set_num_vars(num_vars as i32);
+
+        // Add base candidate clauses
+        for clause in &self.encoded.cand_clauses {
+            let _ = solver.add_clause(clause);
+        }
+
+        // Add base candidate PB constraints
+        for (terms, bound) in &self.encoded.cand_pb_constraints {
+            let (lits, coefs): (Vec<i32>, Vec<i32>) = terms.iter().copied().unzip();
+            let _ = solver.add_pb_constraint(&lits, &coefs, *bound as i64);
+        }
+
+        solver
     }
 
-    /// Add a PB constraint to the candidate solver.
-    fn add_cand_pb_constraint(&mut self, terms: &[(Lit, cdcl::Weight)], bound: cdcl::Weight) {
-        self.cand_solver
-            .add_pb_constraint(&mut self.db, self.next_cand_clause_id, terms, bound);
-        self.next_cand_clause_id += 1;
+    /// Create the check solver with base constraints.
+    fn create_check_solver(&self) -> Solver {
+        let layout = &self.encoded.layout;
+        let num_vars = layout.total_vars();
+
+        let mut solver = Solver::new().expect("Failed to create solver");
+        solver.set_num_vars(num_vars as i32);
+
+        // Add check clauses
+        for clause in &self.encoded.check_clauses {
+            let _ = solver.add_clause(clause);
+        }
+
+        // Add check PB constraints
+        for (terms, bound) in &self.encoded.check_pb_constraints {
+            let (lits, coefs): (Vec<i32>, Vec<i32>) = terms.iter().copied().unzip();
+            let _ = solver.add_pb_constraint(&lits, &coefs, *bound as i64);
+        }
+
+        solver
     }
 
-    /// Compute the backtrack level for a learned PB constraint.
-    /// Returns the second-highest decision level among the constraint literals.
-    fn compute_backtrack_level_pb(&self, terms: &[(Lit, cdcl::Weight)]) -> Level {
-        // Get all levels for literals in the constraint
-        // The constraint contains literals that should become true, so we check the negation
-        // Note: some literals may be unassigned (e.g., supporting rule variables)
-        let mut levels: Vec<Level> = terms
+    /// Extract candidate assignment from solver.
+    fn extract_cand_assignment(&self, solver: &Solver) -> HashMap<Var, bool> {
+        let layout = &self.encoded.layout;
+        let mut assignment = HashMap::new();
+
+        // Extract atom values
+        for atom_id in 1..=layout.num_atoms {
+            let var = layout.cand(Atom(atom_id));
+            if let Some(value) = solver.get_value(var) {
+                assignment.insert(var, value);
+            }
+        }
+
+        // Extract active rule values at all levels
+        for rule_idx in 0..layout.num_rules {
+            let num_levels = layout.num_levels(rule_idx);
+            let bound = layout.bound(rule_idx);
+            for level_offset in 0..num_levels {
+                let level = bound + level_offset as i32;
+                let var = layout.active_cand(rule_idx, level);
+                if let Some(value) = solver.get_value(var) {
+                    assignment.insert(var, value);
+                }
+            }
+        }
+
+        assignment
+    }
+
+    /// Check if the candidate is minimal (no unfounded set exists).
+    fn check_minimality(
+        &self,
+        cand_assignment: &HashMap<Var, bool>,
+        check_solver: &mut Solver,
+        check_calls: &mut u64,
+    ) -> MinimalityResult {
+        // Set candidate assignment as assumptions
+        let assumptions: Vec<i32> = cand_assignment
             .iter()
-            .filter_map(|&(lit, _)| self.cand_solver.get_level(!lit))
+            .map(|(&var, &value)| if value { var } else { -var })
             .collect();
+        check_solver
+            .set_assumptions(&assumptions)
+            .expect("Invalid assumption");
 
-        // Sort descending to find second-highest
-        levels.sort_by(|a, b| b.cmp(a));
-        levels.dedup();
-
-        // Return second-highest level, or TOP if only one level
-        levels.get(1).copied().unwrap_or(Level::TOP)
-    }
-
-    /// Check if the current candidate assignment is minimal (no unfounded set exists).
-    fn check_minimality(&mut self, check_calls: &mut u64) -> MinimalityResult {
-        // Check solver sees candidate's assignments via external relation
-        // Try to find a strictly smaller model (an unfounded set)
-        let (sat, _stats) = self.check_solver.solve_and_stay(&mut self.db);
+        let result = check_solver.solve();
         *check_calls += 1;
-        if sat {
-            // Found a smaller model - extract the unfounded set
-            let unfounded_set = {
-                let cand_assignment = self.cand_solver.get_assignment();
-                let check_assignment = self.check_solver.get_assignment();
-                self.extract_unfounded_set(&*cand_assignment, &*check_assignment)
-            };
 
-            // Backtrack check solver
-            self.check_solver.backtrack(&mut self.db, Level::TOP);
+        // Clear assumptions for next call
+        check_solver.clear_assumptions();
 
+        if result == SolveResult::Sat {
+            // Found a smaller model - extract unfounded set
+            let unfounded_set = self.extract_unfounded_set(cand_assignment, check_solver);
             MinimalityResult::SmallerExists { unfounded_set }
         } else {
-            // No smaller model - candidate is minimal
             MinimalityResult::IsMinimal
         }
     }
 
-    /// Extract unfounded set: atoms in candidate but not in check (S_cand \ S_check).
+    /// Extract unfounded set: atoms in candidate but not in check.
     fn extract_unfounded_set(
         &self,
-        cand_assignment: &contiguous_data::Multiset<Lit>,
-        check_assignment: &contiguous_data::Multiset<Lit>,
+        cand_assignment: &HashMap<Var, bool>,
+        check_solver: &Solver,
     ) -> Vec<Atom> {
         let layout = &self.encoded.layout;
         let mut unfounded = Vec::new();
@@ -286,9 +287,8 @@ impl AspSolver {
             let cand_var = layout.cand(atom);
             let check_var = layout.check(atom);
 
-            // Check if atom is true in candidate but false in check
-            let in_cand = cand_assignment.contains(&Lit::pos(cand_var));
-            let in_check = check_assignment.contains(&Lit::pos(check_var));
+            let in_cand = cand_assignment.get(&cand_var).copied().unwrap_or(false);
+            let in_check = check_solver.get_value(check_var).unwrap_or(false);
 
             if in_cand && !in_check {
                 unfounded.push(atom);
@@ -298,21 +298,20 @@ impl AspSolver {
         unfounded
     }
 
-    /// Create a blocking clause to prevent finding the same candidate model again.
-    fn blocking_clause(&self) -> Clause {
+    /// Create a blocking clause to prevent finding the same candidate.
+    fn create_blocking_clause(&self, cand_assignment: &HashMap<Var, bool>) -> Clause {
         let layout = &self.encoded.layout;
-        let assignment = self.cand_solver.get_assignment();
         let mut clause = Vec::new();
 
-        // Blocking clause: negate current assignment for atoms
         for atom_id in 2..=layout.num_atoms {
             let atom = Atom(atom_id);
             let var = layout.cand(atom);
-            // Check if positive literal is assigned (atom is true)
-            if assignment.contains(&Lit::pos(var)) {
-                clause.push(Lit::neg(var));
-            } else if assignment.contains(&Lit::neg(var)) {
-                clause.push(Lit::pos(var));
+            if let Some(&value) = cand_assignment.get(&var) {
+                if value {
+                    clause.push(neg(var));
+                } else {
+                    clause.push(pos(var));
+                }
             }
             // If neither, atom is unassigned - don't include in blocking clause
         }
@@ -320,18 +319,19 @@ impl AspSolver {
         clause
     }
 
-    /// Extract the answer set from the current candidate assignment.
-    fn extract_answer_set(&self) -> AnswerSet {
+    /// Extract the answer set from the candidate assignment.
+    fn extract_answer_set(&self, cand_assignment: &HashMap<Var, bool>) -> AnswerSet {
         let layout = &self.encoded.layout;
-        let assignment = self.cand_solver.get_assignment();
         let mut answer_set = HashSet::default();
 
         // Extract true atoms with symbol names (non-auxiliary atoms)
         for atom_id in 2..=layout.num_atoms {
             let atom = Atom(atom_id);
             let var = layout.cand(atom);
-            // Check if positive literal is assigned (atom is true)
-            if assignment.contains(&Lit::pos(var)) && self.is_shown_atom(atom) {
+            if let Some(&value) = cand_assignment.get(&var)
+                && value
+                && self.is_shown_atom(atom)
+            {
                 answer_set.insert(atom);
             }
         }

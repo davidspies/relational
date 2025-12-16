@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cdcl = { path = "../cdcl" }
-relational = { path = "../relational" }
+roundingsat = { path = "../roundingsat" }
 contiguous_data = { path = "../contiguous_data" }
 rand = "*"
 

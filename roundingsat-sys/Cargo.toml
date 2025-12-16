@@ -1,0 +1,5 @@
+[package]
+name = "roundingsat-sys"
+version.workspace = true
+edition.workspace = true
+links = "roundingsat"

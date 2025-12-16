@@ -1,5 +1,5 @@
 [workspace]
-members = ["relational", "cdcl", "contiguous_data", "asp"]
+members = ["relational", "cdcl", "contiguous_data", "asp", "roundingsat-sys", "roundingsat"]
 resolver = "2"
 
 [workspace.package]

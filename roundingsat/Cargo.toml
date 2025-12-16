@@ -1,0 +1,7 @@
+[package]
+name = "roundingsat"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+roundingsat-sys = { path = "../roundingsat-sys" }

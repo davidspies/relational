@@ -165,7 +165,7 @@ fn parse_basic_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
     Ok(DisjunctiveRule {
         heads: vec![head],
         body,
-        bound: body_count as i64,
+        bound: body_count as i32,
     })
 }
 
@@ -182,7 +182,7 @@ fn parse_cardinality_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
     let neg_count: usize = parts[3]
         .parse()
         .map_err(|e| format!("Invalid neg count: {e}"))?;
-    let bound: i64 = parts[4]
+    let bound: i32 = parts[4]
         .parse()
         .map_err(|e| format!("Invalid bound: {e}"))?;
 
@@ -221,7 +221,7 @@ fn parse_weight_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
     }
 
     let head = Atom(parts[1].parse().map_err(|e| format!("Invalid head: {e}"))?);
-    let bound: i64 = parts[2]
+    let bound: i32 = parts[2]
         .parse()
         .map_err(|e| format!("Invalid bound: {e}"))?;
     let body_count: usize = parts[3]
@@ -249,7 +249,7 @@ fn parse_weight_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
                 .parse()
                 .map_err(|e| format!("Invalid body literal: {e}"))?,
         );
-        let weight: i64 = parts[weights_start + i]
+        let weight: i32 = parts[weights_start + i]
             .parse()
             .map_err(|e| format!("Invalid weight: {e}"))?;
 
@@ -330,7 +330,7 @@ fn parse_choice_rule(parts: &[&str]) -> Result<ChoiceRule, String> {
     Ok(ChoiceRule {
         heads,
         body,
-        bound: body_count as i64,
+        bound: body_count as i32,
     })
 }
 
@@ -398,7 +398,7 @@ fn parse_disjunctive_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
     Ok(DisjunctiveRule {
         heads,
         body,
-        bound: body_count as i64,
+        bound: body_count as i32,
     })
 }
 

@@ -11,11 +11,30 @@
 
 use std::collections::HashMap;
 
-use cdcl::{Lit, Var, Weight};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
 use crate::types::{Atom, ChoiceRule, DisjunctiveRule, Program, Rule, WeightedLit};
+
+/// A literal is a signed integer: positive for true, negative for false.
+/// Variable n is represented as literal n (true) or -n (false).
+pub type Lit = i32;
+
+/// A variable is a positive integer.
+pub type Var = i32;
+
+/// Weight for PB constraints.
+pub type Weight = i32;
+
+/// Helper to create a positive literal from a variable.
+pub fn pos(v: Var) -> Lit {
+    v
+}
+
+/// Helper to create a negative literal from a variable.
+pub fn neg(v: Var) -> Lit {
+    -v
+}
 
 /// Entry in the atom→rules index for generate_loop_constraint.
 #[derive(Debug, Clone, Copy)]
@@ -142,7 +161,7 @@ impl VarLayout {
 
     /// Get the x_cand variable for an atom.
     pub fn cand(&self, atom: Atom) -> Var {
-        Var::new(atom.0)
+        atom.0 as Var
     }
 
     /// Get the bound (threshold) for a rule.
@@ -166,28 +185,28 @@ impl VarLayout {
         let info = &self.rule_info[rule_idx as usize];
         let level_offset = (level - info.bound) as u32;
         assert!(level_offset < info.num_levels, "level out of range");
-        Var::new(info.active_cand_start + level_offset)
+        (info.active_cand_start + level_offset) as Var
     }
 
     /// Get the active_r_cand variable at base level (s = bound).
     pub fn active_cand_base(&self, rule_idx: u32) -> Var {
         let info = &self.rule_info[rule_idx as usize];
-        Var::new(info.active_cand_start)
+        info.active_cand_start as Var
     }
 
     /// Get the active_r_check variable for a rule index.
     pub fn active_check(&self, rule_idx: u32) -> Var {
-        Var::new(self.active_check_base + rule_idx)
+        (self.active_check_base + rule_idx) as Var
     }
 
     /// Get the x_check variable for an atom.
     pub fn check(&self, atom: Atom) -> Var {
-        Var::new(self.check_base + atom.0 - 1)
+        (self.check_base + atom.0 - 1) as Var
     }
 
     /// Get the x_dim variable for an atom.
     pub fn dim(&self, atom: Atom) -> Var {
-        Var::new(self.dim_base + atom.0 - 1)
+        (self.dim_base + atom.0 - 1) as Var
     }
 
     /// Get rules that have the given atom as a head.
@@ -310,11 +329,11 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     }
 
     // Add constraint that false atom (atom 1) is always false in candidate solver
-    cand_clauses.push(vec![Lit::neg(layout.cand(Atom(1)))]);
+    cand_clauses.push(vec![neg(layout.cand(Atom(1)))]);
 
     // Add single-atom loop constraints for each atom (Constraint 12 initialization)
-    // At initialization, no assignments exist, so use empty multiset
-    let empty_assignment = contiguous_data::Multiset::new();
+    // At initialization, no assignments exist, so use empty HashMap
+    let empty_assignment: HashMap<Var, bool> = HashMap::new();
     let mut rng = StdRng::seed_from_u64(42);
     for atom_id in 2..=layout.num_atoms {
         let atom = Atom(atom_id);
@@ -329,9 +348,9 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     for atom_id in 2..=layout.num_atoms {
         let atom = Atom(atom_id);
         let terms = vec![
-            (Lit::neg(layout.check(atom)), 1),
-            (Lit::pos(layout.cand(atom)), 1),
-            (Lit::neg(layout.dim(atom)), 1),
+            (neg(layout.check(atom)), 1),
+            (pos(layout.cand(atom)), 1),
+            (neg(layout.dim(atom)), 1),
         ];
         check_pb_constraints.push((terms, 2));
     }
@@ -341,9 +360,9 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     for atom_id in 2..=layout.num_atoms {
         let atom = Atom(atom_id);
         check_clauses.push(vec![
-            Lit::pos(layout.check(atom)),
-            Lit::neg(layout.cand(atom)),
-            Lit::pos(layout.dim(atom)),
+            pos(layout.check(atom)),
+            neg(layout.cand(atom)),
+            pos(layout.dim(atom)),
         ]);
     }
 
@@ -353,7 +372,7 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     // which correctly makes check solver UNSAT (no smaller model than {})
     let mut dim_clause = Vec::new();
     for atom_id in 2..=layout.num_atoms {
-        dim_clause.push(Lit::pos(layout.dim(Atom(atom_id))));
+        dim_clause.push(pos(layout.dim(Atom(atom_id))));
     }
     check_clauses.push(dim_clause);
 
@@ -361,8 +380,8 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     // This ensures that if a rule is active in check, it must also be active in cand.
     for rule_idx in 0..layout.num_rules {
         check_clauses.push(vec![
-            Lit::pos(layout.active_cand_base(rule_idx)),
-            Lit::neg(layout.active_check(rule_idx)),
+            pos(layout.active_cand_base(rule_idx)),
+            neg(layout.active_check(rule_idx)),
         ]);
     }
 
@@ -405,12 +424,12 @@ fn encode_choice_rule(
         let level = bound + level_offset as Weight;
         let active_at_level = layout.active_cand(rule_idx, level);
         let falsification_weight = sum_weights - level + 1;
-        let mut constraint1_terms = vec![(Lit::pos(active_at_level), falsification_weight)];
+        let mut constraint1_terms = vec![(pos(active_at_level), falsification_weight)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
-                Lit::neg(layout.cand(lit.atom))
+                neg(layout.cand(lit.atom))
             } else {
-                Lit::pos(layout.cand(lit.atom))
+                pos(layout.cand(lit.atom))
             };
             constraint1_terms.push((cdcl_lit, lit.weight));
         }
@@ -422,12 +441,12 @@ fn encode_choice_rule(
     for level_offset in 0..num_levels {
         let level = bound + level_offset as Weight;
         let active_at_level = layout.active_cand(rule_idx, level);
-        let mut constraint2_terms = vec![(Lit::neg(active_at_level), level)];
+        let mut constraint2_terms = vec![(neg(active_at_level), level)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
-                Lit::pos(layout.cand(lit.atom))
+                pos(layout.cand(lit.atom))
             } else {
-                Lit::neg(layout.cand(lit.atom))
+                neg(layout.cand(lit.atom))
             };
             constraint2_terms.push((cdcl_lit, lit.weight));
         }
@@ -440,15 +459,15 @@ fn encode_choice_rule(
     // Positive body uses check variables, negative body uses cand variables
     let falsification_weight = sum_weights - bound + 1;
     let mut constraint7_terms = vec![
-        (Lit::neg(active_cand), falsification_weight),
-        (Lit::pos(active_check), falsification_weight),
+        (neg(active_cand), falsification_weight),
+        (pos(active_check), falsification_weight),
     ];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
-            Lit::neg(layout.check(lit.atom))
+            neg(layout.check(lit.atom))
         } else {
             // Negative body uses cand, not check (per formalization Constraint 7)
-            Lit::pos(layout.cand(lit.atom))
+            pos(layout.cand(lit.atom))
         };
         constraint7_terms.push((cdcl_lit, lit.weight));
     }
@@ -456,13 +475,13 @@ fn encode_choice_rule(
 
     // Constraint 8 (reduct body falsification):
     // t_r · ¬active_r_check + Σ w_i · b_i_check + Σ u_j · ¬c_j_cand >= t_r
-    let mut constraint8_terms = vec![(Lit::neg(active_check), bound)];
+    let mut constraint8_terms = vec![(neg(active_check), bound)];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
-            Lit::pos(layout.check(lit.atom))
+            pos(layout.check(lit.atom))
         } else {
             // Negative body uses cand, not check (per formalization Constraint 8)
-            Lit::neg(layout.cand(lit.atom))
+            neg(layout.cand(lit.atom))
         };
         constraint8_terms.push((cdcl_lit, lit.weight));
     }
@@ -471,9 +490,9 @@ fn encode_choice_rule(
     // Constraint 11 (reduct head propagation): ¬h_cand ∨ h_check ∨ ¬active_r_check (for each head)
     for &head in &rule.heads {
         check_clauses.push(vec![
-            Lit::neg(layout.cand(head)),
-            Lit::pos(layout.check(head)),
-            Lit::neg(active_check),
+            neg(layout.cand(head)),
+            pos(layout.check(head)),
+            neg(active_check),
         ]);
     }
 }
@@ -519,12 +538,12 @@ fn encode_disjunctive_rule(
         let level = bound + level_offset as Weight;
         let active_at_level = layout.active_cand(rule_idx, level);
         let falsification_weight = sum_weights - level + 1;
-        let mut constraint1_terms = vec![(Lit::pos(active_at_level), falsification_weight)];
+        let mut constraint1_terms = vec![(pos(active_at_level), falsification_weight)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
-                Lit::neg(layout.cand(lit.atom))
+                neg(layout.cand(lit.atom))
             } else {
-                Lit::pos(layout.cand(lit.atom))
+                pos(layout.cand(lit.atom))
             };
             constraint1_terms.push((cdcl_lit, lit.weight));
         }
@@ -536,12 +555,12 @@ fn encode_disjunctive_rule(
     for level_offset in 0..num_levels {
         let level = bound + level_offset as Weight;
         let active_at_level = layout.active_cand(rule_idx, level);
-        let mut constraint2_terms = vec![(Lit::neg(active_at_level), level)];
+        let mut constraint2_terms = vec![(neg(active_at_level), level)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
-                Lit::pos(layout.cand(lit.atom))
+                pos(layout.cand(lit.atom))
             } else {
-                Lit::neg(layout.cand(lit.atom))
+                neg(layout.cand(lit.atom))
             };
             constraint2_terms.push((cdcl_lit, lit.weight));
         }
@@ -550,12 +569,9 @@ fn encode_disjunctive_rule(
 
     // Constraint 3 (head requirement) - base level: Σ h_cand + ¬active_r_cand >= 1
     // For integrity constraints (empty heads), this is just ¬active_r_cand >= 1
-    let mut constraint3_clause: Vec<Lit> = rule
-        .heads
-        .iter()
-        .map(|&h| Lit::pos(layout.cand(h)))
-        .collect();
-    constraint3_clause.push(Lit::neg(active_cand));
+    let mut constraint3_clause: Vec<Lit> =
+        rule.heads.iter().map(|&h| pos(layout.cand(h))).collect();
+    constraint3_clause.push(neg(active_cand));
     cand_clauses.push(constraint3_clause);
 
     // Constraint 7 (reduct body satisfaction):
@@ -563,15 +579,15 @@ fn encode_disjunctive_rule(
     // Positive body uses check variables, negative body uses cand variables
     let falsification_weight = sum_weights - bound + 1;
     let mut constraint7_terms = vec![
-        (Lit::neg(active_cand), falsification_weight),
-        (Lit::pos(active_check), falsification_weight),
+        (neg(active_cand), falsification_weight),
+        (pos(active_check), falsification_weight),
     ];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
-            Lit::neg(layout.check(lit.atom))
+            neg(layout.check(lit.atom))
         } else {
             // Negative body uses cand, not check (per formalization Constraint 7)
-            Lit::pos(layout.cand(lit.atom))
+            pos(layout.cand(lit.atom))
         };
         constraint7_terms.push((cdcl_lit, lit.weight));
     }
@@ -579,13 +595,13 @@ fn encode_disjunctive_rule(
 
     // Constraint 8 (reduct body falsification):
     // t_r · ¬active_r_check + Σ w_i · b_i_check + Σ u_j · ¬c_j_cand >= t_r
-    let mut constraint8_terms = vec![(Lit::neg(active_check), bound)];
+    let mut constraint8_terms = vec![(neg(active_check), bound)];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
-            Lit::pos(layout.check(lit.atom))
+            pos(layout.check(lit.atom))
         } else {
             // Negative body uses cand, not check (per formalization Constraint 8)
-            Lit::neg(layout.cand(lit.atom))
+            neg(layout.cand(lit.atom))
         };
         constraint8_terms.push((cdcl_lit, lit.weight));
     }
@@ -593,12 +609,9 @@ fn encode_disjunctive_rule(
 
     // Constraint 10 (reduct head implication): Σ h_check + ¬active_r_check >= 1
     // For integrity constraints (empty heads), this is just ¬active_r_check >= 1
-    let mut constraint10_clause: Vec<Lit> = rule
-        .heads
-        .iter()
-        .map(|&h| Lit::pos(layout.check(h)))
-        .collect();
-    constraint10_clause.push(Lit::neg(active_check));
+    let mut constraint10_clause: Vec<Lit> =
+        rule.heads.iter().map(|&h| pos(layout.check(h))).collect();
+    constraint10_clause.push(neg(active_check));
     check_clauses.push(constraint10_clause);
 }
 
@@ -618,7 +631,7 @@ pub fn generate_loop_constraint<R: rand::Rng>(
     unfounded_set: &[Atom],
     program: &Program,
     layout: &VarLayout,
-    assignment: &contiguous_data::Multiset<Lit>,
+    assignment: &HashMap<Var, bool>,
     rng: &mut R,
 ) -> PBConstraint {
     let u_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
@@ -665,12 +678,12 @@ pub fn generate_loop_constraint<R: rand::Rng>(
 
             // Check if active_{r,s,cand} is NOT true (false or unassigned)
             let active_var = layout.active_cand(entry.rule_idx, level);
-            let active_is_true = assignment.contains(&Lit::pos(active_var));
+            let active_is_true = assignment.get(&active_var).copied().unwrap_or(false);
 
             if !active_is_true {
                 // Body isn't satisfied - add active as reason AND add overlap atoms to O
                 if added_rule_levels.insert((entry.rule_idx, level)) {
-                    let reason = Lit::pos(active_var);
+                    let reason = pos(active_var);
                     if seen_reasons.insert(reason) {
                         reason_terms.push(reason);
                     }
@@ -696,7 +709,7 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                             return false; // Skip UFS heads
                         }
                         let head_var = layout.cand(head);
-                        assignment.contains(&Lit::pos(head_var))
+                        assignment.get(&head_var).copied().unwrap_or(false)
                     })
                     .collect()
             };
@@ -714,7 +727,7 @@ pub fn generate_loop_constraint<R: rand::Rng>(
             // Select one stealing head at random (do NOT add to O)
             let idx = rng.random_range(0..stealing_heads.len());
             let stealing_head = stealing_heads[idx];
-            let reason = Lit::neg(layout.cand(stealing_head));
+            let reason = neg(layout.cand(stealing_head));
             if seen_reasons.insert(reason) {
                 reason_terms.push(reason);
             }
@@ -726,7 +739,7 @@ pub fn generate_loop_constraint<R: rand::Rng>(
         // O ≠ ∅: sum(¬x for x in O) + sum(reason_r) >= 1
         let mut terms: Vec<(Lit, Weight)> = Vec::new();
         for &atom in &overlap_atoms {
-            terms.push((Lit::neg(layout.cand(atom)), 1));
+            terms.push((neg(layout.cand(atom)), 1));
         }
         for reason in reason_terms {
             terms.push((reason, 1));
@@ -737,7 +750,7 @@ pub fn generate_loop_constraint<R: rand::Rng>(
         let n = unfounded_set.len() as Weight;
         let mut terms: Vec<(Lit, Weight)> = Vec::new();
         for &atom in unfounded_set {
-            terms.push((Lit::neg(layout.cand(atom)), 1));
+            terms.push((neg(layout.cand(atom)), 1));
         }
         for reason in reason_terms {
             terms.push((reason, n));
@@ -780,24 +793,24 @@ mod tests {
         let layout = VarLayout::new(&program);
 
         // cand: 1, 2, 3
-        assert_eq!(layout.cand(Atom(1)).raw(), 1);
-        assert_eq!(layout.cand(Atom(3)).raw(), 3);
+        assert_eq!(layout.cand(Atom(1)), 1);
+        assert_eq!(layout.cand(Atom(3)), 3);
 
         // active_cand: 4, 5 (base level for each rule with 1 level)
-        assert_eq!(layout.active_cand_base(0).raw(), 4);
-        assert_eq!(layout.active_cand_base(1).raw(), 5);
+        assert_eq!(layout.active_cand_base(0), 4);
+        assert_eq!(layout.active_cand_base(1), 5);
 
         // active_check: 6, 7
-        assert_eq!(layout.active_check(0).raw(), 6);
-        assert_eq!(layout.active_check(1).raw(), 7);
+        assert_eq!(layout.active_check(0), 6);
+        assert_eq!(layout.active_check(1), 7);
 
         // check: 8, 9, 10
-        assert_eq!(layout.check(Atom(1)).raw(), 8);
-        assert_eq!(layout.check(Atom(3)).raw(), 10);
+        assert_eq!(layout.check(Atom(1)), 8);
+        assert_eq!(layout.check(Atom(3)), 10);
 
         // dim: 11, 12, 13
-        assert_eq!(layout.dim(Atom(1)).raw(), 11);
-        assert_eq!(layout.dim(Atom(3)).raw(), 13);
+        assert_eq!(layout.dim(Atom(1)), 11);
+        assert_eq!(layout.dim(Atom(3)), 13);
 
         // Total: 3 atoms + 2 active_cand + 2 active_check + 3 check + 3 dim = 13
         assert_eq!(layout.total_vars(), 13);
@@ -908,7 +921,7 @@ mod tests {
         let chosen_atom = Atom(2);
 
         // At test time, use empty assignment (no stealing heads)
-        let empty_assignment = contiguous_data::Multiset::new();
+        let empty_assignment: HashMap<Var, bool> = HashMap::new();
         let mut rng = StdRng::seed_from_u64(42);
         let (terms, bound) = generate_loop_constraint(
             chosen_atom,
@@ -929,14 +942,14 @@ mod tests {
             terms
         );
 
-        // Verify we have the overlap atom (¬b = Lit::neg(Var(3)))
+        // Verify we have the overlap atom (¬b = neg(Var(3)))
         let has_neg_b = terms
             .iter()
-            .any(|(lit, _)| *lit == Lit::neg(layout.cand(Atom(3))));
+            .any(|(lit, _)| *lit == neg(layout.cand(Atom(3))));
         assert!(has_neg_b, "Expected ¬b in terms, got {:?}", terms);
 
         // Verify we have the active variable reason
-        let has_active = terms.iter().any(|(lit, _)| lit.is_positive());
+        let has_active = terms.iter().any(|(lit, _)| *lit > 0);
         assert!(
             has_active,
             "Expected active variable in terms, got {:?}",

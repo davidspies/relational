@@ -1,6 +1,7 @@
 //! ASP types for atoms, rules, and programs.
 
-pub use cdcl::Weight;
+/// Weight for PB constraints.
+pub type Weight = i32;
 
 /// An atom ID (non-zero positive integer in smodels).
 /// Atom 1 is reserved for "false" (contradiction).
