@@ -1,50 +1,159 @@
-Basic/Cardinality/Weight rule handling:
+# ASP to PB Encoding Formalization
 
-Initially, the bottom solver is solving the ASP program _nearly_ naively encoded as SAT with no supportedness constraints. It contains the variables x_bottom for each atom x in the ASP program, and active_r_bottom for each rule r in the ASP program. So if you have a rule r which says:
+## Notation
 
-h :- #sum{1 : b1 ; 2 : b2 ; 3 : b3 ; 4 : not b4} >= 3.
+- **Atoms**: Let $A = \{a_1, a_2, \ldots\}$ be the set of atoms in the ASP program
+- **Rules**: Let $R = \{r_1, r_2, \ldots\}$ be the set of rules in the ASP program
+- For a rule $r$: $heads(r)$ is the set of head atoms, $body^+(r)$ are positive body literals, $body^-(r)$ are negative body literals
 
-We'll encode that as:
+**PB Constraint Notation**: Constraints are written as $\sum_i w_i \cdot l_i \geq k$ where $w_i$ are weights, $l_i$ are literals, and $k$ is the threshold. We use $\overline{x}$ to denote the negation of variable $x$.
 
-(active_r_bottom, ((1 + 2 + 3 + 4) - 3 + 1)) v (not b1_bottom, 1) v (not b2_bottom, 2) v (not b3_bottom, 3) v (b4_bottom, 4) >= ((1 + 2 + 3 + 4) - 3 + 1)
+## Rule Classification
 
-i.e.: (active_r_bottom, 8) v (not b1_bottom, 1) v (not b2_bottom, 2) v (not b3_bottom, 3) v (b4_bottom, 4) >= 8
+ASP rules vary along two independent axes:
 
-Also the constraint
-(not active_r_bottom, 3) v (b1_bottom, 1) v (b2_bottom, 2) v (b3_bottom, 3) v (not b4_bottom, 4) >= 3
+**Head type:**
+- **Basic rule**: Head is a single atom. If the rule fires, the head *must* be true.
+- **Choice rule**: Head is `{h1; h2; ...}`. If the rule fires, each head *may* be true (independently).
 
-h_bottom v not active_r_bottom
+**Body type:**
+- **Basic body**: Conjunction of literals (e.g., `a, b, not c`)
+- **Cardinality body**: Count constraint (e.g., `#count{a; b; c} >= 2`)
+- **Weight body**: Weighted sum constraint (e.g., `#sum{1:a; 2:b; 3:c} >= 4`)
 
-We export that as the external relation (both the bottom variables and the rule activeness variables).
+Since basic and cardinality bodies are special cases of weight bodies (with all weights = 1, and threshold = number of literals or cardinality bound respectively), this formalization treats all bodies uniformly as weight bodies.
 
-The _top_ solver has two more variables for each ASP atom, x_top and x_diminished, and one for each rule, active_r_top. These aren't external, they're free in the top solver, but come with the following PB constraint:
+## Weight Body Encoding
 
-(not a_top, 1) v (a_bottom, 1) v (not a_diminished, 1) >= 2
+A rule with a weight body has the form:
+$$h \leftarrow \#sum\{w_1 : b_1; \ldots; w_n : b_n; w_{n+1} : \text{not } c_1; \ldots; w_m : \text{not } c_k\} \geq t$$
 
-We also have a single clause enforcing that our subset is strict:
+where $h$ is the head, $b_i$ are positive body atoms, $c_j$ are negated body atoms, $w_i$ are weights, and $t$ is the threshold.
 
-a_diminished v b_diminished v c_diminished...
+Define the **falsification weight** for rule $r$:
+$$W_r = \left(\sum_{i=1}^{m} w_i\right) - t + 1$$
 
-If a rule is active, then its body must be satisfied in the reduct. We use the same activation weight structure as the bottom constraint:
+This is the minimum total weight of falsified literals needed to guarantee the body is not satisfied.
 
-(not active_r_bottom, activation_weight) v (active_r_top, activation_weight) v (not b1_top, w1) v (not b2_top, w2) v (not b3_top, w3) v (b4_top, w4) >= activation_weight
+---
 
-For the example `h :- #sum{1:b1; 2:b2; 3:b3; 4:not b4} >= 3`, activation_weight = (1+2+3+4) - 3 + 1 = 8, so:
-(not active_r_bottom, 8) v (active_r_top, 8) v (not b1_top, 1) v (not b2_top, 2) v (not b3_top, 3) v (b4_top, 4) >= 8
+## Candidate Solver
 
-The head propagation clause:
-not h_bottom v h_top v not active_r_top
+### Variables
+- $x_{\text{cand}}$ for each atom $x \in A$
+- $active_{r,\text{cand}}$ for each rule $r \in R$
 
-Now suppose that we find a solution, let's say {w_top, x_top} are the true variables, and that the bottom solution was {w_bottom, x_bottom, y_bottom, z_bottom}. In that case, we want to take the difference and add in the loop constraint to the bottom solver and re-solve. In this case that's {y, z}.
+### Constraint 1: Body Satisfaction (when active)
+For a weight rule $r$ with head $h$, positive body atoms $B^+ = \{b_1, \ldots, b_n\}$ with weights $\{w_1, \ldots, w_n\}$, and negative body atoms $B^- = \{c_1, \ldots, c_k\}$ with weights $\{u_1, \ldots, u_k\}$:
 
-To find the loop constraint, find all rules which have y or z in their head but have _neither_ in their body (so we would exclude a rule of the form y :- z). Then we assert that in order for all of those to be true, at least one of these rules needs to be active. So if we found that the rules which have y or z in their heads but not in their bodies are r1, r2, r3, we would add the new base clause (to the _bottom_ solver only):
+$$W_r \cdot active_{r,\text{cand}} + \sum_{b_i \in B^+} w_i \cdot \overline{b_{i,\text{cand}}} + \sum_{c_j \in B^-} u_j \cdot c_{j,\text{cand}} \geq W_r$$
 
-not y_bottom v not z_bottom v r1_active v r2_active v r3_active
+### Constraint 2: Body Falsification (when inactive)
+$$t \cdot \overline{active_{r,\text{cand}}} + \sum_{b_i \in B^+} w_i \cdot b_{i,\text{cand}} + \sum_{c_j \in B^-} u_j \cdot \overline{c_{j,\text{cand}}} \geq t$$
 
-and re-run it until we get to where the bottom solver returns SAT and the top solver returns UNSAT. Then we return that solution.
+### Constraint 3: Head Propagation — Basic Rules Only
+$$h_{\text{cand}} + \overline{active_{r,\text{cand}}} \geq 1$$
 
-Choice rules are almost the same as basic rules, with just one minor change.
+*Note: This constraint is omitted for choice rules.*
 
-We don't include line 14
+---
 
-Also we have a line 29 rule _for each head_ (since choice rules are allowed multiple heads)
+## Check Solver
+
+### Variables
+- $x_{\text{check}}$ for each atom $x \in A$
+- $x_{\text{dim}}$ (diminished) for each atom $x \in A$
+- $active_{r,\text{check}}$ for each rule $r \in R$
+
+### Constraint 4: Subset Relationship
+For each atom $x$:
+$$\overline{x_{\text{check}}} + x_{\text{cand}} + \overline{x_{\text{dim}}} \geq 2$$
+
+This enforces:
+- $x_{\text{check}} \implies x_{\text{cand}}$ (check atoms must be candidate atoms)
+- $x_{\text{dim}} \implies x_{\text{cand}}$ (diminished atoms must be candidate atoms)
+- $x_{\text{check}} \land x_{\text{dim}}$ is false (an atom cannot be both checked and diminished)
+
+### Constraint 5: Strict Subset
+$$\sum_{x \in A} x_{\text{dim}} \geq 1$$
+
+At least one atom must be diminished.
+
+### Constraint 6: Reduct Body Satisfaction
+If a rule is active in the candidate solver, its body must be satisfiable in the check (reduct) interpretation:
+
+$$W_r \cdot \overline{active_{r,\text{cand}}} + W_r \cdot active_{r,\text{check}} + \sum_{b_i \in B^+} w_i \cdot \overline{b_{i,\text{check}}} + \sum_{c_j \in B^-} u_j \cdot c_{j,\text{check}} \geq W_r$$
+
+### Constraint 7: Reduct Head Propagation
+For each head $h$ of rule $r$:
+$$\overline{h_{\text{cand}}} + h_{\text{check}} + \overline{active_{r,\text{check}}} \geq 1$$
+
+*Note: Basic rules have exactly one head. Choice rules may have multiple heads, generating one instance of this constraint per head.*
+
+---
+
+## Loop Constraints
+
+### Constraint 8: Loop Constraints
+
+When the candidate solver finds a solution $S_{\text{cand}}$ and the check solver finds a strict subset $S_{\text{check}} \subset S_{\text{cand}}$:
+
+1. Compute the **unfounded set**: $U = S_{\text{cand}} \setminus S_{\text{check}}$
+2. Find **external support rules**: rules $r$ where $heads(r) \cap U \neq \emptyset$ but $body^+(r) \cap U = \emptyset$
+3. Add to the candidate solver:
+$$\sum_{x \in U} \overline{x_{\text{cand}}} + \sum_{r \in \text{external}} active_{r,\text{cand}} \geq 1$$
+
+Repeat until the check solver returns UNSAT, indicating no unfounded set exists.
+
+### Constraint 8 Initialization: Single-Atom Loop Constraints
+As a special case, for each atom $x$ we add single-atom loop constraints upfront:
+$$\overline{x_{\text{cand}}} + \sum_{r : x \in heads(r) \land x \notin body^+(r)} active_{r,\text{cand}} \geq 1$$
+
+These are loop constraints where $U = \{x\}$, added to bootstrap supportedness without needing check solver iterations.
+
+---
+
+## Choice Rules
+
+Choice rules (e.g., `{h1; h2} :- body.`) differ from basic rules:
+- **Omit Constraint 3** (head propagation in candidate solver)
+- May have multiple heads, so **Constraint 7** generates one instance per head
+
+---
+
+## Example
+
+Consider the rule:
+```
+h :- #sum{1:b1; 2:b2; 3:b3; 4:not b4} >= 3.
+```
+
+Here: $B^+ = \{b1, b2, b3\}$ with weights $\{1, 2, 3\}$, $B^- = \{b4\}$ with weight $4$, threshold $t = 3$.
+
+Falsification weight: $W_r = (1 + 2 + 3 + 4) - 3 + 1 = 8$
+
+**Candidate Solver Constraints:**
+
+Constraint 1:
+$8 \cdot active_{r,\text{cand}} + 1 \cdot \overline{b1_{\text{cand}}} + 2 \cdot \overline{b2_{\text{cand}}} + 3 \cdot \overline{b3_{\text{cand}}} + 4 \cdot b4_{\text{cand}} \geq 8$
+
+Constraint 2:
+$3 \cdot \overline{active_{r,\text{cand}}} + 1 \cdot b1_{\text{cand}} + 2 \cdot b2_{\text{cand}} + 3 \cdot b3_{\text{cand}} + 4 \cdot \overline{b4_{\text{cand}}} \geq 3$
+
+Constraint 3:
+$h_{\text{cand}} + \overline{active_{r,\text{cand}}} \geq 1$
+
+**Check Solver Constraints:**
+
+Constraint 6:
+$8 \cdot \overline{active_{r,\text{cand}}} + 8 \cdot active_{r,\text{check}} + 1 \cdot \overline{b1_{\text{check}}} + 2 \cdot \overline{b2_{\text{check}}} + 3 \cdot \overline{b3_{\text{check}}} + 4 \cdot b4_{\text{check}} \geq 8$
+
+Constraint 7:
+$\overline{h_{\text{cand}}} + h_{\text{check}} + \overline{active_{r,\text{check}}} \geq 1$
+
+**Loop Constraint Example:**
+
+If candidate solution is $\{w, x, y, z\}$ and check solution is $\{w, x\}$, the unfounded set is $\{y, z\}$.
+
+If rules $r_1, r_2, r_3$ have $y$ or $z$ in their heads but neither $y$ nor $z$ in their positive bodies, add:
+$$\overline{y_{\text{cand}}} + \overline{z_{\text{cand}}} + active_{r_1,\text{cand}} + active_{r_2,\text{cand}} + active_{r_3,\text{cand}} \geq 1$$
