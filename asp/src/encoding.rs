@@ -1,11 +1,11 @@
 //! SAT encoding for ASP programs with two-solver architecture.
 //!
 //! Variable layout:
-//! - Atoms 1..N → x_bottom (var 1..N)
-//! - Rules 0..R-1 → active_r_bottom (var N+1..N+R)
-//! - Rules 0..R-1 → active_r_top (var N+R+1..N+2R)
-//! - Atoms 1..N → x_top (var N+2R+1..N+2R+N)
-//! - Atoms 1..N → x_diminished (var N+2R+N+1..N+2R+2N)
+//! - Atoms 1..N → x_cand (var 1..N)
+//! - Rules 0..R-1 → active_r_cand (var N+1..N+R)
+//! - Rules 0..R-1 → active_r_check (var N+R+1..N+2R)
+//! - Atoms 1..N → x_check (var N+2R+1..N+2R+N)
+//! - Atoms 1..N → x_dim (var N+2R+N+1..N+2R+2N)
 
 use cdcl::{Lit, Var, Weight};
 
@@ -36,34 +36,34 @@ impl VarLayout {
         }
     }
 
-    /// Get the x_bottom variable for an atom.
-    pub fn bottom(&self, atom: Atom) -> Var {
+    /// Get the x_cand variable for an atom.
+    pub fn cand(&self, atom: Atom) -> Var {
         Var::new(atom.0)
     }
 
-    /// Get the active_r_bottom variable for a rule index.
-    pub fn active_bottom(&self, rule_idx: u32) -> Var {
+    /// Get the active_r_cand variable for a rule index.
+    pub fn active_cand(&self, rule_idx: u32) -> Var {
         Var::new(self.num_atoms + 1 + rule_idx)
     }
 
-    /// Get the active_r_top variable for a rule index.
-    pub fn active_top(&self, rule_idx: u32) -> Var {
+    /// Get the active_r_check variable for a rule index.
+    pub fn active_check(&self, rule_idx: u32) -> Var {
         Var::new(self.num_atoms + self.num_rules + 1 + rule_idx)
     }
 
-    /// Get the x_top variable for an atom.
-    pub fn top(&self, atom: Atom) -> Var {
+    /// Get the x_check variable for an atom.
+    pub fn check(&self, atom: Atom) -> Var {
         Var::new(self.num_atoms + 2 * self.num_rules + atom.0)
     }
 
-    /// Get the x_diminished variable for an atom.
-    pub fn diminished(&self, atom: Atom) -> Var {
+    /// Get the x_dim variable for an atom.
+    pub fn dim(&self, atom: Atom) -> Var {
         Var::new(self.num_atoms + 2 * self.num_rules + self.num_atoms + atom.0)
     }
 
     /// Total number of variables.
     pub fn total_vars(&self) -> u32 {
-        // bottom: N, active_bottom: R, active_top: R, top: N, diminished: N
+        // cand: N, active_cand: R, active_check: R, check: N, dim: N
         self.num_atoms + 2 * self.num_rules + self.num_atoms + self.num_atoms
     }
 }
@@ -71,23 +71,23 @@ impl VarLayout {
 /// Encoded ASP program ready for solving.
 pub struct EncodedProgram {
     pub layout: VarLayout,
-    /// Clauses for the bottom solver only.
-    pub bottom_clauses: Vec<Clause>,
-    /// PB constraints for the bottom solver.
-    pub bottom_pb_constraints: Vec<PBConstraint>,
-    /// Clauses for the top solver (includes constraints on top/diminished vars).
-    pub top_clauses: Vec<Clause>,
-    /// PB constraints for the top solver.
-    pub top_pb_constraints: Vec<PBConstraint>,
+    /// Clauses for the candidate solver only.
+    pub cand_clauses: Vec<Clause>,
+    /// PB constraints for the candidate solver.
+    pub cand_pb_constraints: Vec<PBConstraint>,
+    /// Clauses for the check solver (includes constraints on check/dim vars).
+    pub check_clauses: Vec<Clause>,
+    /// PB constraints for the check solver.
+    pub check_pb_constraints: Vec<PBConstraint>,
 }
 
 /// Encode an ASP program for the two-solver architecture.
 pub fn encode_program(program: &Program) -> EncodedProgram {
     let layout = VarLayout::new(program);
-    let mut bottom_clauses = Vec::new();
-    let mut bottom_pb_constraints = Vec::new();
-    let mut top_clauses = Vec::new();
-    let mut top_pb_constraints = Vec::new();
+    let mut cand_clauses = Vec::new();
+    let mut cand_pb_constraints = Vec::new();
+    let mut check_clauses = Vec::new();
+    let mut check_pb_constraints = Vec::new();
 
     // Encode each rule
     for (rule_idx, rule) in program.rules.iter().enumerate() {
@@ -98,10 +98,10 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
                     r,
                     rule_idx,
                     &layout,
-                    &mut bottom_clauses,
-                    &mut bottom_pb_constraints,
-                    &mut top_clauses,
-                    &mut top_pb_constraints,
+                    &mut cand_clauses,
+                    &mut cand_pb_constraints,
+                    &mut check_clauses,
+                    &mut check_pb_constraints,
                 );
             }
             Rule::Choice(r) => {
@@ -109,10 +109,10 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
                     r,
                     rule_idx,
                     &layout,
-                    &mut bottom_clauses,
-                    &mut bottom_pb_constraints,
-                    &mut top_clauses,
-                    &mut top_pb_constraints,
+                    &mut cand_clauses,
+                    &mut cand_pb_constraints,
+                    &mut check_clauses,
+                    &mut check_pb_constraints,
                 );
             }
             Rule::Disjunctive(_) => {
@@ -121,301 +121,276 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
         }
     }
 
-    // Add constraint that false atom (atom 1) is always false in bottom
-    bottom_clauses.push(vec![Lit::neg(layout.bottom(Atom(1)))]);
+    // Add constraint that false atom (atom 1) is always false in candidate solver
+    cand_clauses.push(vec![Lit::neg(layout.cand(Atom(1)))]);
 
-    // Add supportedness constraints for each atom:
-    // ¬a_bottom ∨ r1_active ∨ r2_active ∨ ... (for all rules that derive a)
-    // This ensures every true atom has at least one active supporting rule
+    // Add single-atom loop constraints for each atom (Constraint 8 initialization)
     for atom_id in 2..=layout.num_atoms {
-        let atom = Atom(atom_id);
-        let mut supporting_rules = Vec::new();
-
-        for (rule_idx, rule) in program.rules.iter().enumerate() {
-            let derives_atom = match rule {
-                Rule::Basic(r) => r.head == atom,
-                Rule::Choice(r) => r.heads.contains(&atom),
-                Rule::Disjunctive(_) => false,
-            };
-            if derives_atom {
-                supporting_rules.push(rule_idx as u32);
-            }
-        }
-
-        // Only add constraint if there are supporting rules
-        // (atoms with no rules can never be true, which is handled by propagation)
-        if !supporting_rules.is_empty() {
-            let mut clause = vec![Lit::neg(layout.bottom(atom))];
-            for rule_idx in supporting_rules {
-                clause.push(Lit::pos(layout.active_bottom(rule_idx)));
-            }
-            bottom_clauses.push(clause);
-        }
+        let clause = generate_loop_constraint(&[Atom(atom_id)], program, &layout);
+        cand_clauses.push(clause);
     }
 
-    // Top solver constraints for each atom using PB constraint:
-    // (¬a_top, 1) ∨ (a_bottom, 1) ∨ (¬a_diminished, 1) >= 2
-    // This encodes: a_top → (a_bottom ∧ ¬a_diminished)
+    // Check solver constraints for each atom using PB constraint (Constraint 4):
+    // (¬x_check, 1) + (x_cand, 1) + (¬x_dim, 1) >= 2
+    // This encodes: x_check → (x_cand ∧ ¬x_dim)
     for atom_id in 2..=layout.num_atoms {
         let atom = Atom(atom_id);
         let terms = vec![
-            (Lit::neg(layout.top(atom)), 1),
-            (Lit::pos(layout.bottom(atom)), 1),
-            (Lit::neg(layout.diminished(atom)), 1),
+            (Lit::neg(layout.check(atom)), 1),
+            (Lit::pos(layout.cand(atom)), 1),
+            (Lit::neg(layout.dim(atom)), 1),
         ];
-        top_pb_constraints.push((terms, 2));
+        check_pb_constraints.push((terms, 2));
     }
 
-    // At least one atom must be diminished (strict subset)
-    // ∨ all a_diminished
+    // Constraint 5: At least one atom must be diminished (strict subset)
+    // ∨ all x_dim
     // Note: if there are no user atoms, this is an empty clause (FALSE),
-    // which correctly makes top solver UNSAT (no smaller model than {})
-    let mut diminished_clause = Vec::new();
+    // which correctly makes check solver UNSAT (no smaller model than {})
+    let mut dim_clause = Vec::new();
     for atom_id in 2..=layout.num_atoms {
-        diminished_clause.push(Lit::pos(layout.diminished(Atom(atom_id))));
+        dim_clause.push(Lit::pos(layout.dim(Atom(atom_id))));
     }
-    top_clauses.push(diminished_clause);
+    check_clauses.push(dim_clause);
 
     EncodedProgram {
         layout,
-        bottom_clauses,
-        bottom_pb_constraints,
-        top_clauses,
-        top_pb_constraints,
+        cand_clauses,
+        cand_pb_constraints,
+        check_clauses,
+        check_pb_constraints,
     }
 }
 
 /// Encode a basic/weight rule: h :- #sum{w1:b1; w2:b2; w3:not b3; ...} >= bound
 ///
-/// Bottom PB constraint 1 (activation): body satisfied → rule active
-/// (active_r, sum_weights - bound + 1) ∨ (¬b1, w1) ∨ (¬b2, w2) ∨ (b3, w3) ... >= (sum - bound + 1)
+/// Candidate Constraint 1 (body satisfaction when active):
+/// W_r · active_r_cand + Σ w_i · ¬b_i_cand + Σ u_j · c_j_cand >= W_r
 ///
-/// Bottom PB constraint 2 (reverse implication): rule active → body satisfied
-/// (¬active_r, bound) ∨ (b1, w1) ∨ (b2, w2) ∨ (¬b3, w3) ... >= bound
+/// Candidate Constraint 2 (body falsification when inactive):
+/// t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
 ///
-/// Bottom clause: h ∨ ¬active_r
+/// Candidate Constraint 3 (head propagation):
+/// h_cand ∨ ¬active_r_cand
 ///
-/// Top PB constraint: (¬active_r_bottom, bound) ∨ (active_r_top, bound) ∨ (¬b1_top, w1) ∨ ... >= bound
-/// Top clause: ¬h_bottom ∨ h_top ∨ ¬active_r_top
+/// Check Constraint 6 (reduct body satisfaction):
+/// W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
+///
+/// Check Constraint 7 (reduct head propagation):
+/// ¬h_cand ∨ h_check ∨ ¬active_r_check
 fn encode_basic_rule(
     rule: &BasicRule,
     rule_idx: u32,
     layout: &VarLayout,
-    bottom_clauses: &mut Vec<Clause>,
-    bottom_pb_constraints: &mut Vec<PBConstraint>,
-    top_clauses: &mut Vec<Clause>,
-    top_pb_constraints: &mut Vec<PBConstraint>,
+    cand_clauses: &mut Vec<Clause>,
+    cand_pb_constraints: &mut Vec<PBConstraint>,
+    check_clauses: &mut Vec<Clause>,
+    check_pb_constraints: &mut Vec<PBConstraint>,
 ) {
-    let active_bottom = layout.active_bottom(rule_idx);
-    let active_top = layout.active_top(rule_idx);
+    let active_cand = layout.active_cand(rule_idx);
+    let active_check = layout.active_check(rule_idx);
 
     // Calculate sum of weights
     let sum_weights: Weight = rule.body.iter().map(|lit| lit.weight).sum();
     let bound = rule.bound;
 
-    // Activation weight: sum - bound + 1
+    // Falsification weight: W_r = sum - bound + 1
     // This ensures: if body is satisfied (sum >= bound), then rule must be active
-    let activation_weight = sum_weights - bound + 1;
+    let falsification_weight = sum_weights - bound + 1;
 
-    // Bottom PB constraint 1 (activation): body satisfied → rule active
-    // (active_r, activation_weight) ∨ (negated body literals with weights) >= activation_weight
+    // Constraint 1 (body satisfaction when active):
+    // W_r · active_r_cand + Σ w_i · ¬b_i_cand + Σ u_j · c_j_cand >= W_r
     // For facts (empty body), this becomes (active_r, 1) >= 1, forcing the rule active
-    let mut activation_terms = vec![(Lit::pos(active_bottom), activation_weight)];
+    let mut constraint1_terms = vec![(Lit::pos(active_cand), falsification_weight)];
     for lit in &rule.body {
-        // Negate the literal for the activation constraint
+        // Negate positive body literals, keep negative body literals positive
         let cdcl_lit = if lit.positive {
-            Lit::neg(layout.bottom(lit.atom))
+            Lit::neg(layout.cand(lit.atom))
         } else {
-            Lit::pos(layout.bottom(lit.atom))
+            Lit::pos(layout.cand(lit.atom))
         };
-        activation_terms.push((cdcl_lit, lit.weight));
+        constraint1_terms.push((cdcl_lit, lit.weight));
     }
-    bottom_pb_constraints.push((activation_terms, activation_weight));
+    cand_pb_constraints.push((constraint1_terms, falsification_weight));
 
-    // Bottom PB constraint 2 (reverse implication): rule active → body satisfied
-    // (¬active_r, bound) ∨ (body literals with weights) >= bound
+    // Constraint 2 (body falsification when inactive):
+    // t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
     // Only needed if bound > 0 (otherwise trivially satisfied)
     if bound > 0 {
-        let mut reverse_terms = vec![(Lit::neg(active_bottom), bound)];
+        let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
-                Lit::pos(layout.bottom(lit.atom))
+                Lit::pos(layout.cand(lit.atom))
             } else {
-                Lit::neg(layout.bottom(lit.atom))
+                Lit::neg(layout.cand(lit.atom))
             };
-            reverse_terms.push((cdcl_lit, lit.weight));
+            constraint2_terms.push((cdcl_lit, lit.weight));
         }
-        bottom_pb_constraints.push((reverse_terms, bound));
+        cand_pb_constraints.push((constraint2_terms, bound));
     }
 
-    // Bottom clause: h_bottom ∨ ¬active_r_bottom
-    // This says: if rule is active, head must be true
+    // Constraint 3 (head propagation): h_cand ∨ ¬active_r_cand
     if !rule.head.is_false() {
-        bottom_clauses.push(vec![
-            Lit::pos(layout.bottom(rule.head)),
-            Lit::neg(active_bottom),
+        cand_clauses.push(vec![
+            Lit::pos(layout.cand(rule.head)),
+            Lit::neg(active_cand),
         ]);
     } else {
-        // Constraint rule: if active, contradiction
-        // ¬active_r_bottom (rule can never be active)
-        bottom_clauses.push(vec![Lit::neg(active_bottom)]);
+        // Constraint rule: if active, contradiction → ¬active_r_cand
+        cand_clauses.push(vec![Lit::neg(active_cand)]);
     }
 
-    // Top PB constraint: same structure as bottom activation constraint
-    // (¬active_r_bottom, activation_weight) ∨ (active_r_top, activation_weight) ∨ (negated body) >= activation_weight
-    // This ensures: if bottom rule is active and body is satisfied in top, then top rule is active
-    let mut reduct_terms = vec![
-        (Lit::neg(active_bottom), activation_weight),
-        (Lit::pos(active_top), activation_weight),
+    // Constraint 6 (reduct body satisfaction):
+    // W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
+    let mut constraint6_terms = vec![
+        (Lit::neg(active_cand), falsification_weight),
+        (Lit::pos(active_check), falsification_weight),
     ];
     for lit in &rule.body {
-        // Same negation logic as bottom activation constraint
         let cdcl_lit = if lit.positive {
-            Lit::neg(layout.top(lit.atom))
+            Lit::neg(layout.check(lit.atom))
         } else {
-            Lit::pos(layout.top(lit.atom))
+            Lit::pos(layout.check(lit.atom))
         };
-        reduct_terms.push((cdcl_lit, lit.weight));
+        constraint6_terms.push((cdcl_lit, lit.weight));
     }
-    top_pb_constraints.push((reduct_terms, activation_weight));
+    check_pb_constraints.push((constraint6_terms, falsification_weight));
 
-    // Top clause 2: ¬h_bottom ∨ h_top ∨ ¬active_r_top
-    // If head is true in bottom and top rule is active, head must be true in top
+    // Constraint 7 (reduct head propagation): ¬h_cand ∨ h_check ∨ ¬active_r_check
     if !rule.head.is_false() {
-        top_clauses.push(vec![
-            Lit::neg(layout.bottom(rule.head)),
-            Lit::pos(layout.top(rule.head)),
-            Lit::neg(active_top),
+        check_clauses.push(vec![
+            Lit::neg(layout.cand(rule.head)),
+            Lit::pos(layout.check(rule.head)),
+            Lit::neg(active_check),
         ]);
     } else {
-        // Constraint rule: if active_top, contradiction
-        top_clauses.push(vec![Lit::neg(active_top)]);
+        // Constraint rule: ¬active_r_check
+        check_clauses.push(vec![Lit::neg(active_check)]);
     }
 }
 
 /// Encode a choice rule: {h1, h2, ...} :- #sum{w1:b1; w2:b2; ...} >= bound
 ///
-/// Same as basic rule but WITHOUT head implication clause
-/// (heads are optional in choice rules)
+/// Same as basic rule but WITHOUT Constraint 3 (head propagation).
+/// Heads are optional in choice rules.
 ///
-/// Top clauses include: ¬hi_bottom ∨ hi_top ∨ ¬active_r_top (for each head)
+/// Constraint 7 generates one clause per head: ¬h_cand ∨ h_check ∨ ¬active_r_check
 fn encode_choice_rule(
     rule: &ChoiceRule,
     rule_idx: u32,
     layout: &VarLayout,
-    _bottom_clauses: &mut Vec<Clause>,
-    bottom_pb_constraints: &mut Vec<PBConstraint>,
-    top_clauses: &mut Vec<Clause>,
-    top_pb_constraints: &mut Vec<PBConstraint>,
+    _cand_clauses: &mut Vec<Clause>,
+    cand_pb_constraints: &mut Vec<PBConstraint>,
+    check_clauses: &mut Vec<Clause>,
+    check_pb_constraints: &mut Vec<PBConstraint>,
 ) {
-    let active_bottom = layout.active_bottom(rule_idx);
-    let active_top = layout.active_top(rule_idx);
+    let active_cand = layout.active_cand(rule_idx);
+    let active_check = layout.active_check(rule_idx);
 
     // Calculate sum of weights
     let sum_weights: Weight = rule.body.iter().map(|lit| lit.weight).sum();
     let bound = rule.bound;
 
-    // Activation weight: sum - bound + 1
-    let activation_weight = sum_weights - bound + 1;
+    // Falsification weight: W_r = sum - bound + 1
+    let falsification_weight = sum_weights - bound + 1;
 
-    // Bottom PB constraint 1 (activation): body satisfied → rule active
+    // Constraint 1 (body satisfaction when active)
     // For choice rules with empty body, this forces the rule active
-    let mut activation_terms = vec![(Lit::pos(active_bottom), activation_weight)];
+    let mut constraint1_terms = vec![(Lit::pos(active_cand), falsification_weight)];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
-            Lit::neg(layout.bottom(lit.atom))
+            Lit::neg(layout.cand(lit.atom))
         } else {
-            Lit::pos(layout.bottom(lit.atom))
+            Lit::pos(layout.cand(lit.atom))
         };
-        activation_terms.push((cdcl_lit, lit.weight));
+        constraint1_terms.push((cdcl_lit, lit.weight));
     }
-    bottom_pb_constraints.push((activation_terms, activation_weight));
+    cand_pb_constraints.push((constraint1_terms, falsification_weight));
 
-    // Bottom PB constraint 2 (reverse implication): rule active → body satisfied
+    // Constraint 2 (body falsification when inactive)
     // Only needed if bound > 0
     if bound > 0 {
-        let mut reverse_terms = vec![(Lit::neg(active_bottom), bound)];
+        let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
-                Lit::pos(layout.bottom(lit.atom))
+                Lit::pos(layout.cand(lit.atom))
             } else {
-                Lit::neg(layout.bottom(lit.atom))
+                Lit::neg(layout.cand(lit.atom))
             };
-            reverse_terms.push((cdcl_lit, lit.weight));
+            constraint2_terms.push((cdcl_lit, lit.weight));
         }
-        bottom_pb_constraints.push((reverse_terms, bound));
+        cand_pb_constraints.push((constraint2_terms, bound));
     }
 
-    // NOTE: No h_bottom ∨ ¬active_r_bottom clause - heads are OPTIONAL in choice rules
+    // NOTE: No Constraint 3 - heads are OPTIONAL in choice rules
 
-    // Top PB constraint: same structure as bottom activation constraint
-    let mut reduct_terms = vec![
-        (Lit::neg(active_bottom), activation_weight),
-        (Lit::pos(active_top), activation_weight),
+    // Constraint 6 (reduct body satisfaction)
+    let mut constraint6_terms = vec![
+        (Lit::neg(active_cand), falsification_weight),
+        (Lit::pos(active_check), falsification_weight),
     ];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
-            Lit::neg(layout.top(lit.atom))
+            Lit::neg(layout.check(lit.atom))
         } else {
-            Lit::pos(layout.top(lit.atom))
+            Lit::pos(layout.check(lit.atom))
         };
-        reduct_terms.push((cdcl_lit, lit.weight));
+        constraint6_terms.push((cdcl_lit, lit.weight));
     }
-    top_pb_constraints.push((reduct_terms, activation_weight));
+    check_pb_constraints.push((constraint6_terms, falsification_weight));
 
-    // Top clause: ¬hi_bottom ∨ hi_top ∨ ¬active_r_top (for each head)
+    // Constraint 7 (reduct head propagation): ¬h_cand ∨ h_check ∨ ¬active_r_check (for each head)
     for &head in &rule.heads {
-        top_clauses.push(vec![
-            Lit::neg(layout.bottom(head)),
-            Lit::pos(layout.top(head)),
-            Lit::neg(active_top),
+        check_clauses.push(vec![
+            Lit::neg(layout.cand(head)),
+            Lit::pos(layout.check(head)),
+            Lit::neg(active_check),
         ]);
     }
 }
 
-/// Generate a loop constraint for the bottom solver.
+/// Generate a loop constraint for the candidate solver (Constraint 8).
 ///
-/// Given the difference between bottom and top models (atoms in bottom but not top),
-/// find all rules that could support these atoms and require at least one to be active.
+/// Given an unfounded set U (atoms in candidate but not in check model),
+/// find external support rules and require at least one to be active.
 ///
-/// Clause: ¬y_bottom ∨ ¬z_bottom ∨ r1_active ∨ r2_active ∨ ...
+/// Clause: Σ ¬x_cand (for x ∈ U) + Σ active_r_cand (for external r) >= 1
 pub fn generate_loop_constraint(
-    difference: &[Atom],
+    unfounded_set: &[Atom],
     program: &Program,
     layout: &VarLayout,
 ) -> Clause {
-    // Find rules that have any of the difference atoms in their head
-    // but do NOT have any of the difference atoms in their positive body
-    let diff_set: std::collections::HashSet<Atom> = difference.iter().copied().collect();
+    // Find external support rules: rules r where heads(r) ∩ U ≠ ∅ but body⁺(r) ∩ U = ∅
+    let u_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
 
-    let mut supporting_rules = Vec::new();
+    let mut external_rules = Vec::new();
 
     for (rule_idx, rule) in program.rules.iter().enumerate() {
         match rule {
             Rule::Basic(r) => {
-                // Check if head is in difference
-                if diff_set.contains(&r.head) {
-                    // Check that no positive body atom is in difference
-                    let body_in_diff = r
+                // Check if head is in unfounded set
+                if u_set.contains(&r.head) {
+                    // Check that no positive body atom is in unfounded set
+                    let body_in_u = r
                         .body
                         .iter()
-                        .any(|lit| lit.positive && diff_set.contains(&lit.atom));
-                    if !body_in_diff {
-                        supporting_rules.push(rule_idx as u32);
+                        .any(|lit| lit.positive && u_set.contains(&lit.atom));
+                    if !body_in_u {
+                        external_rules.push(rule_idx as u32);
                     }
                 }
             }
             Rule::Choice(r) => {
-                // Check if any head is in difference
-                let head_in_diff = r.heads.iter().any(|h| diff_set.contains(h));
-                if head_in_diff {
-                    // Check that no positive body atom is in difference
-                    let body_in_diff = r
+                // Check if any head is in unfounded set
+                let head_in_u = r.heads.iter().any(|h| u_set.contains(h));
+                if head_in_u {
+                    // Check that no positive body atom is in unfounded set
+                    let body_in_u = r
                         .body
                         .iter()
-                        .any(|lit| lit.positive && diff_set.contains(&lit.atom));
-                    if !body_in_diff {
-                        supporting_rules.push(rule_idx as u32);
+                        .any(|lit| lit.positive && u_set.contains(&lit.atom));
+                    if !body_in_u {
+                        external_rules.push(rule_idx as u32);
                     }
                 }
             }
@@ -425,17 +400,17 @@ pub fn generate_loop_constraint(
         }
     }
 
-    // Build clause: ¬y_bottom ∨ ¬z_bottom ∨ r1_active ∨ r2_active ∨ ...
+    // Build clause: Σ ¬x_cand + Σ active_r_cand >= 1
     let mut clause = Vec::new();
 
-    // Negated difference atoms
-    for &atom in difference {
-        clause.push(Lit::neg(layout.bottom(atom)));
+    // Negated unfounded atoms
+    for &atom in unfounded_set {
+        clause.push(Lit::neg(layout.cand(atom)));
     }
 
-    // Supporting rules must have at least one active
-    for rule_idx in supporting_rules {
-        clause.push(Lit::pos(layout.active_bottom(rule_idx)));
+    // External rules must have at least one active
+    for rule_idx in external_rules {
+        clause.push(Lit::pos(layout.active_cand(rule_idx)));
     }
 
     clause
@@ -454,25 +429,25 @@ mod tests {
             num_rules: 2,
         };
 
-        // bottom: 1, 2, 3
-        assert_eq!(layout.bottom(Atom(1)).raw(), 1);
-        assert_eq!(layout.bottom(Atom(3)).raw(), 3);
+        // cand: 1, 2, 3
+        assert_eq!(layout.cand(Atom(1)).raw(), 1);
+        assert_eq!(layout.cand(Atom(3)).raw(), 3);
 
-        // active_bottom: 4, 5
-        assert_eq!(layout.active_bottom(0).raw(), 4);
-        assert_eq!(layout.active_bottom(1).raw(), 5);
+        // active_cand: 4, 5
+        assert_eq!(layout.active_cand(0).raw(), 4);
+        assert_eq!(layout.active_cand(1).raw(), 5);
 
-        // active_top: 6, 7
-        assert_eq!(layout.active_top(0).raw(), 6);
-        assert_eq!(layout.active_top(1).raw(), 7);
+        // active_check: 6, 7
+        assert_eq!(layout.active_check(0).raw(), 6);
+        assert_eq!(layout.active_check(1).raw(), 7);
 
-        // top: 8, 9, 10
-        assert_eq!(layout.top(Atom(1)).raw(), 8);
-        assert_eq!(layout.top(Atom(3)).raw(), 10);
+        // check: 8, 9, 10
+        assert_eq!(layout.check(Atom(1)).raw(), 8);
+        assert_eq!(layout.check(Atom(3)).raw(), 10);
 
-        // diminished: 11, 12, 13
-        assert_eq!(layout.diminished(Atom(1)).raw(), 11);
-        assert_eq!(layout.diminished(Atom(3)).raw(), 13);
+        // dim: 11, 12, 13
+        assert_eq!(layout.dim(Atom(1)).raw(), 11);
+        assert_eq!(layout.dim(Atom(3)).raw(), 13);
 
         assert_eq!(layout.total_vars(), 13);
     }
@@ -495,27 +470,27 @@ mod tests {
             num_rules: 1,
         };
 
-        let mut bottom = Vec::new();
-        let mut bottom_pb = Vec::new();
-        let mut top = Vec::new();
-        let mut top_pb = Vec::new();
-        encode_basic_rule(&rule, 0, &layout, &mut bottom, &mut bottom_pb, &mut top, &mut top_pb);
+        let mut cand = Vec::new();
+        let mut cand_pb = Vec::new();
+        let mut check = Vec::new();
+        let mut check_pb = Vec::new();
+        encode_basic_rule(&rule, 0, &layout, &mut cand, &mut cand_pb, &mut check, &mut check_pb);
 
-        // Bottom should have 1 clause:
-        // h_bottom ∨ ¬active_bottom_0
-        assert_eq!(bottom.len(), 1);
+        // Candidate solver should have 1 clause (Constraint 3):
+        // h_cand ∨ ¬active_cand_0
+        assert_eq!(cand.len(), 1);
 
-        // Bottom should have 2 PB constraints (body size 2, bound 2):
-        // 1. Activation: (active, 1) ∨ (¬b, 1) ∨ (c, 1) >= 1 (sum=2, bound=2, weight=1)
-        // 2. Reverse: (¬active, 2) ∨ (b, 1) ∨ (¬c, 1) >= 2
-        assert_eq!(bottom_pb.len(), 2);
+        // Candidate solver should have 2 PB constraints (Constraints 1 and 2):
+        // 1. Body satisfaction: (active, 1) + (¬b, 1) + (c, 1) >= 1
+        // 2. Body falsification: (¬active, 2) + (b, 1) + (¬c, 1) >= 2
+        assert_eq!(cand_pb.len(), 2);
 
-        // Top should have 1 clause:
-        // ¬h_bottom ∨ h_top ∨ ¬active_top_0
-        assert_eq!(top.len(), 1);
+        // Check solver should have 1 clause (Constraint 7):
+        // ¬h_cand ∨ h_check ∨ ¬active_check_0
+        assert_eq!(check.len(), 1);
 
-        // Top should have 1 PB constraint:
-        // (¬active_bottom, 1) ∨ (active_top, 1) ∨ (¬b_top, 1) ∨ (c_top, 1) >= 1
-        assert_eq!(top_pb.len(), 1);
+        // Check solver should have 1 PB constraint (Constraint 6):
+        // (¬active_cand, 1) + (active_check, 1) + (¬b_check, 1) + (c_check, 1) >= 1
+        assert_eq!(check_pb.len(), 1);
     }
 }
