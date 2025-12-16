@@ -11,9 +11,19 @@
 //!
 //! Where NC = number of non-choice rules, TH = total heads across non-choice rules.
 
+use std::collections::HashMap;
+
 use cdcl::{Lit, Var, Weight};
 
 use crate::types::{Atom, BasicRule, ChoiceRule, DisjunctiveRule, Program, Rule};
+
+/// Entry in the atom→rules index for generate_loop_constraint.
+#[derive(Debug, Clone, Copy)]
+pub struct HeadEntry {
+    pub rule_idx: u32,
+    pub head_idx: u32,
+    pub is_choice: bool,
+}
 
 /// A clause is a disjunction of literals.
 pub type Clause = Vec<Lit>;
@@ -45,6 +55,8 @@ pub struct VarLayout {
     total_head_vars: u32,
     /// Info for each rule: Some(info) for non-choice, None for choice
     rule_info: Vec<Option<NonChoiceRuleInfo>>,
+    /// Index from atom → rules that have this atom as a head
+    atom_to_rules: HashMap<Atom, Vec<HeadEntry>>,
 }
 
 impl VarLayout {
@@ -53,10 +65,12 @@ impl VarLayout {
         let num_rules = program.rules.len() as u32;
 
         let mut rule_info = Vec::with_capacity(program.rules.len());
+        let mut atom_to_rules: HashMap<Atom, Vec<HeadEntry>> = HashMap::new();
         let mut non_choice_idx = 0u32;
         let mut head_var_offset = 0u32;
 
-        for rule in &program.rules {
+        for (rule_idx, rule) in program.rules.iter().enumerate() {
+            let rule_idx = rule_idx as u32;
             match rule {
                 Rule::Basic(r) => {
                     let num_heads = if r.head.is_false() { 0 } else { 1 };
@@ -65,6 +79,13 @@ impl VarLayout {
                         num_heads,
                         head_var_start: head_var_offset,
                     }));
+                    if !r.head.is_false() {
+                        atom_to_rules.entry(r.head).or_default().push(HeadEntry {
+                            rule_idx,
+                            head_idx: 0,
+                            is_choice: false,
+                        });
+                    }
                     non_choice_idx += 1;
                     head_var_offset += num_heads;
                 }
@@ -75,11 +96,25 @@ impl VarLayout {
                         num_heads,
                         head_var_start: head_var_offset,
                     }));
+                    for (head_idx, &head) in r.heads.iter().enumerate() {
+                        atom_to_rules.entry(head).or_default().push(HeadEntry {
+                            rule_idx,
+                            head_idx: head_idx as u32,
+                            is_choice: false,
+                        });
+                    }
                     non_choice_idx += 1;
                     head_var_offset += num_heads;
                 }
-                Rule::Choice(_) => {
+                Rule::Choice(r) => {
                     rule_info.push(None);
+                    for (head_idx, &head) in r.heads.iter().enumerate() {
+                        atom_to_rules.entry(head).or_default().push(HeadEntry {
+                            rule_idx,
+                            head_idx: head_idx as u32,
+                            is_choice: true,
+                        });
+                    }
                 }
             }
         }
@@ -90,6 +125,7 @@ impl VarLayout {
             num_non_choice: non_choice_idx,
             total_head_vars: head_var_offset,
             rule_info,
+            atom_to_rules,
         }
     }
 
@@ -159,6 +195,11 @@ impl VarLayout {
             .as_ref()
             .map(|info| info.num_heads)
             .unwrap_or(0)
+    }
+
+    /// Get rules that have the given atom as a head.
+    pub fn rules_for_head(&self, atom: Atom) -> &[HeadEntry] {
+        self.atom_to_rules.get(&atom).map_or(&[], |v| v.as_slice())
     }
 
     /// Total number of variables.
@@ -663,54 +704,38 @@ pub fn generate_loop_constraint(
         terms.push((Lit::neg(layout.cand(atom)), 1));
     }
 
-    // Find external support for each rule
-    for (rule_idx, rule) in program.rules.iter().enumerate() {
-        let rule_idx = rule_idx as u32;
-        match rule {
-            Rule::Basic(r) => {
-                // Check if head is in unfounded set and body doesn't depend on U
-                if u_set.contains(&r.head) {
-                    let body_in_u = r
-                        .body
-                        .iter()
-                        .any(|lit| lit.positive && u_set.contains(&lit.atom));
-                    if !body_in_u {
-                        // Use active_head_cand for this single head (head_idx = 0)
-                        terms.push((Lit::pos(layout.active_head_cand(rule_idx, 0)), n));
-                    }
-                }
+    // Track which choice rules we've already added (they use active_r_cand, not per-head)
+    let mut added_choice_rules: std::collections::HashSet<u32> = std::collections::HashSet::new();
+
+    // Find external support using the atom→rules index
+    for &atom in unfounded_set {
+        for entry in layout.rules_for_head(atom) {
+            let rule = &program.rules[entry.rule_idx as usize];
+            let body = match rule {
+                Rule::Basic(r) => &r.body,
+                Rule::Choice(r) => &r.body,
+                Rule::Disjunctive(r) => &r.body,
+            };
+
+            // Check if body depends on unfounded set
+            let body_in_u = body
+                .iter()
+                .any(|lit| lit.positive && u_set.contains(&lit.atom));
+            if body_in_u {
+                continue;
             }
-            Rule::Choice(r) => {
-                // For choice rules, check if any head is in U and body doesn't depend on U
-                let head_in_u = r.heads.iter().any(|h| u_set.contains(h));
-                if head_in_u {
-                    let body_in_u = r
-                        .body
-                        .iter()
-                        .any(|lit| lit.positive && u_set.contains(&lit.atom));
-                    if !body_in_u {
-                        // Use active_r_cand (choice rules don't have per-head vars)
-                        terms.push((Lit::pos(layout.active_cand(rule_idx)), n));
-                    }
+
+            if entry.is_choice {
+                // Choice rules use active_r_cand (only add once per rule)
+                if added_choice_rules.insert(entry.rule_idx) {
+                    terms.push((Lit::pos(layout.active_cand(entry.rule_idx)), n));
                 }
-            }
-            Rule::Disjunctive(r) => {
-                // Check that body doesn't depend on U
-                let body_in_u = r
-                    .body
-                    .iter()
-                    .any(|lit| lit.positive && u_set.contains(&lit.atom));
-                if !body_in_u {
-                    // For each head in U, add active_r,h_cand with weight n
-                    for (head_idx, &head) in r.heads.iter().enumerate() {
-                        if u_set.contains(&head) {
-                            terms.push((
-                                Lit::pos(layout.active_head_cand(rule_idx, head_idx as u32)),
-                                n,
-                            ));
-                        }
-                    }
-                }
+            } else {
+                // Non-choice rules use active_r,h_cand for this specific head
+                terms.push((
+                    Lit::pos(layout.active_head_cand(entry.rule_idx, entry.head_idx)),
+                    n,
+                ));
             }
         }
     }
