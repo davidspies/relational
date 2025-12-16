@@ -7,3 +7,6 @@
 [submodule "vendor/clingo"]
 	path = vendor/clingo
 	url = git@github.com:potassco/clingo.git
+[submodule "vendor/roundingsat"]
+	path = vendor/roundingsat
+	url = git@github.com:davidspies/roundingsat.git
