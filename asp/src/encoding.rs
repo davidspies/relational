@@ -684,8 +684,10 @@ fn encode_disjunctive_rule(
 /// Given an unfounded set U (atoms in candidate but not in check model),
 /// find external support and require at least one to be active.
 ///
-/// PB: Σ ¬x_cand (x ∈ U) + Σ n · active_r,h_cand (external (r,h)) >= n
-/// where n = |U|.
+/// Clause: Σ ¬x_cand (x ∈ U) + Σ active_r,h_cand (external (r,h)) >= 1
+///
+/// This is a simple disjunction: either some atom in U is false, or some
+/// external support rule is active.
 ///
 /// For choice rules, use active_r_cand directly.
 /// For non-choice rules, use active_r,h_cand for each head h in U.
@@ -694,7 +696,6 @@ pub fn generate_loop_constraint(
     program: &Program,
     layout: &VarLayout,
 ) -> PBConstraint {
-    let n = unfounded_set.len() as Weight;
     let u_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
 
     let mut terms: Vec<(Lit, Weight)> = Vec::new();
@@ -721,6 +722,7 @@ pub fn generate_loop_constraint(
             let body_in_u = body
                 .iter()
                 .any(|lit| lit.positive && u_set.contains(&lit.atom));
+
             if body_in_u {
                 continue;
             }
@@ -728,19 +730,19 @@ pub fn generate_loop_constraint(
             if entry.is_choice {
                 // Choice rules use active_r_cand (only add once per rule)
                 if added_choice_rules.insert(entry.rule_idx) {
-                    terms.push((Lit::pos(layout.active_cand(entry.rule_idx)), n));
+                    terms.push((Lit::pos(layout.active_cand(entry.rule_idx)), 1));
                 }
             } else {
                 // Non-choice rules use active_r,h_cand for this specific head
                 terms.push((
                     Lit::pos(layout.active_head_cand(entry.rule_idx, entry.head_idx)),
-                    n,
+                    1,
                 ));
             }
         }
     }
 
-    (terms, n)
+    (terms, 1)
 }
 
 #[cfg(test)]
@@ -815,10 +817,7 @@ mod tests {
         // This is a basic rule with weights all 1 and bound = 2
         let rule = BasicRule {
             head: Atom(2),
-            body: vec![
-                WeightedLit::pos(Atom(3), 1),
-                WeightedLit::neg(Atom(4), 1),
-            ],
+            body: vec![WeightedLit::pos(Atom(3), 1), WeightedLit::neg(Atom(4), 1)],
             bound: 2,
         };
 
@@ -829,7 +828,15 @@ mod tests {
         let mut cand_pb = Vec::new();
         let mut check = Vec::new();
         let mut check_pb = Vec::new();
-        encode_basic_rule(&rule, 0, &layout, &mut cand, &mut cand_pb, &mut check, &mut check_pb);
+        encode_basic_rule(
+            &rule,
+            0,
+            &layout,
+            &mut cand,
+            &mut cand_pb,
+            &mut check,
+            &mut check_pb,
+        );
 
         // Candidate solver should have 4 clauses:
         // Constraint 3: h_cand ∨ ¬active_cand_0
