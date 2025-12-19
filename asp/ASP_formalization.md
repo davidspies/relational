@@ -142,12 +142,12 @@ When the candidate solver finds a solution $S_{\text{cand}}$ and the check solve
 
 1. Compute the **unfounded set**: $U = S_{\text{cand}} \setminus S_{\text{check}}$
 2. Find **external support**: for each atom $x \in U$, find all rules $r$ where $x \in heads(r)$ but $body^+(r) \cap U = \emptyset$
-3. Add to the candidate solver (where $n = |U|$):
-$$\sum_{x \in U} \overline{x_{\text{cand}}} + \sum_{(r,x) \in \text{external}} n \cdot active_{r,x,\text{cand}} \geq n$$
+3. Add to the candidate solver:
+$$\sum_{x \in U} \overline{x_{\text{cand}}} + \sum_{(r,x) \in \text{external}} active_{r,x,\text{cand}} \geq 1$$
 
 where "external" is the set of $(r, x)$ pairs such that $x \in U$, $x \in heads(r)$, and $body^+(r) \cap U = \emptyset$.
 
-This ensures that if ANY atom in U is true, there must be external support. Without external support, ALL atoms in U must be false.
+This is a simple disjunctive clause: either at least one atom in $U$ is false, or at least one external support rule is active. The constraint only forces external support when ALL atoms in U would otherwise be true.
 
 *Note: For choice rules, use $active_{r,\text{cand}}$ instead of $active_{r,x,\text{cand}}$.*
 
@@ -219,5 +219,7 @@ $h_{\text{check}} + \overline{active_{r,\text{check}}} \geq 1$
 
 If candidate solution is $\{w, x, y, z\}$ and check solution is $\{w, x\}$, the unfounded set is $\{y, z\}$.
 
-Suppose $r_1$ has $y$ in its head, $r_2$ has $z$ in its head, and $r_3$ has both $y$ and $z$ in its heads, and none have $y$ or $z$ in their positive bodies. The external support pairs are $(r_1, y)$, $(r_2, z)$, $(r_3, y)$, $(r_3, z)$, so we add (with $n = |U| = 2$):
-$$\overline{y_{\text{cand}}} + \overline{z_{\text{cand}}} + 2 \cdot active_{r_1,y,\text{cand}} + 2 \cdot active_{r_2,z,\text{cand}} + 2 \cdot active_{r_3,y,\text{cand}} + 2 \cdot active_{r_3,z,\text{cand}} \geq 2$$
+Suppose $r_1$ has $y$ in its head, $r_2$ has $z$ in its head, and $r_3$ has both $y$ and $z$ in its heads, and none have $y$ or $z$ in their positive bodies. The external support pairs are $(r_1, y)$, $(r_2, z)$, $(r_3, y)$, $(r_3, z)$, so we add:
+$$\overline{y_{\text{cand}}} + \overline{z_{\text{cand}}} + active_{r_1,y,\text{cand}} + active_{r_2,z,\text{cand}} + active_{r_3,y,\text{cand}} + active_{r_3,z,\text{cand}} \geq 1$$
+
+This disjunctive clause says: either $y$ is false, or $z$ is false, or one of the external support rules is actively supporting its head.
