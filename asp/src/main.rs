@@ -1,7 +1,7 @@
 //! ASP solver command-line interface.
 
 use std::env;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 
 use asp::{AspSolver, parse_smodels};
 
@@ -27,21 +27,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut solver = AspSolver::new(program);
-    let answer_sets = solver.solve_n(limit);
+    let atom_names = solver.atom_names();
+    let mut count = 0usize;
 
-    if answer_sets.is_empty() {
-        println!("UNSATISFIABLE");
-    } else {
-        println!("SATISFIABLE");
-        for (i, answer_set) in answer_sets.iter().enumerate() {
-            print!("Answer {}: ", i + 1);
-            let mut names: Vec<_> = answer_set
-                .iter()
-                .filter_map(|&atom| solver.atom_name(atom))
-                .collect();
-            names.sort();
-            println!("{}", names.join(" "));
+    solver.solve_streaming(limit, |answer_set| {
+        if count == 0 {
+            println!("SATISFIABLE");
         }
+        count += 1;
+        print!("Answer {}: ", count);
+        let mut names: Vec<_> = answer_set
+            .iter()
+            .filter_map(|&atom| atom_names.get(&atom).map(|s| s.as_str()))
+            .collect();
+        names.sort();
+        println!("{}", names.join(" "));
+        io::stdout().flush().unwrap();
+    });
+
+    if count == 0 {
+        println!("UNSATISFIABLE");
     }
 
     Ok(())

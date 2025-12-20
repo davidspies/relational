@@ -1,3 +1,6 @@
 [submodule "vendor/drat-trim"]
 	path = vendor/drat-trim
 	url = https://github.com/marijnheule/drat-trim.git
+[submodule "vendor/clasp"]
+	path = vendor/clasp
+	url = https://github.com/potassco/clasp.git

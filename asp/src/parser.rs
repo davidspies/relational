@@ -1,6 +1,6 @@
 //! Parser for smodels/lparse format.
 
-use crate::types::{Atom, BasicRule, ChoiceRule, DisjunctiveRule, Program, Rule, WeightedLit};
+use crate::types::{Atom, ChoiceRule, DisjunctiveRule, Program, Rule, WeightedLit};
 
 /// Parse a program in smodels format.
 pub fn parse_smodels(input: &str) -> Result<Program, String> {
@@ -42,20 +42,20 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
             1 => {
                 // Basic rule: 1 head body_count neg_count body_lits...
                 let rule = parse_basic_rule(&parts)?;
-                max_atom = max_atom.max(rule.head.0);
+                max_atom = max_atom.max(rule.heads[0].0);
                 for lit in &rule.body {
                     max_atom = max_atom.max(lit.atom.0);
                 }
-                program.rules.push(Rule::Basic(rule));
+                program.rules.push(Rule::Disjunctive(rule));
             }
             2 => {
                 // Cardinality rule: 2 head body_count neg_count bound body_lits...
                 let rule = parse_cardinality_rule(&parts)?;
-                max_atom = max_atom.max(rule.head.0);
+                max_atom = max_atom.max(rule.heads[0].0);
                 for lit in &rule.body {
                     max_atom = max_atom.max(lit.atom.0);
                 }
-                program.rules.push(Rule::Basic(rule));
+                program.rules.push(Rule::Disjunctive(rule));
             }
             3 => {
                 // Choice rule: 3 head_count heads... body_count neg_count body_lits...
@@ -71,11 +71,11 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
             5 => {
                 // Weight rule: 5 head bound body_count neg_count lits... weights...
                 let rule = parse_weight_rule(&parts)?;
-                max_atom = max_atom.max(rule.head.0);
+                max_atom = max_atom.max(rule.heads[0].0);
                 for lit in &rule.body {
                     max_atom = max_atom.max(lit.atom.0);
                 }
-                program.rules.push(Rule::Basic(rule));
+                program.rules.push(Rule::Disjunctive(rule));
             }
             8 => {
                 // Disjunctive rule: 8 head_count heads... body_count neg_count body_lits...
@@ -120,7 +120,7 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
     Ok(program)
 }
 
-fn parse_basic_rule(parts: &[&str]) -> Result<BasicRule, String> {
+fn parse_basic_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
     // Format: 1 head body_count neg_count body_lits...
     if parts.len() < 4 {
         return Err("Basic rule too short".to_string());
@@ -162,14 +162,14 @@ fn parse_basic_rule(parts: &[&str]) -> Result<BasicRule, String> {
     }
 
     // For basic rules, bound = body_count (all must be satisfied)
-    Ok(BasicRule {
-        head,
+    Ok(DisjunctiveRule {
+        heads: vec![head],
         body,
         bound: body_count as i64,
     })
 }
 
-fn parse_cardinality_rule(parts: &[&str]) -> Result<BasicRule, String> {
+fn parse_cardinality_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
     // Format: 2 head body_count neg_count bound body_lits...
     if parts.len() < 5 {
         return Err("Cardinality rule too short".to_string());
@@ -207,10 +207,14 @@ fn parse_cardinality_rule(parts: &[&str]) -> Result<BasicRule, String> {
         }
     }
 
-    Ok(BasicRule { head, body, bound })
+    Ok(DisjunctiveRule {
+        heads: vec![head],
+        body,
+        bound,
+    })
 }
 
-fn parse_weight_rule(parts: &[&str]) -> Result<BasicRule, String> {
+fn parse_weight_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
     // Format: 5 head bound body_count neg_count lits... weights...
     if parts.len() < 5 {
         return Err("Weight rule too short".to_string());
@@ -256,7 +260,11 @@ fn parse_weight_rule(parts: &[&str]) -> Result<BasicRule, String> {
         }
     }
 
-    Ok(BasicRule { head, body, bound })
+    Ok(DisjunctiveRule {
+        heads: vec![head],
+        body,
+        bound,
+    })
 }
 
 fn parse_choice_rule(parts: &[&str]) -> Result<ChoiceRule, String> {

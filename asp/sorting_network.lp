@@ -1,8 +1,8 @@
 % Sorting Network Finder (Σ₂ᵖ encoding)
 % Problem: ∃ network ∀ input: network sorts input
 
-#const n = 5.
-#const k = 7.
+#const n = 3.
+#const k = 4.
 
 wire(0..k-1).
 layer(1..n).
