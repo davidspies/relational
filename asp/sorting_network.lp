@@ -50,5 +50,3 @@ sorted :- sorted_pair(I, I+1) : wire(I), wire(I+1).
 val(0, W, B) :- sorted, wire(W), bit(B).
 
 :- not sorted.
-
-#show comp/3.
