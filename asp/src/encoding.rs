@@ -1,21 +1,21 @@
 //! SAT encoding for ASP programs with two-solver architecture.
 //!
-//! Variable layout:
+//! Variable layout (multi-level for weight bodies):
 //! - Atoms 1..N → x_cand (var 1..N)
-//! - Rules 0..R-1 → active_r_cand (var N+1..N+R)
-//! - Rules 0..R-1 → active_r_check (var N+R+1..N+2R)
-//! - Atoms 1..N → x_check (var N+2R+1..N+2R+N)
-//! - Atoms 1..N → x_dim (var N+2R+N+1..N+2R+2N)
-//! - Non-choice rules → used_r_cand (var N+2R+2N+1..N+2R+2N+NC)
-//! - Non-choice rule heads → active_r_h_cand (var N+2R+2N+NC+1..N+2R+2N+NC+TH)
+//! - For each rule r, for each level s ∈ {t_r..W_r} → active_r,s_cand
+//! - Rules 0..R-1 → active_r_check (one per rule)
+//! - Atoms 1..N → x_check
+//! - Atoms 1..N → x_dim
+//! - For each non-choice rule r, for each level s → used_r,s_cand
+//! - For each non-choice rule r, head h, level s → active_r,h,s_cand
 //!
-//! Where NC = number of non-choice rules, TH = total heads across non-choice rules.
+//! Number of levels per rule: W_r - t_r + 1 (where W_r = sum of weights, t_r = bound)
 
 use std::collections::HashMap;
 
 use cdcl::{Lit, Var, Weight};
 
-use crate::types::{Atom, ChoiceRule, DisjunctiveRule, Program, Rule};
+use crate::types::{Atom, ChoiceRule, DisjunctiveRule, Program, Rule, WeightedLit};
 
 /// Entry in the atom→rules index for generate_loop_constraint.
 #[derive(Debug, Clone, Copy)]
@@ -31,15 +31,30 @@ pub type Clause = Vec<Lit>;
 /// A PB constraint: sum of (lit * weight) >= bound.
 pub type PBConstraint = (Vec<(Lit, Weight)>, Weight);
 
-/// Per-rule info for non-choice rules (basic or disjunctive).
+/// Per-rule info for variable layout.
 #[derive(Debug, Clone)]
-struct NonChoiceRuleInfo {
-    /// Index among non-choice rules (for used_cand offset)
-    non_choice_idx: u32,
+struct RuleInfo {
+    /// Bound (threshold) for this rule's body
+    bound: Weight,
+    /// Sum of all body weights
+    sum_weights: Weight,
+    /// Number of levels: sum_weights - bound + 1
+    num_levels: u32,
+    /// Starting offset for active_r,s_cand variables
+    active_cand_start: u32,
+    /// For non-choice rules only
+    non_choice: Option<NonChoiceInfo>,
+}
+
+/// Additional info for non-choice rules.
+#[derive(Debug, Clone)]
+struct NonChoiceInfo {
     /// Number of heads
     num_heads: u32,
-    /// Starting offset for head variables
-    head_var_start: u32,
+    /// Starting offset for used_r,s_cand variables
+    used_cand_start: u32,
+    /// Starting offset for active_r,h,s_cand variables
+    active_head_cand_start: u32,
 }
 
 /// Variable layout for the ASP encoding.
@@ -49,14 +64,23 @@ pub struct VarLayout {
     pub num_atoms: u32,
     /// Number of rules (R)
     pub num_rules: u32,
-    /// Number of non-choice rules
-    num_non_choice: u32,
-    /// Total head variables across all non-choice rules
-    total_head_vars: u32,
-    /// Info for each rule: Some(info) for non-choice, None for choice
-    rule_info: Vec<Option<NonChoiceRuleInfo>>,
+    /// Info for each rule
+    rule_info: Vec<RuleInfo>,
+    /// Base offset for active_check variables
+    active_check_base: u32,
+    /// Base offset for check variables
+    check_base: u32,
+    /// Base offset for dim variables
+    dim_base: u32,
+    /// Total number of variables
+    total_vars: u32,
     /// Index from atom → rules that have this atom as a head
     atom_to_rules: HashMap<Atom, Vec<HeadEntry>>,
+}
+
+/// Helper to compute sum of weights for a body
+fn sum_weights(body: &[WeightedLit]) -> Weight {
+    body.iter().map(|lit| lit.weight).sum()
 }
 
 impl VarLayout {
@@ -66,48 +90,87 @@ impl VarLayout {
 
         let mut rule_info = Vec::with_capacity(program.rules.len());
         let mut atom_to_rules: HashMap<Atom, Vec<HeadEntry>> = HashMap::new();
-        let mut non_choice_idx = 0u32;
-        let mut head_var_offset = 0u32;
+
+        // Phase 1: Compute active_cand offsets (all rules)
+        // Layout: atoms (1..N), then active_r,s_cand for each rule and level
+        let mut active_cand_offset = num_atoms + 1;
 
         for (rule_idx, rule) in program.rules.iter().enumerate() {
-            let rule_idx = rule_idx as u32;
-            match rule {
-                Rule::Disjunctive(r) => {
-                    let num_heads = r.heads.len() as u32;
-                    rule_info.push(Some(NonChoiceRuleInfo {
-                        non_choice_idx,
-                        num_heads,
-                        head_var_start: head_var_offset,
-                    }));
-                    for (head_idx, &head) in r.heads.iter().enumerate() {
-                        atom_to_rules.entry(head).or_default().push(HeadEntry {
-                            rule_idx,
-                            head_idx: head_idx as u32,
-                            is_choice: false,
-                        });
-                    }
-                    non_choice_idx += 1;
-                    head_var_offset += num_heads;
-                }
-                Rule::Choice(r) => {
-                    rule_info.push(None);
-                    for (head_idx, &head) in r.heads.iter().enumerate() {
-                        atom_to_rules.entry(head).or_default().push(HeadEntry {
-                            rule_idx,
-                            head_idx: head_idx as u32,
-                            is_choice: true,
-                        });
-                    }
-                }
+            let rule_idx_u32 = rule_idx as u32;
+            let (bound, body, heads, is_choice) = match rule {
+                Rule::Disjunctive(r) => (r.bound, &r.body, &r.heads, false),
+                Rule::Choice(r) => (r.bound, &r.body, &r.heads, true),
+            };
+
+            let sw = sum_weights(body);
+            let num_levels = (sw - bound + 1) as u32;
+
+            // Build atom_to_rules index
+            for (head_idx, &head) in heads.iter().enumerate() {
+                atom_to_rules.entry(head).or_default().push(HeadEntry {
+                    rule_idx: rule_idx_u32,
+                    head_idx: head_idx as u32,
+                    is_choice,
+                });
+            }
+
+            rule_info.push(RuleInfo {
+                bound,
+                sum_weights: sw,
+                num_levels,
+                active_cand_start: active_cand_offset,
+                non_choice: None, // Will be filled in phase 2
+            });
+
+            active_cand_offset += num_levels;
+        }
+
+        // After active_cand: active_check (one per rule)
+        let active_check_base = active_cand_offset;
+        let check_base = active_check_base + num_rules;
+        let dim_base = check_base + num_atoms;
+
+        // Phase 2: Compute used_cand and active_head_cand offsets (non-choice only)
+        let mut used_cand_offset = dim_base + num_atoms;
+        let mut active_head_offset = used_cand_offset;
+
+        // First pass: count total used_cand variables
+        for (rule_idx, rule) in program.rules.iter().enumerate() {
+            if let Rule::Disjunctive(_) = rule {
+                active_head_offset += rule_info[rule_idx].num_levels;
             }
         }
+
+        // Second pass: assign offsets
+        for (rule_idx, rule) in program.rules.iter().enumerate() {
+            if let Rule::Disjunctive(r) = rule {
+                let info = &mut rule_info[rule_idx];
+                let num_heads = r.heads.len() as u32;
+                let num_levels = info.num_levels;
+
+                info.non_choice = Some(NonChoiceInfo {
+                    num_heads,
+                    used_cand_start: used_cand_offset,
+                    active_head_cand_start: active_head_offset,
+                });
+
+                used_cand_offset += num_levels;
+                active_head_offset += num_heads * num_levels;
+            }
+        }
+
+        // total_vars is the highest variable number used (1-indexed)
+        // active_head_offset points to the next slot after the last variable
+        let total_vars = active_head_offset - 1;
 
         VarLayout {
             num_atoms,
             num_rules,
-            num_non_choice: non_choice_idx,
-            total_head_vars: head_var_offset,
             rule_info,
+            active_check_base,
+            check_base,
+            dim_base,
+            total_vars,
             atom_to_rules,
         }
     }
@@ -117,66 +180,100 @@ impl VarLayout {
         Var::new(atom.0)
     }
 
-    /// Get the active_r_cand variable for a rule index.
-    pub fn active_cand(&self, rule_idx: u32) -> Var {
-        Var::new(self.num_atoms + 1 + rule_idx)
+    /// Get the bound (threshold) for a rule.
+    pub fn bound(&self, rule_idx: u32) -> Weight {
+        self.rule_info[rule_idx as usize].bound
+    }
+
+    /// Get the sum of weights for a rule.
+    pub fn sum_weights(&self, rule_idx: u32) -> Weight {
+        self.rule_info[rule_idx as usize].sum_weights
+    }
+
+    /// Get the number of levels for a rule.
+    pub fn num_levels(&self, rule_idx: u32) -> u32 {
+        self.rule_info[rule_idx as usize].num_levels
+    }
+
+    /// Get the active_r,s_cand variable for a rule index and level.
+    /// level must be in range [bound, sum_weights].
+    pub fn active_cand(&self, rule_idx: u32, level: Weight) -> Var {
+        let info = &self.rule_info[rule_idx as usize];
+        let level_offset = (level - info.bound) as u32;
+        assert!(level_offset < info.num_levels, "level out of range");
+        Var::new(info.active_cand_start + level_offset)
+    }
+
+    /// Get the active_r_cand variable at base level (s = bound).
+    pub fn active_cand_base(&self, rule_idx: u32) -> Var {
+        let info = &self.rule_info[rule_idx as usize];
+        Var::new(info.active_cand_start)
     }
 
     /// Get the active_r_check variable for a rule index.
     pub fn active_check(&self, rule_idx: u32) -> Var {
-        Var::new(self.num_atoms + self.num_rules + 1 + rule_idx)
+        Var::new(self.active_check_base + rule_idx)
     }
 
     /// Get the x_check variable for an atom.
     pub fn check(&self, atom: Atom) -> Var {
-        Var::new(self.num_atoms + 2 * self.num_rules + atom.0)
+        Var::new(self.check_base + atom.0 - 1)
     }
 
     /// Get the x_dim variable for an atom.
     pub fn dim(&self, atom: Atom) -> Var {
-        Var::new(self.num_atoms + 2 * self.num_rules + self.num_atoms + atom.0)
+        Var::new(self.dim_base + atom.0 - 1)
     }
 
-    /// Base offset for used_cand variables
-    fn used_cand_base(&self) -> u32 {
-        self.num_atoms + 2 * self.num_rules + 2 * self.num_atoms + 1
-    }
-
-    /// Get the used_r_cand variable for a non-choice rule.
+    /// Get the used_r,s_cand variable for a non-choice rule at a level.
     /// Panics if rule_idx is a choice rule.
-    pub fn used_cand(&self, rule_idx: u32) -> Var {
-        let info = self.rule_info[rule_idx as usize]
-            .as_ref()
-            .expect("used_cand called on choice rule");
-        Var::new(self.used_cand_base() + info.non_choice_idx)
+    pub fn used_cand(&self, rule_idx: u32, level: Weight) -> Var {
+        let info = &self.rule_info[rule_idx as usize];
+        let nc = info.non_choice.as_ref().expect("used_cand called on choice rule");
+        let level_offset = (level - info.bound) as u32;
+        assert!(level_offset < info.num_levels, "level out of range");
+        Var::new(nc.used_cand_start + level_offset)
     }
 
-    /// Base offset for active_head_cand variables
-    fn active_head_cand_base(&self) -> u32 {
-        self.used_cand_base() + self.num_non_choice
+    /// Get the used_r_cand variable at base level (s = bound).
+    pub fn used_cand_base(&self, rule_idx: u32) -> Var {
+        let info = &self.rule_info[rule_idx as usize];
+        let nc = info.non_choice.as_ref().expect("used_cand_base called on choice rule");
+        Var::new(nc.used_cand_start)
     }
 
-    /// Get the active_r_h_cand variable for a specific head of a non-choice rule.
+    /// Get the active_r,h,s_cand variable for a specific head of a non-choice rule at a level.
     /// head_idx is 0-based index into the rule's heads.
     /// Panics if rule_idx is a choice rule.
-    pub fn active_head_cand(&self, rule_idx: u32, head_idx: u32) -> Var {
-        let info = self.rule_info[rule_idx as usize]
-            .as_ref()
-            .expect("active_head_cand called on choice rule");
-        assert!(head_idx < info.num_heads);
-        Var::new(self.active_head_cand_base() + info.head_var_start + head_idx)
+    pub fn active_head_cand(&self, rule_idx: u32, head_idx: u32, level: Weight) -> Var {
+        let info = &self.rule_info[rule_idx as usize];
+        let nc = info.non_choice.as_ref().expect("active_head_cand called on choice rule");
+        assert!(head_idx < nc.num_heads, "head_idx out of range");
+        let level_offset = (level - info.bound) as u32;
+        assert!(level_offset < info.num_levels, "level out of range");
+        // Layout: for each head, all levels are contiguous
+        Var::new(nc.active_head_cand_start + head_idx * info.num_levels + level_offset)
     }
 
-    /// Check if a rule is a non-choice rule (basic or disjunctive).
+    /// Get the active_r,h_cand variable at base level (s = bound).
+    pub fn active_head_cand_base(&self, rule_idx: u32, head_idx: u32) -> Var {
+        let info = &self.rule_info[rule_idx as usize];
+        let nc = info.non_choice.as_ref().expect("active_head_cand_base called on choice rule");
+        assert!(head_idx < nc.num_heads, "head_idx out of range");
+        Var::new(nc.active_head_cand_start + head_idx * info.num_levels)
+    }
+
+    /// Check if a rule is a non-choice rule (disjunctive).
     pub fn is_non_choice(&self, rule_idx: u32) -> bool {
-        self.rule_info[rule_idx as usize].is_some()
+        self.rule_info[rule_idx as usize].non_choice.is_some()
     }
 
     /// Get the number of heads for a non-choice rule.
     pub fn num_heads(&self, rule_idx: u32) -> u32 {
         self.rule_info[rule_idx as usize]
+            .non_choice
             .as_ref()
-            .map(|info| info.num_heads)
+            .map(|nc| nc.num_heads)
             .unwrap_or(0)
     }
 
@@ -187,13 +284,7 @@ impl VarLayout {
 
     /// Total number of variables.
     pub fn total_vars(&self) -> u32 {
-        // cand: N, active_cand: R, active_check: R, check: N, dim: N,
-        // used_cand: NC, active_head_cand: TH
-        self.num_atoms
-            + 2 * self.num_rules
-            + 2 * self.num_atoms
-            + self.num_non_choice
-            + self.total_head_vars
+        self.total_vars
     }
 }
 
@@ -304,7 +395,7 @@ fn encode_choice_rule(
     check_clauses: &mut Vec<Clause>,
     check_pb_constraints: &mut Vec<PBConstraint>,
 ) {
-    let active_cand = layout.active_cand(rule_idx);
+    let active_cand = layout.active_cand_base(rule_idx);
     let active_check = layout.active_check(rule_idx);
 
     // Calculate sum of weights
@@ -327,19 +418,23 @@ fn encode_choice_rule(
     }
     cand_pb_constraints.push((constraint1_terms, falsification_weight));
 
-    // Constraint 2 (body falsification when inactive)
-    // Per ASP_formalization.md Constraint 2: t · ¬active + ... >= t
-    // When bound=0 this is trivially satisfied (0 >= 0), but still correct.
-    let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
-    for lit in &rule.body {
-        let cdcl_lit = if lit.positive {
-            Lit::pos(layout.cand(lit.atom))
-        } else {
-            Lit::neg(layout.cand(lit.atom))
-        };
-        constraint2_terms.push((cdcl_lit, lit.weight));
+    // Constraint 2 (body falsification when inactive) - at each level s
+    // Per ASP_formalization.md Constraint 2: s · ¬active_r,s + ... >= s
+    let num_levels = layout.num_levels(rule_idx);
+    for level_offset in 0..num_levels {
+        let level = bound + level_offset as Weight;
+        let active_at_level = layout.active_cand(rule_idx, level);
+        let mut constraint2_terms = vec![(Lit::neg(active_at_level), level)];
+        for lit in &rule.body {
+            let cdcl_lit = if lit.positive {
+                Lit::pos(layout.cand(lit.atom))
+            } else {
+                Lit::neg(layout.cand(lit.atom))
+            };
+            constraint2_terms.push((cdcl_lit, lit.weight));
+        }
+        cand_pb_constraints.push((constraint2_terms, level));
     }
-    cand_pb_constraints.push((constraint2_terms, bound));
 
     // NOTE: No Constraint 3 - heads are OPTIONAL in choice rules
 
@@ -400,7 +495,7 @@ fn encode_disjunctive_rule(
     check_clauses: &mut Vec<Clause>,
     check_pb_constraints: &mut Vec<PBConstraint>,
 ) {
-    let active_cand = layout.active_cand(rule_idx);
+    let active_cand = layout.active_cand_base(rule_idx);
     let active_check = layout.active_check(rule_idx);
     let n = rule.heads.len() as Weight;
 
@@ -425,23 +520,25 @@ fn encode_disjunctive_rule(
     }
     cand_pb_constraints.push((constraint1_terms, falsification_weight));
 
-    // Constraint 2 (body falsification when inactive):
-    // t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
-    // When bound=0 this is trivially satisfied (0 >= 0), but still correct.
-    let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
-    for lit in &rule.body {
-        let cdcl_lit = if lit.positive {
-            Lit::pos(layout.cand(lit.atom))
-        } else {
-            Lit::neg(layout.cand(lit.atom))
-        };
-        constraint2_terms.push((cdcl_lit, lit.weight));
+    // Constraint 2 (body falsification when inactive) - at each level s:
+    // s · ¬active_r,s_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= s
+    let num_levels = layout.num_levels(rule_idx);
+    for level_offset in 0..num_levels {
+        let level = bound + level_offset as Weight;
+        let active_at_level = layout.active_cand(rule_idx, level);
+        let mut constraint2_terms = vec![(Lit::neg(active_at_level), level)];
+        for lit in &rule.body {
+            let cdcl_lit = if lit.positive {
+                Lit::pos(layout.cand(lit.atom))
+            } else {
+                Lit::neg(layout.cand(lit.atom))
+            };
+            constraint2_terms.push((cdcl_lit, lit.weight));
+        }
+        cand_pb_constraints.push((constraint2_terms, level));
     }
-    cand_pb_constraints.push((constraint2_terms, bound));
 
-    let used_cand = layout.used_cand(rule_idx);
-
-    // Constraint 3 (head requirement): Σ h_cand + ¬active_r_cand >= 1
+    // Constraint 3 (head requirement) - base level: Σ h_cand + ¬active_r_cand >= 1
     // For integrity constraints (empty heads), this is just ¬active_r_cand >= 1
     let mut constraint3_clause: Vec<Lit> = rule
         .heads
@@ -451,35 +548,43 @@ fn encode_disjunctive_rule(
     constraint3_clause.push(Lit::neg(active_cand));
     cand_clauses.push(constraint3_clause);
 
-    // Constraint 4 (used implies active): ¬used_r_cand ∨ active_r_cand
-    cand_clauses.push(vec![Lit::neg(used_cand), Lit::pos(active_cand)]);
+    // Constraints 4 and 5 at each level s
+    for level_offset in 0..num_levels {
+        let level = bound + level_offset as Weight;
+        let active_at_level = layout.active_cand(rule_idx, level);
+        let used_at_level = layout.used_cand(rule_idx, level);
 
-    // Constraint 5 (head selection): Σ ¬active_r_h_cand + used_r_cand >= n
-    let mut constraint5_terms: Vec<(Lit, Weight)> = (0..rule.heads.len())
-        .map(|head_idx| {
-            (
-                Lit::neg(layout.active_head_cand(rule_idx, head_idx as u32)),
-                1,
-            )
-        })
-        .collect();
-    constraint5_terms.push((Lit::pos(used_cand), n));
-    cand_pb_constraints.push((constraint5_terms, n));
+        // Constraint 4 (used implies active) - at each level: ¬used_r,s_cand ∨ active_r,s_cand
+        cand_clauses.push(vec![Lit::neg(used_at_level), Lit::pos(active_at_level)]);
 
-    // Constraint 6 (exclusive head): Σ ¬h_cand + (n-1)·¬used_r_cand >= n-1
+        // Constraint 5 (head selection) - at each level: Σ ¬active_r,h,s_cand + used_r,s_cand >= n
+        let mut constraint5_terms: Vec<(Lit, Weight)> = (0..rule.heads.len())
+            .map(|head_idx| {
+                (
+                    Lit::neg(layout.active_head_cand(rule_idx, head_idx as u32, level)),
+                    1,
+                )
+            })
+            .collect();
+        constraint5_terms.push((Lit::pos(used_at_level), n));
+        cand_pb_constraints.push((constraint5_terms, n));
+    }
+
+    // Constraint 6 (exclusive head) - base level: Σ ¬h_cand + (n-1)·¬used_r_cand >= n-1
+    let used_cand_base = layout.used_cand_base(rule_idx);
     let mut constraint6_terms: Vec<(Lit, Weight)> = rule
         .heads
         .iter()
         .map(|&h| (Lit::neg(layout.cand(h)), 1))
         .collect();
-    constraint6_terms.push((Lit::neg(used_cand), n - 1));
+    constraint6_terms.push((Lit::neg(used_cand_base), n - 1));
     cand_pb_constraints.push((constraint6_terms, n - 1));
 
     // Constraint 7 (head propagation): h_cand ∨ ¬active_r_h_cand (for each head)
     for (head_idx, &head) in rule.heads.iter().enumerate() {
         cand_clauses.push(vec![
             Lit::pos(layout.cand(head)),
-            Lit::neg(layout.active_head_cand(rule_idx, head_idx as u32)),
+            Lit::neg(layout.active_head_cand_base(rule_idx, head_idx as u32)),
         ]);
     }
 
@@ -516,13 +621,13 @@ fn encode_disjunctive_rule(
 /// Given an unfounded set U (atoms in candidate but not in check model),
 /// find external support and require at least one to be active.
 ///
-/// Clause: ¬chosen_atom_cand + Σ active_r,h_cand (external (r,h)) >= 1
+/// For weight bodies, a rule can provide external support even if some positive
+/// body atoms are in U, as long as the remaining atoms can satisfy the bound.
+/// We use level s = t + overlap_weight where overlap_weight is the sum of weights
+/// for positive body atoms in U.
 ///
-/// This is a simple disjunction: either the chosen atom is false, or some
-/// external support rule is active.
-///
-/// For choice rules, use active_r_cand directly.
-/// For non-choice rules, use active_r,h_cand for each head h in U.
+/// For choice rules, use active_r,s_cand.
+/// For non-choice rules, use active_r,h,s_cand for each head h in U.
 pub fn generate_loop_constraint(
     chosen_atom: Atom,
     unfounded_set: &[Atom],
@@ -536,67 +641,61 @@ pub fn generate_loop_constraint(
     // Negated chosen atom (like clasp, we process one atom at a time)
     terms.push((Lit::neg(layout.cand(chosen_atom)), 1));
 
-    // Track which choice rules we've already added (they use active_r_cand, not per-head)
-    let mut added_choice_rules: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    // Track which (choice_rule, level) pairs we've already added
+    let mut added_choice_rules: std::collections::HashSet<(u32, Weight)> =
+        std::collections::HashSet::new();
 
     // Find external support for ANY atom in the UFS
-    // (if any atom gets external support, the whole loop can be supported)
     for &atom in unfounded_set {
         for entry in layout.rules_for_head(atom) {
             let rule = &program.rules[entry.rule_idx as usize];
-            let body = match rule {
-                Rule::Choice(r) => &r.body,
-                Rule::Disjunctive(r) => &r.body,
+            let (body, bound) = match rule {
+                Rule::Choice(r) => (&r.body, r.bound),
+                Rule::Disjunctive(r) => (&r.body, r.bound),
             };
 
-            // Check if body depends on unfounded set
-            // BUG: This check is wrong for weight/cardinality rules. It should check
-            // if the body CAN be satisfied without UFS atoms, not just if ANY body
-            // atom is in UFS. See test_loop_constraint_cardinality_external_support.
-            let body_in_u = body
+            // Calculate overlap_weight: sum of weights for positive body atoms in UFS
+            let overlap_weight: Weight = body
                 .iter()
-                .any(|lit| lit.positive && u_set.contains(&lit.atom));
+                .filter(|lit| lit.positive && u_set.contains(&lit.atom))
+                .map(|lit| lit.weight)
+                .sum();
 
-            // NECESSARY: Skip internal rules (body depends on UFS atoms).
-            // BUG: For weight bodies, should check if body CAN be satisfied without UFS,
-            // not just if ANY body atom is in UFS.
-            if body_in_u {
-                // DEBUG: Conditional output for debugging external support detection
+            // Compute the required level: s = t + overlap_weight
+            let level = bound + overlap_weight;
+            let sum_weights = layout.sum_weights(entry.rule_idx);
+
+            // If s > W_r, rule cannot provide external support (skip)
+            if level > sum_weights {
                 if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
                     eprintln!(
-                        "c     Rule {} for {:?}: INTERNAL (body depends on UFS)",
-                        entry.rule_idx, atom
+                        "c     Rule {} for {:?}: INTERNAL (level {} > sum_weights {})",
+                        entry.rule_idx, atom, level, sum_weights
                     );
                 }
                 continue;
             }
 
-            // NECESSARY: Choice rules use active_r_cand, non-choice use active_r,h_cand.
-            // Different variables per ASP_formalization.md.
+            // Rule can provide external support at this level
             if entry.is_choice {
-                // NECESSARY: Deduplicate - choice rules use one variable for all heads.
-                // Adding same term twice would give wrong weight.
-                if added_choice_rules.insert(entry.rule_idx) {
-                    let var = layout.active_cand(entry.rule_idx);
+                // Choice rules use active_r,s_cand (deduplicate by rule+level)
+                if added_choice_rules.insert((entry.rule_idx, level)) {
+                    let var = layout.active_cand(entry.rule_idx, level);
                     if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
                         eprintln!(
-                            "c     Rule {} for {:?}: EXTERNAL (choice) -> var {}",
-                            entry.rule_idx,
-                            atom,
-                            var.raw()
+                            "c     Rule {} for {:?}: EXTERNAL (choice, level {}) -> var {}",
+                            entry.rule_idx, atom, level, var.raw()
                         );
                     }
                     terms.push((Lit::pos(var), 1));
                 }
             } else {
-                // Non-choice rules use active_r,h_cand for this specific head
-                let var = layout.active_head_cand(entry.rule_idx, entry.head_idx);
+                // Non-choice rules use active_r,h,s_cand for this specific head
+                let var = layout.active_head_cand(entry.rule_idx, entry.head_idx, level);
                 if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
                     eprintln!(
-                        "c     Rule {} for {:?}: EXTERNAL (non-choice) -> var {}",
-                        entry.rule_idx,
-                        atom,
-                        var.raw()
+                        "c     Rule {} for {:?}: EXTERNAL (non-choice, level {}) -> var {}",
+                        entry.rule_idx, atom, level, var.raw()
                     );
                 }
                 terms.push((Lit::pos(var), 1));
@@ -644,9 +743,9 @@ mod tests {
         assert_eq!(layout.cand(Atom(1)).raw(), 1);
         assert_eq!(layout.cand(Atom(3)).raw(), 3);
 
-        // active_cand: 4, 5
-        assert_eq!(layout.active_cand(0).raw(), 4);
-        assert_eq!(layout.active_cand(1).raw(), 5);
+        // active_cand: 4, 5 (base level for each rule with 1 level)
+        assert_eq!(layout.active_cand_base(0).raw(), 4);
+        assert_eq!(layout.active_cand_base(1).raw(), 5);
 
         // active_check: 6, 7
         assert_eq!(layout.active_check(0).raw(), 6);
@@ -660,13 +759,13 @@ mod tests {
         assert_eq!(layout.dim(Atom(1)).raw(), 11);
         assert_eq!(layout.dim(Atom(3)).raw(), 13);
 
-        // used_cand for 2 non-choice rules: 14, 15
-        assert_eq!(layout.used_cand(0).raw(), 14);
-        assert_eq!(layout.used_cand(1).raw(), 15);
+        // used_cand for 2 non-choice rules: 14, 15 (base level for each)
+        assert_eq!(layout.used_cand_base(0).raw(), 14);
+        assert_eq!(layout.used_cand_base(1).raw(), 15);
 
-        // active_head_cand: each rule has 1 head, so: 16, 17
-        assert_eq!(layout.active_head_cand(0, 0).raw(), 16);
-        assert_eq!(layout.active_head_cand(1, 0).raw(), 17);
+        // active_head_cand: each rule has 1 head, so: 16, 17 (base level for each)
+        assert_eq!(layout.active_head_cand_base(0, 0).raw(), 16);
+        assert_eq!(layout.active_head_cand_base(1, 0).raw(), 17);
 
         // Total: 3 atoms + 2 active_cand + 2 active_check + 3 check + 3 dim
         //        + 2 used_cand + 2 active_head_cand = 17
@@ -700,15 +799,18 @@ mod tests {
             &mut check_pb,
         );
 
-        // Candidate solver should have 4 clauses:
+        // Candidate solver should have 3 clauses:
         // Constraint 3: h_cand ∨ ¬active_cand_0
         // Constraint 4: ¬used_cand ∨ active_cand
-        // Constraint 5: ¬active_head_cand ∨ used_cand
         // Constraint 7: h_cand ∨ ¬active_head_cand
-        assert_eq!(cand.len(), 4);
+        assert_eq!(cand.len(), 3);
 
-        // Candidate solver should have 2 PB constraints (Constraints 1 and 2)
-        assert_eq!(cand_pb.len(), 2);
+        // Candidate solver should have 4 PB constraints:
+        // Constraint 1: body satisfaction
+        // Constraint 2: body falsification
+        // Constraint 5: head selection (¬active_head_cand + used_cand >= 1)
+        // Constraint 6: exclusive head (¬h_cand + 0·¬used_cand >= 0, trivial but still added)
+        assert_eq!(cand_pb.len(), 4);
 
         // Check solver should have 1 clause (Constraint 11):
         // h_check ∨ ¬active_check_0
