@@ -36,6 +36,23 @@ Good patterns:
 
 The goal is to surface bugs immediately, not hide them behind fallbacks.
 
+### Avoid Unnecessary Conditionals
+
+**Every `if` statement must be justified.** Don't add special cases unless the specification requires them.
+
+Bad patterns:
+- Adding `if` branches "just in case" without a clear reason
+- Special-casing edge cases that aren't in the spec (if the spec says "do X", don't add "unless Y")
+- Defensive checks for conditions that "might" happen but aren't documented
+- `if !has_foo { do_fallback }` when the code path should always have foo
+
+Good patterns:
+- `if` that directly implements a branch in the specification
+- `if` for fundamentally different cases (e.g., choice rules vs disjunctive rules have different semantics)
+- `if` with a comment explaining why this branch is necessary
+
+When implementing an algorithm from a formalization, the code structure should mirror the formalization. If the formalization has no conditionals, the code shouldn't either. Add a comment to every `if` explaining which part of the spec requires it.
+
 ### Debug Scripts
 
 Debug scripts should be placed in the workspace directory, not in `/tmp`. Operations outside the workspace require manual approval for each action, with no way to grant blanket approval.

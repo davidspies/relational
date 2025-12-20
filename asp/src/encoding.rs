@@ -252,7 +252,8 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
 
     // Add single-atom loop constraints for each atom (Constraint 13 initialization)
     for atom_id in 2..=layout.num_atoms {
-        let pb_constraint = generate_loop_constraint(&[Atom(atom_id)], program, &layout);
+        let atom = Atom(atom_id);
+        let pb_constraint = generate_loop_constraint(atom, &[atom], program, &layout);
         cand_pb_constraints.push(pb_constraint);
     }
 
@@ -315,6 +316,9 @@ fn encode_choice_rule(
 
     // Constraint 1 (body satisfaction when active)
     // For choice rules with empty body, this forces the rule active
+    // JUSTIFIED: Per ASP_formalization.md Constraint 1, positive body atoms contribute
+    // ¬b_i (falsified when true) while negative body atoms contribute c_j (falsified when false).
+    // This is the standard PB encoding of weighted body satisfaction.
     let mut constraint1_terms = vec![(Lit::pos(active_cand), falsification_weight)];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
@@ -327,8 +331,13 @@ fn encode_choice_rule(
     cand_pb_constraints.push((constraint1_terms, falsification_weight));
 
     // Constraint 2 (body falsification when inactive)
-    // Only needed if bound > 0
+    // JUSTIFIED: When bound=0, the body is trivially satisfied (sum >= 0 always true),
+    // so the rule is always active and this constraint would be 0 >= 0 (trivial).
+    // Per ASP_formalization.md Constraint 2: t · ¬active + ... >= t requires t > 0.
     if bound > 0 {
+        // JUSTIFIED: Per ASP_formalization.md Constraint 2, this is the inverse of Constraint 1:
+        // positive body atoms contribute b_i (satisfied when true) while negative body atoms
+        // contribute ¬c_j (satisfied when false). Ensures active ↔ body satisfied.
         let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
@@ -343,7 +352,9 @@ fn encode_choice_rule(
 
     // NOTE: No Constraint 3 - heads are OPTIONAL in choice rules
 
-    // Constraint 6 (reduct body satisfaction)
+    // Constraint 6 (reduct body satisfaction) - actually Constraint 10 in formalization
+    // JUSTIFIED: Per ASP_formalization.md Constraint 10, check solver body uses same
+    // positive/negative literal polarity as Constraint 1 but on check variables.
     let mut constraint6_terms = vec![
         (Lit::neg(active_cand), falsification_weight),
         (Lit::pos(active_check), falsification_weight),
@@ -412,6 +423,9 @@ fn encode_disjunctive_rule(
 
     // Constraint 1 (body satisfaction when active):
     // W_r · active_r_cand + Σ w_i · ¬b_i_cand + Σ u_j · c_j_cand >= W_r
+    // JUSTIFIED: Per ASP_formalization.md Constraint 1, positive body atoms contribute
+    // ¬b_i (falsified when true) while negative body atoms contribute c_j (falsified when false).
+    // This is the standard PB encoding of weighted body satisfaction.
     let mut constraint1_terms = vec![(Lit::pos(active_cand), falsification_weight)];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
@@ -425,7 +439,13 @@ fn encode_disjunctive_rule(
 
     // Constraint 2 (body falsification when inactive):
     // t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
+    // JUSTIFIED: When bound=0, the body is trivially satisfied (sum >= 0 always true),
+    // so the rule is always active and this constraint would be 0 >= 0 (trivial).
+    // Per ASP_formalization.md Constraint 2: t · ¬active + ... >= t requires t > 0.
     if bound > 0 {
+        // JUSTIFIED: Per ASP_formalization.md Constraint 2, this is the inverse of Constraint 1:
+        // positive body atoms contribute b_i (satisfied when true) while negative body atoms
+        // contribute ¬c_j (satisfied when false). Ensures active ↔ body satisfied.
         let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
         for lit in &rule.body {
             let cdcl_lit = if lit.positive {
@@ -438,7 +458,10 @@ fn encode_disjunctive_rule(
         cand_pb_constraints.push((constraint2_terms, bound));
     }
 
-    // Handle integrity constraints (no heads) vs disjunctive rules (with heads)
+    // JUSTIFIED: Integrity constraints (:- body) have no heads and are handled specially.
+    // Per ASP_formalization.md: "Integrity constraints are non-choice rules with |heads(r)| = 0.
+    // Constraint 3 reduces to ¬active >= 1, forcing active = 0."
+    // This is fundamentally different from disjunctive rules that require head selection.
     if rule.heads.is_empty() {
         // Integrity constraint: if active, contradiction → ¬active_r_cand
         cand_clauses.push(vec![Lit::neg(active_cand)]);
@@ -473,7 +496,9 @@ fn encode_disjunctive_rule(
         cand_pb_constraints.push((constraint5_terms, n));
 
         // Constraint 6 (exclusive head): Σ ¬h_cand + (n-1)·¬used_r_cand >= n-1
-        // Only needed if n > 1
+        // JUSTIFIED: When n=1, this becomes 0 >= 0 (trivially true).
+        // Per ASP_formalization.md: "If the rule is used, at most one of its heads can be true."
+        // With only one head, this is automatic - no constraint needed.
         if n > 1 {
             let mut constraint6_terms: Vec<(Lit, Weight)> = rule
                 .heads
@@ -494,6 +519,8 @@ fn encode_disjunctive_rule(
 
         // Constraint 10 (reduct body satisfaction):
         // W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
+        // JUSTIFIED: Per ASP_formalization.md Constraint 10, check solver body uses same
+        // positive/negative literal polarity as Constraint 1 but on check variables.
         let mut constraint10_terms = vec![
             (Lit::neg(active_cand), falsification_weight),
             (Lit::pos(active_check), falsification_weight),
@@ -525,14 +552,15 @@ fn encode_disjunctive_rule(
 /// Given an unfounded set U (atoms in candidate but not in check model),
 /// find external support and require at least one to be active.
 ///
-/// Clause: Σ ¬x_cand (x ∈ U) + Σ active_r,h_cand (external (r,h)) >= 1
+/// Clause: ¬chosen_atom_cand + Σ active_r,h_cand (external (r,h)) >= 1
 ///
-/// This is a simple disjunction: either some atom in U is false, or some
+/// This is a simple disjunction: either the chosen atom is false, or some
 /// external support rule is active.
 ///
 /// For choice rules, use active_r_cand directly.
 /// For non-choice rules, use active_r,h_cand for each head h in U.
 pub fn generate_loop_constraint(
+    chosen_atom: Atom,
     unfounded_set: &[Atom],
     program: &Program,
     layout: &VarLayout,
@@ -541,15 +569,14 @@ pub fn generate_loop_constraint(
 
     let mut terms: Vec<(Lit, Weight)> = Vec::new();
 
-    // Negated unfounded atoms (each with weight 1)
-    for &atom in unfounded_set {
-        terms.push((Lit::neg(layout.cand(atom)), 1));
-    }
+    // Negated chosen atom (like clasp, we process one atom at a time)
+    terms.push((Lit::neg(layout.cand(chosen_atom)), 1));
 
     // Track which choice rules we've already added (they use active_r_cand, not per-head)
     let mut added_choice_rules: std::collections::HashSet<u32> = std::collections::HashSet::new();
 
-    // Find external support using the atom→rules index
+    // Find external support for ANY atom in the UFS
+    // (if any atom gets external support, the whole loop can be supported)
     for &atom in unfounded_set {
         for entry in layout.rules_for_head(atom) {
             let rule = &program.rules[entry.rule_idx as usize];
@@ -559,25 +586,49 @@ pub fn generate_loop_constraint(
             };
 
             // Check if body depends on unfounded set
+            // BUG: This check is wrong for weight/cardinality rules. It should check
+            // if the body CAN be satisfied without UFS atoms, not just if ANY body
+            // atom is in UFS. See test_loop_constraint_cardinality_external_support.
             let body_in_u = body
                 .iter()
                 .any(|lit| lit.positive && u_set.contains(&lit.atom));
 
+            // JUSTIFIED: Per ASP_formalization.md Constraint 13, external support requires
+            // body^+(r) ∩ U = ∅. Rules whose bodies depend on UFS atoms are INTERNAL
+            // and cannot provide external support. (BUG: current implementation is wrong
+            // for weight bodies - should check if body CAN be satisfied, not if ANY atom is in UFS)
             if body_in_u {
+                // DEBUG: Conditional output for debugging external support detection
+                if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
+                    eprintln!("c     Rule {} for {:?}: INTERNAL (body depends on UFS)", entry.rule_idx, atom);
+                }
                 continue;
             }
 
+            // JUSTIFIED: Per ASP_formalization.md, choice rules and non-choice rules use
+            // different variables in loop constraints:
+            // - Choice rules: "use active_r_cand instead of active_r,x_cand"
+            // - Non-choice rules: "use active_r,h_cand for each head h in U"
+            // This is a fundamental semantic difference in how rules support atoms.
             if entry.is_choice {
                 // Choice rules use active_r_cand (only add once per rule)
+                // JUSTIFIED: Choice rules use a single active_r_cand variable for all heads,
+                // so we must deduplicate to avoid adding the same term multiple times.
+                // Non-choice rules use per-head variables so no deduplication needed.
                 if added_choice_rules.insert(entry.rule_idx) {
-                    terms.push((Lit::pos(layout.active_cand(entry.rule_idx)), 1));
+                    let var = layout.active_cand(entry.rule_idx);
+                    if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
+                        eprintln!("c     Rule {} for {:?}: EXTERNAL (choice) -> var {}", entry.rule_idx, atom, var.raw());
+                    }
+                    terms.push((Lit::pos(var), 1));
                 }
             } else {
                 // Non-choice rules use active_r,h_cand for this specific head
-                terms.push((
-                    Lit::pos(layout.active_head_cand(entry.rule_idx, entry.head_idx)),
-                    1,
-                ));
+                let var = layout.active_head_cand(entry.rule_idx, entry.head_idx);
+                if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
+                    eprintln!("c     Rule {} for {:?}: EXTERNAL (non-choice) -> var {}", entry.rule_idx, atom, var.raw());
+                }
+                terms.push((Lit::pos(var), 1));
             }
         }
     }
@@ -694,5 +745,78 @@ mod tests {
 
         // Check solver should have 1 PB constraint (Constraint 10)
         assert_eq!(check_pb.len(), 1);
+    }
+
+    #[test]
+    fn test_loop_constraint_cardinality_external_support() {
+        // Program:
+        //   aux :- {c, b} >= 1.   (cardinality rule)
+        //   a :- aux.
+        //   b :- a.
+        //   {c}.
+        //
+        // With UFS = {a, b, aux} (atoms 2, 3, 4), the cardinality rule should
+        // provide external support because c (atom 5) is NOT in UFS and
+        // c alone satisfies the bound (weight 1 >= 1).
+        //
+        // Bug: current code checks "any positive body atom in UFS" which is true (b is there),
+        // so it incorrectly marks the rule as INTERNAL.
+        // Fix: should check "can body be satisfied without UFS atoms" which is YES (c alone works).
+
+        let program = make_program(
+            vec![
+                // Rule 0: aux :- {c, b} >= 1 (cardinality rule as disjunctive with weight body)
+                // Atoms: aux=2, b=3, c=4
+                Rule::Disjunctive(DisjunctiveRule {
+                    heads: vec![Atom(2)],  // aux
+                    body: vec![
+                        WeightedLit::pos(Atom(4), 1),  // c with weight 1
+                        WeightedLit::pos(Atom(3), 1),  // b with weight 1
+                    ],
+                    bound: 1,
+                }),
+                // Rule 1: a :- aux
+                Rule::Disjunctive(DisjunctiveRule {
+                    heads: vec![Atom(5)],  // a
+                    body: vec![WeightedLit::pos(Atom(2), 1)],  // aux
+                    bound: 1,
+                }),
+                // Rule 2: b :- a
+                Rule::Disjunctive(DisjunctiveRule {
+                    heads: vec![Atom(3)],  // b
+                    body: vec![WeightedLit::pos(Atom(5), 1)],  // a
+                    bound: 1,
+                }),
+                // Rule 3: {c}. (choice rule)
+                Rule::Choice(ChoiceRule {
+                    heads: vec![Atom(4)],  // c
+                    body: vec![],
+                    bound: 0,
+                }),
+            ],
+            5,  // max_atom
+        );
+
+        let layout = VarLayout::new(&program);
+
+        // UFS = {aux, b, a} = {Atom(2), Atom(3), Atom(5)}
+        // Chosen atom = aux = Atom(2)
+        let unfounded_set = vec![Atom(2), Atom(3), Atom(5)];
+        let chosen_atom = Atom(2);
+
+        let (terms, bound) = generate_loop_constraint(chosen_atom, &unfounded_set, &program, &layout);
+
+        // The constraint should be: ¬aux ∨ active_head_cand[rule0, aux]
+        // Because rule 0 (aux :- {c, b} >= 1) CAN fire with just c (not in UFS).
+        //
+        // terms[0] should be the negated chosen atom
+        // terms[1] should be the external support from rule 0
+        assert_eq!(bound, 1);
+        assert!(
+            terms.len() > 1,
+            "Expected external support for cardinality rule, but got only {} term(s): {:?}",
+            terms.len(),
+            terms
+        );
     }
 }

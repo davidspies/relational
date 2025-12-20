@@ -10,5 +10,5 @@ mod solver;
 pub mod types;
 
 pub use parser::parse_smodels;
-pub use solver::AspSolver;
+pub use solver::{AspSolver, RecordedConstraint};
 pub use types::{Atom, Program, Rule};
