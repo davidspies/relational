@@ -315,10 +315,7 @@ fn encode_choice_rule(
     let falsification_weight = sum_weights - bound + 1;
 
     // Constraint 1 (body satisfaction when active)
-    // For choice rules with empty body, this forces the rule active
-    // JUSTIFIED: Per ASP_formalization.md Constraint 1, positive body atoms contribute
-    // ¬b_i (falsified when true) while negative body atoms contribute c_j (falsified when false).
-    // This is the standard PB encoding of weighted body satisfaction.
+    // Per ASP_formalization.md: positive body → ¬b_i, negative body → c_j
     let mut constraint1_terms = vec![(Lit::pos(active_cand), falsification_weight)];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
@@ -331,30 +328,23 @@ fn encode_choice_rule(
     cand_pb_constraints.push((constraint1_terms, falsification_weight));
 
     // Constraint 2 (body falsification when inactive)
-    // JUSTIFIED: When bound=0, the body is trivially satisfied (sum >= 0 always true),
-    // so the rule is always active and this constraint would be 0 >= 0 (trivial).
-    // Per ASP_formalization.md Constraint 2: t · ¬active + ... >= t requires t > 0.
-    if bound > 0 {
-        // JUSTIFIED: Per ASP_formalization.md Constraint 2, this is the inverse of Constraint 1:
-        // positive body atoms contribute b_i (satisfied when true) while negative body atoms
-        // contribute ¬c_j (satisfied when false). Ensures active ↔ body satisfied.
-        let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
-        for lit in &rule.body {
-            let cdcl_lit = if lit.positive {
-                Lit::pos(layout.cand(lit.atom))
-            } else {
-                Lit::neg(layout.cand(lit.atom))
-            };
-            constraint2_terms.push((cdcl_lit, lit.weight));
-        }
-        cand_pb_constraints.push((constraint2_terms, bound));
+    // Per ASP_formalization.md Constraint 2: t · ¬active + ... >= t
+    // When bound=0 this is trivially satisfied (0 >= 0), but still correct.
+    let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
+    for lit in &rule.body {
+        let cdcl_lit = if lit.positive {
+            Lit::pos(layout.cand(lit.atom))
+        } else {
+            Lit::neg(layout.cand(lit.atom))
+        };
+        constraint2_terms.push((cdcl_lit, lit.weight));
     }
+    cand_pb_constraints.push((constraint2_terms, bound));
 
     // NOTE: No Constraint 3 - heads are OPTIONAL in choice rules
 
-    // Constraint 6 (reduct body satisfaction) - actually Constraint 10 in formalization
-    // JUSTIFIED: Per ASP_formalization.md Constraint 10, check solver body uses same
-    // positive/negative literal polarity as Constraint 1 but on check variables.
+    // Constraint 10 (reduct body satisfaction)
+    // Same polarity as Constraint 1, but on check variables
     let mut constraint6_terms = vec![
         (Lit::neg(active_cand), falsification_weight),
         (Lit::pos(active_check), falsification_weight),
@@ -423,9 +413,7 @@ fn encode_disjunctive_rule(
 
     // Constraint 1 (body satisfaction when active):
     // W_r · active_r_cand + Σ w_i · ¬b_i_cand + Σ u_j · c_j_cand >= W_r
-    // JUSTIFIED: Per ASP_formalization.md Constraint 1, positive body atoms contribute
-    // ¬b_i (falsified when true) while negative body atoms contribute c_j (falsified when false).
-    // This is the standard PB encoding of weighted body satisfaction.
+    // Per ASP_formalization.md: positive body → ¬b_i, negative body → c_j
     let mut constraint1_terms = vec![(Lit::pos(active_cand), falsification_weight)];
     for lit in &rule.body {
         let cdcl_lit = if lit.positive {
@@ -439,112 +427,88 @@ fn encode_disjunctive_rule(
 
     // Constraint 2 (body falsification when inactive):
     // t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
-    // JUSTIFIED: When bound=0, the body is trivially satisfied (sum >= 0 always true),
-    // so the rule is always active and this constraint would be 0 >= 0 (trivial).
-    // Per ASP_formalization.md Constraint 2: t · ¬active + ... >= t requires t > 0.
-    if bound > 0 {
-        // JUSTIFIED: Per ASP_formalization.md Constraint 2, this is the inverse of Constraint 1:
-        // positive body atoms contribute b_i (satisfied when true) while negative body atoms
-        // contribute ¬c_j (satisfied when false). Ensures active ↔ body satisfied.
-        let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
-        for lit in &rule.body {
-            let cdcl_lit = if lit.positive {
-                Lit::pos(layout.cand(lit.atom))
-            } else {
-                Lit::neg(layout.cand(lit.atom))
-            };
-            constraint2_terms.push((cdcl_lit, lit.weight));
-        }
-        cand_pb_constraints.push((constraint2_terms, bound));
+    // When bound=0 this is trivially satisfied (0 >= 0), but still correct.
+    let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
+    for lit in &rule.body {
+        let cdcl_lit = if lit.positive {
+            Lit::pos(layout.cand(lit.atom))
+        } else {
+            Lit::neg(layout.cand(lit.atom))
+        };
+        constraint2_terms.push((cdcl_lit, lit.weight));
     }
+    cand_pb_constraints.push((constraint2_terms, bound));
 
-    // JUSTIFIED: Integrity constraints (:- body) have no heads and are handled specially.
-    // Per ASP_formalization.md: "Integrity constraints are non-choice rules with |heads(r)| = 0.
-    // Constraint 3 reduces to ¬active >= 1, forcing active = 0."
-    // This is fundamentally different from disjunctive rules that require head selection.
-    if rule.heads.is_empty() {
-        // Integrity constraint: if active, contradiction → ¬active_r_cand
-        cand_clauses.push(vec![Lit::neg(active_cand)]);
-        // Constraint 10: ¬active_r_check (if it were active, we'd need a head)
-        check_clauses.push(vec![Lit::neg(active_check)]);
-    } else {
-        let used_cand = layout.used_cand(rule_idx);
+    let used_cand = layout.used_cand(rule_idx);
 
-        // Constraint 3 (head requirement): Σ h_cand + ¬active_r_cand >= 1
-        // This is a clause: h1 ∨ h2 ∨ ... ∨ ¬active_r
-        let mut constraint3_clause: Vec<Lit> = rule
-            .heads
-            .iter()
-            .map(|&h| Lit::pos(layout.cand(h)))
-            .collect();
-        constraint3_clause.push(Lit::neg(active_cand));
-        cand_clauses.push(constraint3_clause);
+    // Constraint 3 (head requirement): Σ h_cand + ¬active_r_cand >= 1
+    // For integrity constraints (empty heads), this is just ¬active_r_cand >= 1
+    let mut constraint3_clause: Vec<Lit> = rule
+        .heads
+        .iter()
+        .map(|&h| Lit::pos(layout.cand(h)))
+        .collect();
+    constraint3_clause.push(Lit::neg(active_cand));
+    cand_clauses.push(constraint3_clause);
 
-        // Constraint 4 (used implies active): ¬used_r_cand ∨ active_r_cand
-        cand_clauses.push(vec![Lit::neg(used_cand), Lit::pos(active_cand)]);
+    // Constraint 4 (used implies active): ¬used_r_cand ∨ active_r_cand
+    cand_clauses.push(vec![Lit::neg(used_cand), Lit::pos(active_cand)]);
 
-        // Constraint 5 (head selection): Σ ¬active_r_h_cand + used_r_cand >= n
-        let mut constraint5_terms: Vec<(Lit, Weight)> = (0..rule.heads.len())
-            .map(|head_idx| {
-                (
-                    Lit::neg(layout.active_head_cand(rule_idx, head_idx as u32)),
-                    1,
-                )
-            })
-            .collect();
-        constraint5_terms.push((Lit::pos(used_cand), n));
-        cand_pb_constraints.push((constraint5_terms, n));
-
-        // Constraint 6 (exclusive head): Σ ¬h_cand + (n-1)·¬used_r_cand >= n-1
-        // JUSTIFIED: When n=1, this becomes 0 >= 0 (trivially true).
-        // Per ASP_formalization.md: "If the rule is used, at most one of its heads can be true."
-        // With only one head, this is automatic - no constraint needed.
-        if n > 1 {
-            let mut constraint6_terms: Vec<(Lit, Weight)> = rule
-                .heads
-                .iter()
-                .map(|&h| (Lit::neg(layout.cand(h)), 1))
-                .collect();
-            constraint6_terms.push((Lit::neg(used_cand), n - 1));
-            cand_pb_constraints.push((constraint6_terms, n - 1));
-        }
-
-        // Constraint 7 (head propagation): h_cand ∨ ¬active_r_h_cand (for each head)
-        for (head_idx, &head) in rule.heads.iter().enumerate() {
-            cand_clauses.push(vec![
-                Lit::pos(layout.cand(head)),
+    // Constraint 5 (head selection): Σ ¬active_r_h_cand + used_r_cand >= n
+    let mut constraint5_terms: Vec<(Lit, Weight)> = (0..rule.heads.len())
+        .map(|head_idx| {
+            (
                 Lit::neg(layout.active_head_cand(rule_idx, head_idx as u32)),
-            ]);
-        }
+                1,
+            )
+        })
+        .collect();
+    constraint5_terms.push((Lit::pos(used_cand), n));
+    cand_pb_constraints.push((constraint5_terms, n));
 
-        // Constraint 10 (reduct body satisfaction):
-        // W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
-        // JUSTIFIED: Per ASP_formalization.md Constraint 10, check solver body uses same
-        // positive/negative literal polarity as Constraint 1 but on check variables.
-        let mut constraint10_terms = vec![
-            (Lit::neg(active_cand), falsification_weight),
-            (Lit::pos(active_check), falsification_weight),
-        ];
-        for lit in &rule.body {
-            let cdcl_lit = if lit.positive {
-                Lit::neg(layout.check(lit.atom))
-            } else {
-                Lit::pos(layout.check(lit.atom))
-            };
-            constraint10_terms.push((cdcl_lit, lit.weight));
-        }
-        check_pb_constraints.push((constraint10_terms, falsification_weight));
+    // Constraint 6 (exclusive head): Σ ¬h_cand + (n-1)·¬used_r_cand >= n-1
+    let mut constraint6_terms: Vec<(Lit, Weight)> = rule
+        .heads
+        .iter()
+        .map(|&h| (Lit::neg(layout.cand(h)), 1))
+        .collect();
+    constraint6_terms.push((Lit::neg(used_cand), n - 1));
+    cand_pb_constraints.push((constraint6_terms, n - 1));
 
-        // Constraint 11 (reduct head implication): Σ h_check + ¬active_r_check >= 1
-        // This is a clause: h1_check ∨ h2_check ∨ ... ∨ ¬active_r_check
-        let mut constraint11_clause: Vec<Lit> = rule
-            .heads
-            .iter()
-            .map(|&h| Lit::pos(layout.check(h)))
-            .collect();
-        constraint11_clause.push(Lit::neg(active_check));
-        check_clauses.push(constraint11_clause);
+    // Constraint 7 (head propagation): h_cand ∨ ¬active_r_h_cand (for each head)
+    for (head_idx, &head) in rule.heads.iter().enumerate() {
+        cand_clauses.push(vec![
+            Lit::pos(layout.cand(head)),
+            Lit::neg(layout.active_head_cand(rule_idx, head_idx as u32)),
+        ]);
     }
+
+    // Constraint 10 (reduct body satisfaction):
+    // W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
+    // Same polarity as Constraint 1, but on check variables
+    let mut constraint10_terms = vec![
+        (Lit::neg(active_cand), falsification_weight),
+        (Lit::pos(active_check), falsification_weight),
+    ];
+    for lit in &rule.body {
+        let cdcl_lit = if lit.positive {
+            Lit::neg(layout.check(lit.atom))
+        } else {
+            Lit::pos(layout.check(lit.atom))
+        };
+        constraint10_terms.push((cdcl_lit, lit.weight));
+    }
+    check_pb_constraints.push((constraint10_terms, falsification_weight));
+
+    // Constraint 11 (reduct head implication): Σ h_check + ¬active_r_check >= 1
+    // For integrity constraints (empty heads), this is just ¬active_r_check >= 1
+    let mut constraint11_clause: Vec<Lit> = rule
+        .heads
+        .iter()
+        .map(|&h| Lit::pos(layout.check(h)))
+        .collect();
+    constraint11_clause.push(Lit::neg(active_check));
+    check_clauses.push(constraint11_clause);
 }
 
 /// Generate a loop constraint for the candidate solver (Constraint 13).
@@ -593,32 +557,34 @@ pub fn generate_loop_constraint(
                 .iter()
                 .any(|lit| lit.positive && u_set.contains(&lit.atom));
 
-            // JUSTIFIED: Per ASP_formalization.md Constraint 13, external support requires
-            // body^+(r) ∩ U = ∅. Rules whose bodies depend on UFS atoms are INTERNAL
-            // and cannot provide external support. (BUG: current implementation is wrong
-            // for weight bodies - should check if body CAN be satisfied, not if ANY atom is in UFS)
+            // NECESSARY: Skip internal rules (body depends on UFS atoms).
+            // BUG: For weight bodies, should check if body CAN be satisfied without UFS,
+            // not just if ANY body atom is in UFS.
             if body_in_u {
                 // DEBUG: Conditional output for debugging external support detection
                 if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
-                    eprintln!("c     Rule {} for {:?}: INTERNAL (body depends on UFS)", entry.rule_idx, atom);
+                    eprintln!(
+                        "c     Rule {} for {:?}: INTERNAL (body depends on UFS)",
+                        entry.rule_idx, atom
+                    );
                 }
                 continue;
             }
 
-            // JUSTIFIED: Per ASP_formalization.md, choice rules and non-choice rules use
-            // different variables in loop constraints:
-            // - Choice rules: "use active_r_cand instead of active_r,x_cand"
-            // - Non-choice rules: "use active_r,h_cand for each head h in U"
-            // This is a fundamental semantic difference in how rules support atoms.
+            // NECESSARY: Choice rules use active_r_cand, non-choice use active_r,h_cand.
+            // Different variables per ASP_formalization.md.
             if entry.is_choice {
-                // Choice rules use active_r_cand (only add once per rule)
-                // JUSTIFIED: Choice rules use a single active_r_cand variable for all heads,
-                // so we must deduplicate to avoid adding the same term multiple times.
-                // Non-choice rules use per-head variables so no deduplication needed.
+                // NECESSARY: Deduplicate - choice rules use one variable for all heads.
+                // Adding same term twice would give wrong weight.
                 if added_choice_rules.insert(entry.rule_idx) {
                     let var = layout.active_cand(entry.rule_idx);
                     if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
-                        eprintln!("c     Rule {} for {:?}: EXTERNAL (choice) -> var {}", entry.rule_idx, atom, var.raw());
+                        eprintln!(
+                            "c     Rule {} for {:?}: EXTERNAL (choice) -> var {}",
+                            entry.rule_idx,
+                            atom,
+                            var.raw()
+                        );
                     }
                     terms.push((Lit::pos(var), 1));
                 }
@@ -626,7 +592,12 @@ pub fn generate_loop_constraint(
                 // Non-choice rules use active_r,h_cand for this specific head
                 let var = layout.active_head_cand(entry.rule_idx, entry.head_idx);
                 if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
-                    eprintln!("c     Rule {} for {:?}: EXTERNAL (non-choice) -> var {}", entry.rule_idx, atom, var.raw());
+                    eprintln!(
+                        "c     Rule {} for {:?}: EXTERNAL (non-choice) -> var {}",
+                        entry.rule_idx,
+                        atom,
+                        var.raw()
+                    );
                 }
                 terms.push((Lit::pos(var), 1));
             }
@@ -768,33 +739,33 @@ mod tests {
                 // Rule 0: aux :- {c, b} >= 1 (cardinality rule as disjunctive with weight body)
                 // Atoms: aux=2, b=3, c=4
                 Rule::Disjunctive(DisjunctiveRule {
-                    heads: vec![Atom(2)],  // aux
+                    heads: vec![Atom(2)], // aux
                     body: vec![
-                        WeightedLit::pos(Atom(4), 1),  // c with weight 1
-                        WeightedLit::pos(Atom(3), 1),  // b with weight 1
+                        WeightedLit::pos(Atom(4), 1), // c with weight 1
+                        WeightedLit::pos(Atom(3), 1), // b with weight 1
                     ],
                     bound: 1,
                 }),
                 // Rule 1: a :- aux
                 Rule::Disjunctive(DisjunctiveRule {
-                    heads: vec![Atom(5)],  // a
-                    body: vec![WeightedLit::pos(Atom(2), 1)],  // aux
+                    heads: vec![Atom(5)],                     // a
+                    body: vec![WeightedLit::pos(Atom(2), 1)], // aux
                     bound: 1,
                 }),
                 // Rule 2: b :- a
                 Rule::Disjunctive(DisjunctiveRule {
-                    heads: vec![Atom(3)],  // b
-                    body: vec![WeightedLit::pos(Atom(5), 1)],  // a
+                    heads: vec![Atom(3)],                     // b
+                    body: vec![WeightedLit::pos(Atom(5), 1)], // a
                     bound: 1,
                 }),
                 // Rule 3: {c}. (choice rule)
                 Rule::Choice(ChoiceRule {
-                    heads: vec![Atom(4)],  // c
+                    heads: vec![Atom(4)], // c
                     body: vec![],
                     bound: 0,
                 }),
             ],
-            5,  // max_atom
+            5, // max_atom
         );
 
         let layout = VarLayout::new(&program);
@@ -804,7 +775,8 @@ mod tests {
         let unfounded_set = vec![Atom(2), Atom(3), Atom(5)];
         let chosen_atom = Atom(2);
 
-        let (terms, bound) = generate_loop_constraint(chosen_atom, &unfounded_set, &program, &layout);
+        let (terms, bound) =
+            generate_loop_constraint(chosen_atom, &unfounded_set, &program, &layout);
 
         // The constraint should be: ¬aux ∨ active_head_cand[rule0, aux]
         // Because rule 0 (aux :- {c, b} >= 1) CAN fire with just c (not in UFS).

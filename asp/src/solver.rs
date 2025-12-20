@@ -11,12 +11,14 @@ use std::time::Instant;
 
 use cdcl::{Level, Lit, Var};
 use contiguous_data::HashSet;
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use relational::create_persistent_input;
 use relational::database::{Database, DatabaseBuilder};
 
-use crate::encoding::{Clause, EncodedProgram, PBConstraint, encode_program, generate_loop_constraint};
+use crate::encoding::{
+    Clause, EncodedProgram, PBConstraint, encode_program, generate_loop_constraint,
+};
 use crate::types::{Atom, Program};
 
 /// An answer set (stable model).
@@ -141,8 +143,7 @@ impl AspSolver {
         let mut loop_constraints = 0u64;
 
         loop {
-            // JUSTIFIED: User API allows limiting model count. When limit=0, find all models.
-            // This is a standard solver feature, not special-casing.
+            // NECESSARY: limit=0 means unlimited, limit>0 means stop after that many
             if limit > 0 && count >= limit {
                 break;
             }
@@ -150,8 +151,6 @@ impl AspSolver {
             // Step 1: Solve candidate to find a candidate answer set
             let (sat, _stats) = self.cand_solver.solve_and_stay(&mut self.db);
             cand_calls += 1;
-            // JUSTIFIED: SAT solver returns SAT/UNSAT. UNSAT means no more candidates exist.
-            // This is fundamental SAT solving semantics, not special-casing.
             if !sat {
                 break; // No more candidates - UNSAT
             }
@@ -179,8 +178,12 @@ impl AspSolver {
                     let chosen_atom = unfounded_set[idx];
 
                     // Not stable - add loop constraint
-                    let (terms, bound) =
-                        generate_loop_constraint(chosen_atom, &unfounded_set, &self.program, &self.encoded.layout);
+                    let (terms, bound) = generate_loop_constraint(
+                        chosen_atom,
+                        &unfounded_set,
+                        &self.program,
+                        &self.encoded.layout,
+                    );
 
                     loop_constraints += 1;
 
@@ -260,8 +263,6 @@ impl AspSolver {
         // Try to find a strictly smaller model (an unfounded set)
         let (sat, _stats) = self.check_solver.solve_and_stay(&mut self.db);
         *check_calls += 1;
-        // JUSTIFIED: SAT = found smaller model (unfounded set exists), UNSAT = minimal.
-        // This is the two-solver architecture per ASP_formalization.md Check Solver section.
         if sat {
             // Found a smaller model - extract the unfounded set
             let cand_assignment = self.cand_solver.get_assignment();
@@ -296,8 +297,6 @@ impl AspSolver {
             let in_cand = cand_assignment.get(&cand_var).copied().unwrap_or(false);
             let in_check = check_assignment.get(&check_var).copied().unwrap_or(false);
 
-            // JUSTIFIED: Per ASP_formalization.md Constraint 13, unfounded set U = S_cand \ S_check.
-            // Atoms in candidate but not in check are the unfounded atoms.
             if in_cand && !in_check {
                 unfounded.push(atom);
             }
@@ -312,9 +311,7 @@ impl AspSolver {
         let assignment = self.cand_solver.get_assignment();
         let mut clause = Vec::new();
 
-        // JUSTIFIED: Blocking clause prevents finding the same model again.
-        // For each atom: if true, add ¬atom (require at least one to be false);
-        // if false, add atom (equivalently). This is standard model enumeration.
+        // Blocking clause: negate current assignment
         for atom_id in 2..=layout.num_atoms {
             let atom = Atom(atom_id);
             let var = layout.cand(atom);
@@ -336,8 +333,7 @@ impl AspSolver {
         let assignment = self.cand_solver.get_assignment();
         let mut answer_set = HashSet::default();
 
-        // JUSTIFIED: Answer set contains true atoms that have symbol names (shown atoms).
-        // Atoms without names are auxiliary (introduced by gringo) and not part of output.
+        // Extract true atoms with symbol names (non-auxiliary atoms)
         for atom_id in 2..=layout.num_atoms {
             let atom = Atom(atom_id);
             let var = layout.cand(atom);
@@ -391,26 +387,40 @@ impl AspSolver {
         // Compute the full stable model by forward propagation
         let target_atom_set = self.compute_full_model(&shown_atoms);
 
-        eprintln!("c Full model has {} atoms (started with {} shown)",
-            target_atom_set.len(), shown_atoms.len());
+        eprintln!(
+            "c Full model has {} atoms (started with {} shown)",
+            target_atom_set.len(),
+            shown_atoms.len()
+        );
 
         // Count how many constraints have their chosen_atom in the target model
-        let relevant_count = self.recorded_ufs_constraints.iter()
+        let relevant_count = self
+            .recorded_ufs_constraints
+            .iter()
             .filter(|r| target_atom_set.contains(&r.chosen_atom))
             .count();
-        eprintln!("c {} of {} UFS constraints have chosen_atom in target model",
-            relevant_count, self.recorded_ufs_constraints.len());
+        eprintln!(
+            "c {} of {} UFS constraints have chosen_atom in target model",
+            relevant_count,
+            self.recorded_ufs_constraints.len()
+        );
 
         // Also check initial encoding constraints
-        eprintln!("c Checking {} initial cand_pb_constraints...",
-            self.encoded.cand_pb_constraints.len());
+        eprintln!(
+            "c Checking {} initial cand_pb_constraints...",
+            self.encoded.cand_pb_constraints.len()
+        );
         let mut violations = 0;
         for (idx, (terms, bound)) in self.encoded.cand_pb_constraints.iter().enumerate() {
             let mut sum = 0i64;
             let mut details = Vec::new();
             for &(lit, weight) in terms {
                 let var_value = self.get_var_value_for_target(lit.var().raw(), &target_atom_set);
-                let lit_satisfied = if lit.is_positive() { var_value } else { !var_value };
+                let lit_satisfied = if lit.is_positive() {
+                    var_value
+                } else {
+                    !var_value
+                };
                 details.push((lit, var_value, lit_satisfied, weight));
                 if lit_satisfied {
                     sum += weight as i64;
@@ -418,10 +428,15 @@ impl AspSolver {
             }
             if sum < *bound as i64 {
                 violations += 1;
-                eprintln!("c INITIAL CONSTRAINT {} VIOLATED: sum={} < bound={}",
-                    idx, sum, bound);
+                eprintln!(
+                    "c INITIAL CONSTRAINT {} VIOLATED: sum={} < bound={}",
+                    idx, sum, bound
+                );
                 for (lit, var_val, lit_sat, w) in &details {
-                    eprintln!("c   {:?}: var={}, lit_sat={}, weight={}", lit, var_val, lit_sat, w);
+                    eprintln!(
+                        "c   {:?}: var={}, lit_sat={}, weight={}",
+                        lit, var_val, lit_sat, w
+                    );
                 }
             }
         }
@@ -460,29 +475,47 @@ impl AspSolver {
                 for &(lit, weight) in terms {
                     let var_raw = lit.var().raw();
                     let var_value = self.get_var_value_for_target(var_raw, &target_atom_set);
-                    let lit_satisfied = if lit.is_positive() { var_value } else { !var_value };
-                    eprintln!("c   {:?}: var_raw={}, var_value={}, lit_sat={}, weight={}",
-                        lit, var_raw, var_value, lit_satisfied, weight);
+                    let lit_satisfied = if lit.is_positive() {
+                        var_value
+                    } else {
+                        !var_value
+                    };
+                    eprintln!(
+                        "c   {:?}: var_raw={}, var_value={}, lit_sat={}, weight={}",
+                        lit, var_raw, var_value, lit_satisfied, weight
+                    );
                 }
                 // Show which rules have chosen_atom as head
-                eprintln!("c Rules with chosen_atom {:?} as head:", recorded.chosen_atom);
+                eprintln!(
+                    "c Rules with chosen_atom {:?} as head:",
+                    recorded.chosen_atom
+                );
                 for entry in self.encoded.layout.rules_for_head(recorded.chosen_atom) {
                     let rule = &self.program.rules[entry.rule_idx as usize];
                     eprintln!("c   Rule {}: {:?}", entry.rule_idx, rule);
                     // Check if body depends on UFS
-                    let u_set: std::collections::HashSet<Atom> = recorded.unfounded_set.iter().copied().collect();
+                    let u_set: std::collections::HashSet<Atom> =
+                        recorded.unfounded_set.iter().copied().collect();
                     match rule {
                         crate::types::Rule::Disjunctive(r) => {
-                            let body_in_u = r.body.iter().any(|lit| lit.positive && u_set.contains(&lit.atom));
+                            let body_in_u = r
+                                .body
+                                .iter()
+                                .any(|lit| lit.positive && u_set.contains(&lit.atom));
                             eprintln!("c     body_in_u: {}", body_in_u);
                             // Check if body is satisfied in target
-                            let body_sat = self.is_rule_body_satisfied(entry.rule_idx as usize, &target_atom_set);
+                            let body_sat = self
+                                .is_rule_body_satisfied(entry.rule_idx as usize, &target_atom_set);
                             eprintln!("c     body_satisfied_in_target: {}", body_sat);
                         }
                         crate::types::Rule::Choice(r) => {
-                            let body_in_u = r.body.iter().any(|lit| lit.positive && u_set.contains(&lit.atom));
+                            let body_in_u = r
+                                .body
+                                .iter()
+                                .any(|lit| lit.positive && u_set.contains(&lit.atom));
                             eprintln!("c     body_in_u: {}", body_in_u);
-                            let body_sat = self.is_rule_body_satisfied(entry.rule_idx as usize, &target_atom_set);
+                            let body_sat = self
+                                .is_rule_body_satisfied(entry.rule_idx as usize, &target_atom_set);
                             eprintln!("c     body_satisfied_in_target: {}", body_sat);
                         }
                     }
@@ -553,8 +586,6 @@ impl AspSolver {
     ) -> bool {
         let layout = &self.encoded.layout;
 
-        // JUSTIFIED: Variable layout partitions into ranges per VarLayout documentation.
-        // Each range has different semantics: atoms, active rules, used, etc.
         // x_cand variables: 1..num_atoms
         if var_raw >= 1 && var_raw <= layout.num_atoms {
             let atom = Atom(var_raw);
@@ -572,8 +603,7 @@ impl AspSolver {
 
         // For other variables (used_cand, active_head_cand), we need more complex logic
         // For now, compute based on the semantics
-        let used_cand_base =
-            layout.num_atoms + 2 * layout.num_rules + 2 * layout.num_atoms + 1;
+        let used_cand_base = layout.num_atoms + 2 * layout.num_rules + 2 * layout.num_atoms + 1;
         let active_head_base = used_cand_base + self.count_non_choice_rules();
 
         if var_raw >= used_cand_base && var_raw < active_head_base {
@@ -603,8 +633,6 @@ impl AspSolver {
             Rule::Disjunctive(r) => (&r.body, r.bound),
         };
 
-        // JUSTIFIED: Per ASP semantics, positive literals are satisfied when atom is true,
-        // negative literals are satisfied when atom is false. Standard ASP body evaluation.
         let mut sum = 0i64;
         for lit in body {
             let atom_in = target_atoms.contains(&lit.atom);
@@ -966,7 +994,12 @@ mod tests {
         let input = "3 1 2 0 0\n1 1 1 0 2\n1 3 1 0 4\n1 5 1 0 3\n2 6 2 0 1 2 5\n1 4 1 0 6\n0\n2 c\n3 a\n5 b\n0\n";
         let results = solve_asp(input);
         // Only the empty set should be a stable model
-        assert_eq!(results, vec![Vec::<&str>::new()], "Expected only empty set but got: {:?}", results);
+        assert_eq!(
+            results,
+            vec![Vec::<&str>::new()],
+            "Expected only empty set but got: {:?}",
+            results
+        );
     }
 
     #[test]
@@ -986,11 +1019,20 @@ mod tests {
         // 2 6 2 0 1 2 5   -> aux6 :- {c, b} >= 1
         // 1 4 1 0 6       -> aux4 :- aux6
         // Symbols: 2=c, 3=a, 5=b
-        let input = "3 1 2 0 0\n1 3 1 0 4\n1 5 1 0 3\n2 6 2 0 1 2 5\n1 4 1 0 6\n0\n2 c\n3 a\n5 b\n0\n";
+        let input =
+            "3 1 2 0 0\n1 3 1 0 4\n1 5 1 0 3\n2 6 2 0 1 2 5\n1 4 1 0 6\n0\n2 c\n3 a\n5 b\n0\n";
         let results = solve_asp(input);
         assert_eq!(results.len(), 2, "Expected 2 models but got: {:?}", results);
-        assert!(results.iter().any(|m| m.is_empty()), "Expected empty model but got: {:?}", results);
-        assert!(results.iter().any(|m| m == &vec!["a", "b", "c"]), "Expected {{a,b,c}} but got: {:?}", results);
+        assert!(
+            results.iter().any(|m| m.is_empty()),
+            "Expected empty model but got: {:?}",
+            results
+        );
+        assert!(
+            results.iter().any(|m| m == &vec!["a", "b", "c"]),
+            "Expected {{a,b,c}} but got: {:?}",
+            results
+        );
     }
 
     #[test]
