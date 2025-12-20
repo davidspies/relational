@@ -53,7 +53,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(target) = env::var("ASP_VERIFY") {
         let target_atoms: Vec<&str> = target.split_whitespace().collect();
         eprintln!("\nc Verifying target solution: {:?}", target_atoms);
-        eprintln!("c Recorded {} UFS constraints", solver.recorded_constraints().len());
+        eprintln!(
+            "c Recorded {} UFS constraints",
+            solver.recorded_constraints().len()
+        );
 
         match solver.verify_solution(&target_atoms) {
             Some((idx, violated)) => {
@@ -73,8 +76,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("c   constraint: {:?} >= {}", terms, bound);
             }
             None => {
-                eprintln!("c All {} constraints satisfied by target solution",
-                    solver.recorded_constraints().len());
+                eprintln!(
+                    "c All {} constraints satisfied by target solution",
+                    solver.recorded_constraints().len()
+                );
             }
         }
     }
