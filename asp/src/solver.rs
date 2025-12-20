@@ -106,15 +106,27 @@ impl AspSolver {
 
     /// Find up to `limit` stable models (0 = unlimited).
     pub fn solve_n(&mut self, limit: usize) -> Vec<AnswerSet> {
-        let start = Instant::now();
         let mut answer_sets = Vec::new();
+        self.solve_streaming(limit, |answer_set| {
+            answer_sets.push(answer_set);
+        });
+        answer_sets
+    }
+
+    /// Find stable models, calling the callback for each one as it's found.
+    pub fn solve_streaming<F>(&mut self, limit: usize, mut on_answer: F)
+    where
+        F: FnMut(AnswerSet),
+    {
+        let start = Instant::now();
+        let mut count = 0usize;
         let mut cand_calls = 0u64;
         let mut check_calls = 0u64;
         let mut loop_constraints = 0u64;
 
         loop {
             // Check if we've found enough models
-            if limit > 0 && answer_sets.len() >= limit {
+            if limit > 0 && count >= limit {
                 break;
             }
 
@@ -131,7 +143,8 @@ impl AspSolver {
                 MinimalityResult::IsMinimal => {
                     // Found a stable model!
                     let answer_set = self.extract_answer_set();
-                    answer_sets.push(answer_set);
+                    on_answer(answer_set);
+                    count += 1;
 
                     // Add blocking clause to prevent finding same model again
                     let blocking = self.blocking_clause();
@@ -167,12 +180,11 @@ impl AspSolver {
         eprintln!(
             "c asp: {:.3}s models={} cand_calls={} check_calls={} loop_constraints={}",
             start.elapsed().as_secs_f64(),
-            answer_sets.len(),
+            count,
             cand_calls,
             check_calls,
             loop_constraints
         );
-        answer_sets
     }
 
     /// Add a clause to the candidate solver.
@@ -306,6 +318,11 @@ impl AspSolver {
     /// Get atom name from symbol table.
     pub fn atom_name(&self, atom: Atom) -> Option<&str> {
         self.atom_names.get(&atom).map(|s| s.as_str())
+    }
+
+    /// Get a clone of the atom names map for use outside the solver.
+    pub fn atom_names(&self) -> HashMap<Atom, String> {
+        self.atom_names.clone()
     }
 }
 

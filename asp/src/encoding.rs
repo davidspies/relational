@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use cdcl::{Lit, Var, Weight};
 
-use crate::types::{Atom, BasicRule, ChoiceRule, DisjunctiveRule, Program, Rule};
+use crate::types::{Atom, ChoiceRule, DisjunctiveRule, Program, Rule};
 
 /// Entry in the atom→rules index for generate_loop_constraint.
 #[derive(Debug, Clone, Copy)]
@@ -72,23 +72,6 @@ impl VarLayout {
         for (rule_idx, rule) in program.rules.iter().enumerate() {
             let rule_idx = rule_idx as u32;
             match rule {
-                Rule::Basic(r) => {
-                    let num_heads = if r.head.is_false() { 0 } else { 1 };
-                    rule_info.push(Some(NonChoiceRuleInfo {
-                        non_choice_idx,
-                        num_heads,
-                        head_var_start: head_var_offset,
-                    }));
-                    if !r.head.is_false() {
-                        atom_to_rules.entry(r.head).or_default().push(HeadEntry {
-                            rule_idx,
-                            head_idx: 0,
-                            is_choice: false,
-                        });
-                    }
-                    non_choice_idx += 1;
-                    head_var_offset += num_heads;
-                }
                 Rule::Disjunctive(r) => {
                     let num_heads = r.heads.len() as u32;
                     rule_info.push(Some(NonChoiceRuleInfo {
@@ -239,17 +222,6 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     for (rule_idx, rule) in program.rules.iter().enumerate() {
         let rule_idx = rule_idx as u32;
         match rule {
-            Rule::Basic(r) => {
-                encode_basic_rule(
-                    r,
-                    rule_idx,
-                    &layout,
-                    &mut cand_clauses,
-                    &mut cand_pb_constraints,
-                    &mut check_clauses,
-                    &mut check_pb_constraints,
-                );
-            }
             Rule::Choice(r) => {
                 encode_choice_rule(
                     r,
@@ -313,137 +285,6 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
         cand_pb_constraints,
         check_clauses,
         check_pb_constraints,
-    }
-}
-
-/// Encode a basic/weight rule: h :- #sum{w1:b1; w2:b2; w3:not b3; ...} >= bound
-///
-/// Candidate Constraint 1 (body satisfaction when active):
-/// W_r · active_r_cand + Σ w_i · ¬b_i_cand + Σ u_j · c_j_cand >= W_r
-///
-/// Candidate Constraint 2 (body falsification when inactive):
-/// t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
-///
-/// Candidate Constraint 3 (head requirement): h_cand ∨ ¬active_r_cand
-///
-/// Candidate Constraint 4 (used implies active): ¬used_r_cand ∨ active_r_cand
-///
-/// Candidate Constraint 5 (head selection): ¬active_r_h_cand + used_r_cand >= 1
-///
-/// Candidate Constraint 6 (exclusive head): trivially satisfied for single-head rules
-///
-/// Candidate Constraint 7 (head propagation): h_cand ∨ ¬active_r_h_cand
-///
-/// Check Constraint 10 (reduct body satisfaction):
-/// W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
-///
-/// Check Constraint 11 (reduct head implication): h_check ∨ ¬active_r_check
-fn encode_basic_rule(
-    rule: &BasicRule,
-    rule_idx: u32,
-    layout: &VarLayout,
-    cand_clauses: &mut Vec<Clause>,
-    cand_pb_constraints: &mut Vec<PBConstraint>,
-    check_clauses: &mut Vec<Clause>,
-    check_pb_constraints: &mut Vec<PBConstraint>,
-) {
-    let active_cand = layout.active_cand(rule_idx);
-    let active_check = layout.active_check(rule_idx);
-
-    // Calculate sum of weights
-    let sum_weights: Weight = rule.body.iter().map(|lit| lit.weight).sum();
-    let bound = rule.bound;
-
-    // Falsification weight: W_r = sum - bound + 1
-    // This ensures: if body is satisfied (sum >= bound), then rule must be active
-    let falsification_weight = sum_weights - bound + 1;
-
-    // Constraint 1 (body satisfaction when active):
-    // W_r · active_r_cand + Σ w_i · ¬b_i_cand + Σ u_j · c_j_cand >= W_r
-    // For facts (empty body), this becomes (active_r, 1) >= 1, forcing the rule active
-    let mut constraint1_terms = vec![(Lit::pos(active_cand), falsification_weight)];
-    for lit in &rule.body {
-        // Negate positive body literals, keep negative body literals positive
-        let cdcl_lit = if lit.positive {
-            Lit::neg(layout.cand(lit.atom))
-        } else {
-            Lit::pos(layout.cand(lit.atom))
-        };
-        constraint1_terms.push((cdcl_lit, lit.weight));
-    }
-    cand_pb_constraints.push((constraint1_terms, falsification_weight));
-
-    // Constraint 2 (body falsification when inactive):
-    // t · ¬active_r_cand + Σ w_i · b_i_cand + Σ u_j · ¬c_j_cand >= t
-    // Only needed if bound > 0 (otherwise trivially satisfied)
-    if bound > 0 {
-        let mut constraint2_terms = vec![(Lit::neg(active_cand), bound)];
-        for lit in &rule.body {
-            let cdcl_lit = if lit.positive {
-                Lit::pos(layout.cand(lit.atom))
-            } else {
-                Lit::neg(layout.cand(lit.atom))
-            };
-            constraint2_terms.push((cdcl_lit, lit.weight));
-        }
-        cand_pb_constraints.push((constraint2_terms, bound));
-    }
-
-    // Constraint 3 (head requirement): h_cand ∨ ¬active_r_cand
-    if !rule.head.is_false() {
-        cand_clauses.push(vec![
-            Lit::pos(layout.cand(rule.head)),
-            Lit::neg(active_cand),
-        ]);
-
-        // Additional constraints for non-choice rules with a real head
-        let used_cand = layout.used_cand(rule_idx);
-        let active_head_cand = layout.active_head_cand(rule_idx, 0);
-
-        // Constraint 4 (used implies active): ¬used_r_cand ∨ active_r_cand
-        cand_clauses.push(vec![Lit::neg(used_cand), Lit::pos(active_cand)]);
-
-        // Constraint 5 (head selection): ¬active_r_h_cand + used_r_cand >= 1
-        // For single head, this is a clause
-        cand_clauses.push(vec![Lit::neg(active_head_cand), Lit::pos(used_cand)]);
-
-        // Constraint 6 (exclusive head): trivially satisfied when n=1
-
-        // Constraint 7 (head propagation): h_cand ∨ ¬active_r_h_cand
-        cand_clauses.push(vec![
-            Lit::pos(layout.cand(rule.head)),
-            Lit::neg(active_head_cand),
-        ]);
-    } else {
-        // Constraint rule: if active, contradiction → ¬active_r_cand
-        cand_clauses.push(vec![Lit::neg(active_cand)]);
-    }
-
-    // Constraint 10 (reduct body satisfaction):
-    // W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
-    let mut constraint10_terms = vec![
-        (Lit::neg(active_cand), falsification_weight),
-        (Lit::pos(active_check), falsification_weight),
-    ];
-    for lit in &rule.body {
-        let cdcl_lit = if lit.positive {
-            Lit::neg(layout.check(lit.atom))
-        } else {
-            Lit::pos(layout.check(lit.atom))
-        };
-        constraint10_terms.push((cdcl_lit, lit.weight));
-    }
-    check_pb_constraints.push((constraint10_terms, falsification_weight));
-
-    // Constraint 11 (reduct head implication): h_check ∨ ¬active_r_check
-    if !rule.head.is_false() {
-        check_clauses.push(vec![
-            Lit::pos(layout.check(rule.head)),
-            Lit::neg(active_check),
-        ]);
-    } else {
-        // Constraint rule: ¬active_r_check
-        check_clauses.push(vec![Lit::neg(active_check)]);
     }
 }
 
@@ -713,7 +554,6 @@ pub fn generate_loop_constraint(
         for entry in layout.rules_for_head(atom) {
             let rule = &program.rules[entry.rule_idx as usize];
             let body = match rule {
-                Rule::Basic(r) => &r.body,
                 Rule::Choice(r) => &r.body,
                 Rule::Disjunctive(r) => &r.body,
             };
@@ -763,13 +603,13 @@ mod tests {
         // 3 atoms, 2 basic rules with single heads
         let program = make_program(
             vec![
-                Rule::Basic(BasicRule {
-                    head: Atom(2),
+                Rule::Disjunctive(DisjunctiveRule {
+                    heads: vec![Atom(2)],
                     body: vec![],
                     bound: 0,
                 }),
-                Rule::Basic(BasicRule {
-                    head: Atom(3),
+                Rule::Disjunctive(DisjunctiveRule {
+                    heads: vec![Atom(3)],
                     body: vec![],
                     bound: 0,
                 }),
@@ -815,20 +655,20 @@ mod tests {
     fn test_encode_basic_rule() {
         // h :- b, not c  (atoms: h=2, b=3, c=4)
         // This is a basic rule with weights all 1 and bound = 2
-        let rule = BasicRule {
-            head: Atom(2),
+        let rule = DisjunctiveRule {
+            heads: vec![Atom(2)],
             body: vec![WeightedLit::pos(Atom(3), 1), WeightedLit::neg(Atom(4), 1)],
             bound: 2,
         };
 
-        let program = make_program(vec![Rule::Basic(rule.clone())], 4);
+        let program = make_program(vec![Rule::Disjunctive(rule.clone())], 4);
         let layout = VarLayout::new(&program);
 
         let mut cand = Vec::new();
         let mut cand_pb = Vec::new();
         let mut check = Vec::new();
         let mut check_pb = Vec::new();
-        encode_basic_rule(
+        encode_disjunctive_rule(
             &rule,
             0,
             &layout,

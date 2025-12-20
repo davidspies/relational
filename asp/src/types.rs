@@ -78,18 +78,6 @@ impl WeightedLit {
     }
 }
 
-/// A basic/weight rule: head :- body
-/// For basic rules, all weights are 1 and bound = body_size.
-/// For cardinality rules, all weights are 1.
-/// For weight rules, weights can vary.
-#[derive(Debug, Clone)]
-pub struct BasicRule {
-    pub head: Atom,
-    pub body: Vec<WeightedLit>,
-    /// The bound/threshold for the body to be satisfied.
-    pub bound: Weight,
-}
-
 /// A choice rule: {heads} :- body
 #[derive(Debug, Clone)]
 pub struct ChoiceRule {
@@ -111,7 +99,6 @@ pub struct DisjunctiveRule {
 /// A rule in the program.
 #[derive(Debug, Clone)]
 pub enum Rule {
-    Basic(BasicRule),
     Choice(ChoiceRule),
     Disjunctive(DisjunctiveRule),
 }
