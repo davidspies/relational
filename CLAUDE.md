@@ -53,6 +53,18 @@ Good patterns:
 
 When implementing an algorithm from a formalization, the code structure should mirror the formalization. If the formalization has no conditionals, the code shouldn't either. Add a comment to every `if` explaining which part of the spec requires it.
 
+### Debugging: Understand Before Retrying
+
+When something doesn't work, **figure out why** before trying a different approach.
+
+Bad pattern:
+- "That didn't work. Let me try a different approach."
+
+Good pattern:
+- "That didn't work. Let me figure out why."
+
+Blindly trying alternatives wastes time and teaches nothing. Understand the failure first.
+
 ### Debug Scripts
 
 Debug scripts should be placed in the workspace directory, not in `/tmp`. Operations outside the workspace require manual approval for each action, with no way to grant blanket approval.

@@ -286,6 +286,106 @@ impl VarLayout {
     pub fn total_vars(&self) -> u32 {
         self.total_vars
     }
+
+    /// Decode a raw variable number into what it represents.
+    /// Returns (kind, rule_idx, head_idx, level) where applicable.
+    pub fn decode_var(&self, var_raw: u32) -> VarKind {
+        // x_cand: 1..num_atoms
+        if var_raw >= 1 && var_raw <= self.num_atoms {
+            return VarKind::Cand(Atom(var_raw));
+        }
+
+        // active_cand: search through rule_info
+        for (rule_idx, info) in self.rule_info.iter().enumerate() {
+            let end = info.active_cand_start + info.num_levels;
+            if var_raw >= info.active_cand_start && var_raw < end {
+                let level_offset = var_raw - info.active_cand_start;
+                let level = info.bound + level_offset as Weight;
+                return VarKind::ActiveCand {
+                    rule_idx: rule_idx as u32,
+                    level,
+                };
+            }
+        }
+
+        // active_check: active_check_base + rule_idx
+        if var_raw >= self.active_check_base
+            && var_raw < self.active_check_base + self.num_rules
+        {
+            let rule_idx = var_raw - self.active_check_base;
+            return VarKind::ActiveCheck { rule_idx };
+        }
+
+        // x_check: check_base + atom - 1
+        if var_raw >= self.check_base && var_raw < self.check_base + self.num_atoms {
+            let atom = Atom(var_raw - self.check_base + 1);
+            return VarKind::Check(atom);
+        }
+
+        // x_dim: dim_base + atom - 1
+        if var_raw >= self.dim_base && var_raw < self.dim_base + self.num_atoms {
+            let atom = Atom(var_raw - self.dim_base + 1);
+            return VarKind::Dim(atom);
+        }
+
+        // used_cand and active_head_cand: search through non-choice rules
+        for (rule_idx, info) in self.rule_info.iter().enumerate() {
+            if let Some(nc) = &info.non_choice {
+                // used_cand
+                let used_end = nc.used_cand_start + info.num_levels;
+                if var_raw >= nc.used_cand_start && var_raw < used_end {
+                    let level_offset = var_raw - nc.used_cand_start;
+                    let level = info.bound + level_offset as Weight;
+                    return VarKind::UsedCand {
+                        rule_idx: rule_idx as u32,
+                        level,
+                    };
+                }
+
+                // active_head_cand: layout is head_idx * num_levels + level_offset
+                let total_active_head = nc.num_heads * info.num_levels;
+                let active_head_end = nc.active_head_cand_start + total_active_head;
+                if var_raw >= nc.active_head_cand_start && var_raw < active_head_end {
+                    let offset = var_raw - nc.active_head_cand_start;
+                    let head_idx = offset / info.num_levels;
+                    let level_offset = offset % info.num_levels;
+                    let level = info.bound + level_offset as Weight;
+                    return VarKind::ActiveHeadCand {
+                        rule_idx: rule_idx as u32,
+                        head_idx,
+                        level,
+                    };
+                }
+            }
+        }
+
+        VarKind::Unknown(var_raw)
+    }
+}
+
+/// What kind of variable a raw variable number represents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VarKind {
+    /// x_cand (atom in candidate)
+    Cand(Atom),
+    /// active_r,s_cand (rule active at level s)
+    ActiveCand { rule_idx: u32, level: Weight },
+    /// active_r_check (rule active in check)
+    ActiveCheck { rule_idx: u32 },
+    /// x_check (atom in check)
+    Check(Atom),
+    /// x_dim (diminished atom)
+    Dim(Atom),
+    /// used_r,s_cand (non-choice rule used at level s)
+    UsedCand { rule_idx: u32, level: Weight },
+    /// active_r,h,s_cand (non-choice rule head h active at level s)
+    ActiveHeadCand {
+        rule_idx: u32,
+        head_idx: u32,
+        level: Weight,
+    },
+    /// Unknown variable
+    Unknown(u32),
 }
 
 /// Encoded ASP program ready for solving.
@@ -629,7 +729,7 @@ fn encode_disjunctive_rule(
 /// For choice rules, use active_r,s_cand.
 /// For non-choice rules, use active_r,h,s_cand for each head h in U.
 pub fn generate_loop_constraint(
-    chosen_atom: Atom,
+    _chosen_atom: Atom,
     unfounded_set: &[Atom],
     program: &Program,
     layout: &VarLayout,
@@ -638,8 +738,11 @@ pub fn generate_loop_constraint(
 
     let mut terms: Vec<(Lit, Weight)> = Vec::new();
 
-    // Negated chosen atom (like clasp, we process one atom at a time)
-    terms.push((Lit::neg(layout.cand(chosen_atom)), 1));
+    // Add ALL UFS atoms as negated terms
+    // Constraint: at least one UFS atom is false OR there's external support
+    for &atom in unfounded_set {
+        terms.push((Lit::neg(layout.cand(atom)), 1));
+    }
 
     // Track which (choice_rule, level) pairs we've already added
     let mut added_choice_rules: std::collections::HashSet<(u32, Weight)> =

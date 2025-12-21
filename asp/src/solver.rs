@@ -17,9 +17,10 @@ use relational::create_persistent_input;
 use relational::database::{Database, DatabaseBuilder};
 
 use crate::encoding::{
-    Clause, EncodedProgram, PBConstraint, encode_program, generate_loop_constraint,
+    Clause, EncodedProgram, PBConstraint, VarKind, encode_program, generate_loop_constraint,
 };
-use crate::types::{Atom, Program};
+use crate::expansion::{check_constraint, expand_solution};
+use crate::types::{Atom, Program, Rule};
 
 /// An answer set (stable model).
 pub type AnswerSet = HashSet<Atom>;
@@ -46,6 +47,8 @@ pub struct RecordedConstraint {
     pub constraint: PBConstraint,
     pub chosen_atom: Atom,
     pub unfounded_set: Vec<Atom>,
+    /// candidate_model[i] = true iff Atom(i+1) is true in the candidate model
+    pub candidate_model: Vec<bool>,
 }
 
 impl AspSolver {
@@ -192,6 +195,7 @@ impl AspSolver {
                         constraint: (terms.clone(), bound),
                         chosen_atom,
                         unfounded_set: unfounded_set.clone(),
+                        candidate_model: self.extract_candidate_model(),
                     });
 
                     // DEBUG: Conditional output for debugging loop constraint generation
@@ -205,6 +209,45 @@ impl AspSolver {
                             eprintln!("c   Rule {}: {:?}", entry.rule_idx, rule);
                         }
                         eprintln!("c Constraint terms: {:?}", terms);
+                    }
+
+                    // Dump candidate model if requested
+                    if let Ok(target) = std::env::var("ASP_DUMP_CONSTRAINT") {
+                        if target.parse::<u64>().ok() == Some(loop_constraints) {
+                            eprintln!("c CONSTRAINT_TERMS: {:?}", terms);
+                            eprintln!("c CONSTRAINT_SIZE: {}", terms.len());
+                            // Decode each term
+                            for (i, (lit, weight)) in terms.iter().enumerate() {
+                                let var_kind = self.encoded.layout.decode_var(lit.var().raw());
+                                let sign = if lit.is_positive() { "" } else { "¬" };
+                                eprintln!(
+                                    "c   Term {}: {}Var({}) = {:?}, weight={}",
+                                    i + 1,
+                                    sign,
+                                    lit.var().raw(),
+                                    var_kind,
+                                    weight
+                                );
+                            }
+                            // Also show the UFS
+                            eprintln!("c UFS: {:?}", unfounded_set);
+                            // Show rules for each UFS atom
+                            for &ufs_atom in &unfounded_set {
+                                for entry in self.encoded.layout.rules_for_head(ufs_atom) {
+                                    let rule = &self.program.rules[entry.rule_idx as usize];
+                                    eprintln!(
+                                        "c   {:?} <- Rule {}: {:?}",
+                                        ufs_atom, entry.rule_idx, rule
+                                    );
+                                }
+                            }
+                            let model = self.extract_candidate_model();
+                            let bits: String = model
+                                .iter()
+                                .map(|&b| if b { '1' } else { '0' })
+                                .collect();
+                            eprintln!("c CANDIDATE_MODEL: {}", bits);
+                        }
                     }
 
                     let backtrack_level = self.compute_backtrack_level_pb(&terms);
@@ -348,6 +391,20 @@ impl AspSolver {
         answer_set
     }
 
+    /// Extract the full candidate model as Vec<bool>.
+    /// result[i] = true iff Atom(i+1) is true in the current candidate assignment.
+    fn extract_candidate_model(&self) -> Vec<bool> {
+        let layout = &self.encoded.layout;
+        let assignment = self.cand_solver.get_assignment();
+
+        (1..=layout.num_atoms)
+            .map(|atom_id| {
+                let var = layout.cand(Atom(atom_id));
+                assignment.get(&var).copied().unwrap_or(false)
+            })
+            .collect()
+    }
+
     /// Check if an atom should be shown in output.
     fn is_shown_atom(&self, atom: Atom) -> bool {
         self.atom_names.contains_key(&atom)
@@ -370,6 +427,10 @@ impl AspSolver {
 
     /// Verify if a target solution (set of atom names) satisfies all recorded UFS constraints.
     /// Returns the first violated constraint, if any.
+    ///
+    /// Atom names can be:
+    /// - Regular names from the symbol table (e.g., "comp(1,0,2)")
+    /// - Synthetic names from name_all_atoms.py (e.g., "__atom_42")
     pub fn verify_solution(&self, target_atoms: &[&str]) -> Option<(usize, RecordedConstraint)> {
         // Build name→atom reverse lookup
         let name_to_atom: HashMap<&str, Atom> = self
@@ -378,20 +439,29 @@ impl AspSolver {
             .map(|(atom, name)| (name.as_str(), *atom))
             .collect();
 
-        // Build the initial set of shown atoms
-        let shown_atoms: std::collections::HashSet<Atom> = target_atoms
+        // Build the target atom set, handling both regular names and __atom_N synthetic names
+        let target_atom_set: std::collections::HashSet<Atom> = target_atoms
             .iter()
-            .filter_map(|name| name_to_atom.get(name).copied())
+            .filter_map(|name| {
+                // Try regular symbol table lookup first
+                if let Some(&atom) = name_to_atom.get(name) {
+                    return Some(atom);
+                }
+                // Try parsing __atom_N format
+                if name.starts_with("__atom_") {
+                    if let Ok(id) = name[7..].parse::<u32>() {
+                        return Some(Atom(id));
+                    }
+                }
+                None
+            })
             .collect();
 
-        // Compute the full stable model by forward propagation
-        let target_atom_set = self.compute_full_model(&shown_atoms);
+        eprintln!("c Target model has {} atoms", target_atom_set.len());
 
-        eprintln!(
-            "c Full model has {} atoms (started with {} shown)",
-            target_atom_set.len(),
-            shown_atoms.len()
-        );
+        // Expand the solution to get full variable assignment
+        let assignment = expand_solution(&self.program, &self.encoded.layout, &target_atom_set);
+        eprintln!("c Expanded to {} variable assignments", assignment.len());
 
         // Count how many constraints have their chosen_atom in the target model
         let relevant_count = self
@@ -411,78 +481,56 @@ impl AspSolver {
             self.encoded.cand_pb_constraints.len()
         );
         let mut violations = 0;
-        for (idx, (terms, bound)) in self.encoded.cand_pb_constraints.iter().enumerate() {
-            let mut sum = 0i64;
-            let mut details = Vec::new();
-            for &(lit, weight) in terms {
-                let var_value = self.get_var_value_for_target(lit.var().raw(), &target_atom_set);
-                let lit_satisfied = if lit.is_positive() {
-                    var_value
-                } else {
-                    !var_value
-                };
-                details.push((lit, var_value, lit_satisfied, weight));
-                if lit_satisfied {
-                    sum += weight as i64;
-                }
-            }
-            if sum < *bound as i64 {
+        for (idx, constraint) in self.encoded.cand_pb_constraints.iter().enumerate() {
+            let (satisfied, lhs, bound) = check_constraint(constraint, &assignment);
+            if !satisfied {
                 violations += 1;
                 eprintln!(
                     "c INITIAL CONSTRAINT {} VIOLATED: sum={} < bound={}",
-                    idx, sum, bound
+                    idx, lhs, bound
                 );
-                for (lit, var_val, lit_sat, w) in &details {
-                    eprintln!(
-                        "c   {:?}: var={}, lit_sat={}, weight={}",
-                        lit, var_val, lit_sat, w
-                    );
-                }
-            }
-        }
-        eprintln!("c {} initial constraint violations", violations);
-
-        // Check each recorded constraint
-        for (idx, recorded) in self.recorded_ufs_constraints.iter().enumerate() {
-            let (terms, bound) = &recorded.constraint;
-
-            // Evaluate constraint: sum of satisfied terms >= bound
-            let mut sum = 0i64;
-            for &(lit, weight) in terms {
-                let var = lit.var();
-                let var_raw = var.raw();
-
-                // Determine the value of this variable in the target solution
-                let var_value = self.get_var_value_for_target(var_raw, &target_atom_set);
-
-                // Literal is satisfied if:
-                // - positive literal and var is true, OR
-                // - negative literal and var is false
-                let lit_satisfied = if lit.is_positive() {
-                    var_value
-                } else {
-                    !var_value
-                };
-
-                if lit_satisfied {
-                    sum += weight as i64;
-                }
-            }
-
-            if sum < *bound as i64 {
-                // Print detailed info about violation
-                eprintln!("c === Detailed violation analysis ===");
+                // Print details for debugging
+                let (terms, _) = constraint;
                 for &(lit, weight) in terms {
-                    let var_raw = lit.var().raw();
-                    let var_value = self.get_var_value_for_target(var_raw, &target_atom_set);
+                    let var_value = assignment.get(&lit.var()).copied().unwrap_or(false);
                     let lit_satisfied = if lit.is_positive() {
                         var_value
                     } else {
                         !var_value
                     };
                     eprintln!(
-                        "c   {:?}: var_raw={}, var_value={}, lit_sat={}, weight={}",
-                        lit, var_raw, var_value, lit_satisfied, weight
+                        "c   {:?}: var={}, lit_sat={}, weight={}",
+                        lit, var_value, lit_satisfied, weight
+                    );
+                }
+            }
+        }
+        eprintln!("c {} initial constraint violations", violations);
+
+        // Check each recorded UFS constraint
+        for (idx, recorded) in self.recorded_ufs_constraints.iter().enumerate() {
+            let (satisfied, lhs, bound) = check_constraint(&recorded.constraint, &assignment);
+
+            if !satisfied {
+                // Print detailed info about violation
+                eprintln!("c === Detailed violation analysis ===");
+                eprintln!(
+                    "c UFS Constraint {} VIOLATED: sum={} < bound={}",
+                    idx, lhs, bound
+                );
+                let (terms, _) = &recorded.constraint;
+                for &(lit, weight) in terms {
+                    let var_raw = lit.var().raw();
+                    let var_value = assignment.get(&lit.var()).copied().unwrap_or(false);
+                    let lit_satisfied = if lit.is_positive() {
+                        var_value
+                    } else {
+                        !var_value
+                    };
+                    let var_kind = self.encoded.layout.decode_var(var_raw);
+                    eprintln!(
+                        "c   {:?}: {:?}, value={}, lit_sat={}, weight={}",
+                        lit, var_kind, var_value, lit_satisfied, weight
                     );
                 }
                 // Show which rules have chosen_atom as head
@@ -586,38 +634,42 @@ impl AspSolver {
     ) -> bool {
         let layout = &self.encoded.layout;
 
-        // x_cand variables: 1..num_atoms
-        if var_raw >= 1 && var_raw <= layout.num_atoms {
-            let atom = Atom(var_raw);
-            return target_atoms.contains(&atom);
+        match layout.decode_var(var_raw) {
+            VarKind::Cand(atom) => target_atoms.contains(&atom),
+
+            VarKind::ActiveCand { rule_idx, level } => {
+                // active_r,s_cand is true if body weight sum >= level
+                self.is_rule_body_satisfied_at_level(rule_idx as usize, level, target_atoms)
+            }
+
+            VarKind::ActiveCheck { rule_idx } => {
+                // For verification, assume check active if cand active at base level
+                self.is_rule_body_satisfied(rule_idx as usize, target_atoms)
+            }
+
+            VarKind::Check(atom) => target_atoms.contains(&atom),
+
+            VarKind::Dim(atom) => {
+                // dim is true if atom is in target (for verification purposes)
+                target_atoms.contains(&atom)
+            }
+
+            VarKind::UsedCand { rule_idx, level } => {
+                // used_r,s_cand is true if rule is used at this level
+                self.is_non_choice_rule_used_at_level(rule_idx, level, target_atoms)
+            }
+
+            VarKind::ActiveHeadCand {
+                rule_idx,
+                head_idx,
+                level,
+            } => {
+                // active_r,h,s_cand is true if this head is active at this level
+                self.is_active_head_cand_at_level(rule_idx, head_idx, level, target_atoms)
+            }
+
+            VarKind::Unknown(_) => false,
         }
-
-        // active_cand variables: num_atoms+1..num_atoms+num_rules
-        let active_cand_start = layout.num_atoms + 1;
-        let active_cand_end = layout.num_atoms + layout.num_rules;
-        if var_raw >= active_cand_start && var_raw <= active_cand_end {
-            let rule_idx = (var_raw - active_cand_start) as usize;
-            // A rule is active if its body is satisfied
-            return self.is_rule_body_satisfied(rule_idx, target_atoms);
-        }
-
-        // For other variables (used_cand, active_head_cand), we need more complex logic
-        // For now, compute based on the semantics
-        let used_cand_base = layout.num_atoms + 2 * layout.num_rules + 2 * layout.num_atoms + 1;
-        let active_head_base = used_cand_base + self.count_non_choice_rules();
-
-        if var_raw >= used_cand_base && var_raw < active_head_base {
-            // used_cand: true if rule is used to derive one of its heads
-            let nc_idx = (var_raw - used_cand_base) as usize;
-            return self.is_non_choice_rule_used(nc_idx, target_atoms);
-        }
-
-        if var_raw >= active_head_base {
-            // active_head_cand: true if this rule's specific head is actively derived by it
-            return self.is_active_head_cand(var_raw, active_head_base, target_atoms);
-        }
-
-        false
     }
 
     /// Check if a rule's body is satisfied by the target atoms.
@@ -626,7 +678,6 @@ impl AspSolver {
         rule_idx: usize,
         target_atoms: &std::collections::HashSet<Atom>,
     ) -> bool {
-        use crate::types::Rule;
         let rule = &self.program.rules[rule_idx];
         let (body, bound) = match rule {
             Rule::Choice(r) => (&r.body, r.bound),
@@ -642,6 +693,83 @@ impl AspSolver {
             }
         }
         sum >= bound as i64
+    }
+
+    /// Check if a rule's body weight sum >= level.
+    fn is_rule_body_satisfied_at_level(
+        &self,
+        rule_idx: usize,
+        level: crate::types::Weight,
+        target_atoms: &std::collections::HashSet<Atom>,
+    ) -> bool {
+        let rule = &self.program.rules[rule_idx];
+        let body = match rule {
+            Rule::Choice(r) => &r.body,
+            Rule::Disjunctive(r) => &r.body,
+        };
+
+        let mut sum = 0i64;
+        for lit in body {
+            let atom_in = target_atoms.contains(&lit.atom);
+            let satisfied = if lit.positive { atom_in } else { !atom_in };
+            if satisfied {
+                sum += lit.weight as i64;
+            }
+        }
+        sum >= level as i64
+    }
+
+    /// Check if a non-choice rule is used at a specific level.
+    fn is_non_choice_rule_used_at_level(
+        &self,
+        rule_idx: u32,
+        level: crate::types::Weight,
+        target_atoms: &std::collections::HashSet<Atom>,
+    ) -> bool {
+        let rule = &self.program.rules[rule_idx as usize];
+        if let Rule::Disjunctive(r) = rule {
+            // Rule is used if body satisfied at level and exactly one head is true
+            if !self.is_rule_body_satisfied_at_level(rule_idx as usize, level, target_atoms) {
+                return false;
+            }
+            let heads_true: Vec<_> = r
+                .heads
+                .iter()
+                .filter(|h| target_atoms.contains(h))
+                .collect();
+            return heads_true.len() == 1;
+        }
+        false
+    }
+
+    /// Check if a specific head is actively derived at a level.
+    fn is_active_head_cand_at_level(
+        &self,
+        rule_idx: u32,
+        head_idx: u32,
+        level: crate::types::Weight,
+        target_atoms: &std::collections::HashSet<Atom>,
+    ) -> bool {
+        let rule = &self.program.rules[rule_idx as usize];
+        if let Rule::Disjunctive(r) = rule {
+            // Body must be satisfied at this level
+            if !self.is_rule_body_satisfied_at_level(rule_idx as usize, level, target_atoms) {
+                return false;
+            }
+            // This head must be true
+            let head = r.heads[head_idx as usize];
+            if !target_atoms.contains(&head) {
+                return false;
+            }
+            // And it must be the only true head (used rule)
+            let heads_true: Vec<_> = r
+                .heads
+                .iter()
+                .filter(|h| target_atoms.contains(h))
+                .collect();
+            return heads_true.len() == 1;
+        }
+        false
     }
 
     /// Count non-choice rules.
