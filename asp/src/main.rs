@@ -49,40 +49,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("UNSATISFIABLE");
     }
 
-    // Verification mode: check if a target solution satisfies all recorded constraints
-    if let Ok(target) = env::var("ASP_VERIFY") {
-        let target_atoms: Vec<&str> = target.split_whitespace().collect();
-        eprintln!("\nc Verifying target solution: {:?}", target_atoms);
-        eprintln!(
-            "c Recorded {} UFS constraints",
-            solver.recorded_constraints().len()
-        );
-
-        match solver.verify_solution(&target_atoms) {
-            Some((idx, violated)) => {
-                eprintln!("c VIOLATION at constraint #{}", idx);
-                eprintln!("c   chosen_atom: {:?}", violated.chosen_atom);
-                if let Some(name) = solver.atom_name(violated.chosen_atom) {
-                    eprintln!("c   chosen_atom name: {}", name);
-                }
-                eprintln!("c   unfounded_set: {:?}", violated.unfounded_set);
-                let ufs_names: Vec<_> = violated
-                    .unfounded_set
-                    .iter()
-                    .filter_map(|a| solver.atom_name(*a))
-                    .collect();
-                eprintln!("c   unfounded_set names: {:?}", ufs_names);
-                let (terms, bound) = &violated.constraint;
-                eprintln!("c   constraint: {:?} >= {}", terms, bound);
-            }
-            None => {
-                eprintln!(
-                    "c All {} constraints satisfied by target solution",
-                    solver.recorded_constraints().len()
-                );
-            }
-        }
-    }
-
     Ok(())
 }

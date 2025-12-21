@@ -770,12 +770,6 @@ pub fn generate_loop_constraint(
 
             // If s > W_r, rule cannot provide external support (skip)
             if level > sum_weights {
-                if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
-                    eprintln!(
-                        "c     Rule {} for {:?}: INTERNAL (level {} > sum_weights {})",
-                        entry.rule_idx, atom, level, sum_weights
-                    );
-                }
                 continue;
             }
 
@@ -784,23 +778,11 @@ pub fn generate_loop_constraint(
                 // Choice rules use active_r,s_cand (deduplicate by rule+level)
                 if added_choice_rules.insert((entry.rule_idx, level)) {
                     let var = layout.active_cand(entry.rule_idx, level);
-                    if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
-                        eprintln!(
-                            "c     Rule {} for {:?}: EXTERNAL (choice, level {}) -> var {}",
-                            entry.rule_idx, atom, level, var.raw()
-                        );
-                    }
                     terms.push((Lit::pos(var), 1));
                 }
             } else {
                 // Non-choice rules use active_r,h,s_cand for this specific head
                 let var = layout.active_head_cand(entry.rule_idx, entry.head_idx, level);
-                if std::env::var("ASP_DEBUG_EXT").is_ok() && unfounded_set.len() > 1 {
-                    eprintln!(
-                        "c     Rule {} for {:?}: EXTERNAL (non-choice, level {}) -> var {}",
-                        entry.rule_idx, atom, level, var.raw()
-                    );
-                }
                 terms.push((Lit::pos(var), 1));
             }
         }

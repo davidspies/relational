@@ -16,11 +16,8 @@ use rand::{Rng, SeedableRng};
 use relational::create_persistent_input;
 use relational::database::{Database, DatabaseBuilder};
 
-use crate::encoding::{
-    Clause, EncodedProgram, PBConstraint, VarKind, encode_program, generate_loop_constraint,
-};
-use crate::expansion::{check_constraint, expand_solution};
-use crate::types::{Atom, Program, Rule};
+use crate::encoding::{Clause, EncodedProgram, encode_program, generate_loop_constraint};
+use crate::types::{Atom, Program};
 
 /// An answer set (stable model).
 pub type AnswerSet = HashSet<Atom>;
@@ -37,18 +34,6 @@ pub struct AspSolver {
     atom_names: HashMap<Atom, String>,
     /// Seeded RNG for deterministic behavior
     rng: StdRng,
-    /// Recorded UFS constraints for verification (only when ASP_VERIFY is set)
-    recorded_ufs_constraints: Vec<RecordedConstraint>,
-}
-
-/// A recorded UFS constraint with context for debugging.
-#[derive(Debug, Clone)]
-pub struct RecordedConstraint {
-    pub constraint: PBConstraint,
-    pub chosen_atom: Atom,
-    pub unfounded_set: Vec<Atom>,
-    /// candidate_model[i] = true iff Atom(i+1) is true in the candidate model
-    pub candidate_model: Vec<bool>,
 }
 
 impl AspSolver {
@@ -116,7 +101,6 @@ impl AspSolver {
             next_cand_clause_id: next_id,
             atom_names,
             rng: StdRng::seed_from_u64(42),
-            recorded_ufs_constraints: Vec::new(),
         }
     }
 
@@ -189,66 +173,6 @@ impl AspSolver {
                     );
 
                     loop_constraints += 1;
-
-                    // Record constraint for verification
-                    self.recorded_ufs_constraints.push(RecordedConstraint {
-                        constraint: (terms.clone(), bound),
-                        chosen_atom,
-                        unfounded_set: unfounded_set.clone(),
-                        candidate_model: self.extract_candidate_model(),
-                    });
-
-                    // DEBUG: Conditional output for debugging loop constraint generation
-                    if std::env::var("ASP_DEBUG").is_ok() && loop_constraints <= 3 {
-                        eprintln!("c === Constraint #{} ===", loop_constraints);
-                        eprintln!("c UFS: {:?}", unfounded_set);
-                        eprintln!("c chosen={:?}", chosen_atom);
-                        // Show rules for chosen atom
-                        for entry in self.encoded.layout.rules_for_head(chosen_atom) {
-                            let rule = &self.program.rules[entry.rule_idx as usize];
-                            eprintln!("c   Rule {}: {:?}", entry.rule_idx, rule);
-                        }
-                        eprintln!("c Constraint terms: {:?}", terms);
-                    }
-
-                    // Dump candidate model if requested
-                    if let Ok(target) = std::env::var("ASP_DUMP_CONSTRAINT") {
-                        if target.parse::<u64>().ok() == Some(loop_constraints) {
-                            eprintln!("c CONSTRAINT_TERMS: {:?}", terms);
-                            eprintln!("c CONSTRAINT_SIZE: {}", terms.len());
-                            // Decode each term
-                            for (i, (lit, weight)) in terms.iter().enumerate() {
-                                let var_kind = self.encoded.layout.decode_var(lit.var().raw());
-                                let sign = if lit.is_positive() { "" } else { "¬" };
-                                eprintln!(
-                                    "c   Term {}: {}Var({}) = {:?}, weight={}",
-                                    i + 1,
-                                    sign,
-                                    lit.var().raw(),
-                                    var_kind,
-                                    weight
-                                );
-                            }
-                            // Also show the UFS
-                            eprintln!("c UFS: {:?}", unfounded_set);
-                            // Show rules for each UFS atom
-                            for &ufs_atom in &unfounded_set {
-                                for entry in self.encoded.layout.rules_for_head(ufs_atom) {
-                                    let rule = &self.program.rules[entry.rule_idx as usize];
-                                    eprintln!(
-                                        "c   {:?} <- Rule {}: {:?}",
-                                        ufs_atom, entry.rule_idx, rule
-                                    );
-                                }
-                            }
-                            let model = self.extract_candidate_model();
-                            let bits: String = model
-                                .iter()
-                                .map(|&b| if b { '1' } else { '0' })
-                                .collect();
-                            eprintln!("c CANDIDATE_MODEL: {}", bits);
-                        }
-                    }
 
                     let backtrack_level = self.compute_backtrack_level_pb(&terms);
                     self.add_cand_pb_constraint(&terms, bound);
@@ -391,20 +315,6 @@ impl AspSolver {
         answer_set
     }
 
-    /// Extract the full candidate model as Vec<bool>.
-    /// result[i] = true iff Atom(i+1) is true in the current candidate assignment.
-    fn extract_candidate_model(&self) -> Vec<bool> {
-        let layout = &self.encoded.layout;
-        let assignment = self.cand_solver.get_assignment();
-
-        (1..=layout.num_atoms)
-            .map(|atom_id| {
-                let var = layout.cand(Atom(atom_id));
-                assignment.get(&var).copied().unwrap_or(false)
-            })
-            .collect()
-    }
-
     /// Check if an atom should be shown in output.
     fn is_shown_atom(&self, atom: Atom) -> bool {
         self.atom_names.contains_key(&atom)
@@ -418,456 +328,6 @@ impl AspSolver {
     /// Get a clone of the atom names map for use outside the solver.
     pub fn atom_names(&self) -> HashMap<Atom, String> {
         self.atom_names.clone()
-    }
-
-    /// Get the recorded UFS constraints for verification.
-    pub fn recorded_constraints(&self) -> &[RecordedConstraint] {
-        &self.recorded_ufs_constraints
-    }
-
-    /// Verify if a target solution (set of atom names) satisfies all recorded UFS constraints.
-    /// Returns the first violated constraint, if any.
-    ///
-    /// Atom names can be:
-    /// - Regular names from the symbol table (e.g., "comp(1,0,2)")
-    /// - Synthetic names from name_all_atoms.py (e.g., "__atom_42")
-    pub fn verify_solution(&self, target_atoms: &[&str]) -> Option<(usize, RecordedConstraint)> {
-        // Build name→atom reverse lookup
-        let name_to_atom: HashMap<&str, Atom> = self
-            .atom_names
-            .iter()
-            .map(|(atom, name)| (name.as_str(), *atom))
-            .collect();
-
-        // Build the target atom set, handling both regular names and __atom_N synthetic names
-        let target_atom_set: std::collections::HashSet<Atom> = target_atoms
-            .iter()
-            .filter_map(|name| {
-                // Try regular symbol table lookup first
-                if let Some(&atom) = name_to_atom.get(name) {
-                    return Some(atom);
-                }
-                // Try parsing __atom_N format
-                if name.starts_with("__atom_") {
-                    if let Ok(id) = name[7..].parse::<u32>() {
-                        return Some(Atom(id));
-                    }
-                }
-                None
-            })
-            .collect();
-
-        eprintln!("c Target model has {} atoms", target_atom_set.len());
-
-        // Expand the solution to get full variable assignment
-        let assignment = expand_solution(&self.program, &self.encoded.layout, &target_atom_set);
-        eprintln!("c Expanded to {} variable assignments", assignment.len());
-
-        // Count how many constraints have their chosen_atom in the target model
-        let relevant_count = self
-            .recorded_ufs_constraints
-            .iter()
-            .filter(|r| target_atom_set.contains(&r.chosen_atom))
-            .count();
-        eprintln!(
-            "c {} of {} UFS constraints have chosen_atom in target model",
-            relevant_count,
-            self.recorded_ufs_constraints.len()
-        );
-
-        // Also check initial encoding constraints
-        eprintln!(
-            "c Checking {} initial cand_pb_constraints...",
-            self.encoded.cand_pb_constraints.len()
-        );
-        let mut violations = 0;
-        for (idx, constraint) in self.encoded.cand_pb_constraints.iter().enumerate() {
-            let (satisfied, lhs, bound) = check_constraint(constraint, &assignment);
-            if !satisfied {
-                violations += 1;
-                eprintln!(
-                    "c INITIAL CONSTRAINT {} VIOLATED: sum={} < bound={}",
-                    idx, lhs, bound
-                );
-                // Print details for debugging
-                let (terms, _) = constraint;
-                for &(lit, weight) in terms {
-                    let var_value = assignment.get(&lit.var()).copied().unwrap_or(false);
-                    let lit_satisfied = if lit.is_positive() {
-                        var_value
-                    } else {
-                        !var_value
-                    };
-                    eprintln!(
-                        "c   {:?}: var={}, lit_sat={}, weight={}",
-                        lit, var_value, lit_satisfied, weight
-                    );
-                }
-            }
-        }
-        eprintln!("c {} initial constraint violations", violations);
-
-        // Check each recorded UFS constraint
-        for (idx, recorded) in self.recorded_ufs_constraints.iter().enumerate() {
-            let (satisfied, lhs, bound) = check_constraint(&recorded.constraint, &assignment);
-
-            if !satisfied {
-                // Print detailed info about violation
-                eprintln!("c === Detailed violation analysis ===");
-                eprintln!(
-                    "c UFS Constraint {} VIOLATED: sum={} < bound={}",
-                    idx, lhs, bound
-                );
-                let (terms, _) = &recorded.constraint;
-                for &(lit, weight) in terms {
-                    let var_raw = lit.var().raw();
-                    let var_value = assignment.get(&lit.var()).copied().unwrap_or(false);
-                    let lit_satisfied = if lit.is_positive() {
-                        var_value
-                    } else {
-                        !var_value
-                    };
-                    let var_kind = self.encoded.layout.decode_var(var_raw);
-                    eprintln!(
-                        "c   {:?}: {:?}, value={}, lit_sat={}, weight={}",
-                        lit, var_kind, var_value, lit_satisfied, weight
-                    );
-                }
-                // Show which rules have chosen_atom as head
-                eprintln!(
-                    "c Rules with chosen_atom {:?} as head:",
-                    recorded.chosen_atom
-                );
-                for entry in self.encoded.layout.rules_for_head(recorded.chosen_atom) {
-                    let rule = &self.program.rules[entry.rule_idx as usize];
-                    eprintln!("c   Rule {}: {:?}", entry.rule_idx, rule);
-                    // Check if body depends on UFS
-                    let u_set: std::collections::HashSet<Atom> =
-                        recorded.unfounded_set.iter().copied().collect();
-                    match rule {
-                        crate::types::Rule::Disjunctive(r) => {
-                            let body_in_u = r
-                                .body
-                                .iter()
-                                .any(|lit| lit.positive && u_set.contains(&lit.atom));
-                            eprintln!("c     body_in_u: {}", body_in_u);
-                            // Check if body is satisfied in target
-                            let body_sat = self
-                                .is_rule_body_satisfied(entry.rule_idx as usize, &target_atom_set);
-                            eprintln!("c     body_satisfied_in_target: {}", body_sat);
-                        }
-                        crate::types::Rule::Choice(r) => {
-                            let body_in_u = r
-                                .body
-                                .iter()
-                                .any(|lit| lit.positive && u_set.contains(&lit.atom));
-                            eprintln!("c     body_in_u: {}", body_in_u);
-                            let body_sat = self
-                                .is_rule_body_satisfied(entry.rule_idx as usize, &target_atom_set);
-                            eprintln!("c     body_satisfied_in_target: {}", body_sat);
-                        }
-                    }
-                }
-                return Some((idx, recorded.clone()));
-            }
-        }
-
-        None
-    }
-
-    /// Compute the full stable model by forward propagation from shown atoms.
-    /// This implements the Tp operator repeatedly until fixpoint.
-    fn compute_full_model(
-        &self,
-        shown_atoms: &std::collections::HashSet<Atom>,
-    ) -> std::collections::HashSet<Atom> {
-        use crate::types::Rule;
-
-        let mut model = shown_atoms.clone();
-        let mut changed = true;
-
-        while changed {
-            changed = false;
-            for rule in &self.program.rules {
-                match rule {
-                    Rule::Disjunctive(r) => {
-                        // Check if body is satisfied
-                        let mut sum = 0i64;
-                        for lit in &r.body {
-                            let atom_in = model.contains(&lit.atom);
-                            let satisfied = if lit.positive { atom_in } else { !atom_in };
-                            if satisfied {
-                                sum += lit.weight as i64;
-                            }
-                        }
-                        if sum >= r.bound as i64 {
-                            // Body satisfied - derive heads that are in shown_atoms
-                            // (we only derive heads that we know should be true)
-                            for &head in &r.heads {
-                                if !model.contains(&head) {
-                                    // For basic rules (1 head), derive unconditionally
-                                    // For disjunctive, we can't know which head without more info
-                                    if r.heads.len() == 1 {
-                                        model.insert(head);
-                                        changed = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Rule::Choice(_) => {
-                        // Choice rules don't force derivation
-                    }
-                }
-            }
-        }
-
-        model
-    }
-
-    /// Get the value of a variable for a target solution.
-    /// This interprets the variable based on its position in the layout.
-    fn get_var_value_for_target(
-        &self,
-        var_raw: u32,
-        target_atoms: &std::collections::HashSet<Atom>,
-    ) -> bool {
-        let layout = &self.encoded.layout;
-
-        match layout.decode_var(var_raw) {
-            VarKind::Cand(atom) => target_atoms.contains(&atom),
-
-            VarKind::ActiveCand { rule_idx, level } => {
-                // active_r,s_cand is true if body weight sum >= level
-                self.is_rule_body_satisfied_at_level(rule_idx as usize, level, target_atoms)
-            }
-
-            VarKind::ActiveCheck { rule_idx } => {
-                // For verification, assume check active if cand active at base level
-                self.is_rule_body_satisfied(rule_idx as usize, target_atoms)
-            }
-
-            VarKind::Check(atom) => target_atoms.contains(&atom),
-
-            VarKind::Dim(atom) => {
-                // dim is true if atom is in target (for verification purposes)
-                target_atoms.contains(&atom)
-            }
-
-            VarKind::UsedCand { rule_idx, level } => {
-                // used_r,s_cand is true if rule is used at this level
-                self.is_non_choice_rule_used_at_level(rule_idx, level, target_atoms)
-            }
-
-            VarKind::ActiveHeadCand {
-                rule_idx,
-                head_idx,
-                level,
-            } => {
-                // active_r,h,s_cand is true if this head is active at this level
-                self.is_active_head_cand_at_level(rule_idx, head_idx, level, target_atoms)
-            }
-
-            VarKind::Unknown(_) => false,
-        }
-    }
-
-    /// Check if a rule's body is satisfied by the target atoms.
-    fn is_rule_body_satisfied(
-        &self,
-        rule_idx: usize,
-        target_atoms: &std::collections::HashSet<Atom>,
-    ) -> bool {
-        let rule = &self.program.rules[rule_idx];
-        let (body, bound) = match rule {
-            Rule::Choice(r) => (&r.body, r.bound),
-            Rule::Disjunctive(r) => (&r.body, r.bound),
-        };
-
-        let mut sum = 0i64;
-        for lit in body {
-            let atom_in = target_atoms.contains(&lit.atom);
-            let satisfied = if lit.positive { atom_in } else { !atom_in };
-            if satisfied {
-                sum += lit.weight as i64;
-            }
-        }
-        sum >= bound as i64
-    }
-
-    /// Check if a rule's body weight sum >= level.
-    fn is_rule_body_satisfied_at_level(
-        &self,
-        rule_idx: usize,
-        level: crate::types::Weight,
-        target_atoms: &std::collections::HashSet<Atom>,
-    ) -> bool {
-        let rule = &self.program.rules[rule_idx];
-        let body = match rule {
-            Rule::Choice(r) => &r.body,
-            Rule::Disjunctive(r) => &r.body,
-        };
-
-        let mut sum = 0i64;
-        for lit in body {
-            let atom_in = target_atoms.contains(&lit.atom);
-            let satisfied = if lit.positive { atom_in } else { !atom_in };
-            if satisfied {
-                sum += lit.weight as i64;
-            }
-        }
-        sum >= level as i64
-    }
-
-    /// Check if a non-choice rule is used at a specific level.
-    fn is_non_choice_rule_used_at_level(
-        &self,
-        rule_idx: u32,
-        level: crate::types::Weight,
-        target_atoms: &std::collections::HashSet<Atom>,
-    ) -> bool {
-        let rule = &self.program.rules[rule_idx as usize];
-        if let Rule::Disjunctive(r) = rule {
-            // Rule is used if body satisfied at level and exactly one head is true
-            if !self.is_rule_body_satisfied_at_level(rule_idx as usize, level, target_atoms) {
-                return false;
-            }
-            let heads_true: Vec<_> = r
-                .heads
-                .iter()
-                .filter(|h| target_atoms.contains(h))
-                .collect();
-            return heads_true.len() == 1;
-        }
-        false
-    }
-
-    /// Check if a specific head is actively derived at a level.
-    fn is_active_head_cand_at_level(
-        &self,
-        rule_idx: u32,
-        head_idx: u32,
-        level: crate::types::Weight,
-        target_atoms: &std::collections::HashSet<Atom>,
-    ) -> bool {
-        let rule = &self.program.rules[rule_idx as usize];
-        if let Rule::Disjunctive(r) = rule {
-            // Body must be satisfied at this level
-            if !self.is_rule_body_satisfied_at_level(rule_idx as usize, level, target_atoms) {
-                return false;
-            }
-            // This head must be true
-            let head = r.heads[head_idx as usize];
-            if !target_atoms.contains(&head) {
-                return false;
-            }
-            // And it must be the only true head (used rule)
-            let heads_true: Vec<_> = r
-                .heads
-                .iter()
-                .filter(|h| target_atoms.contains(h))
-                .collect();
-            return heads_true.len() == 1;
-        }
-        false
-    }
-
-    /// Count non-choice rules.
-    fn count_non_choice_rules(&self) -> u32 {
-        use crate::types::Rule;
-        self.program
-            .rules
-            .iter()
-            .filter(|r| matches!(r, Rule::Disjunctive(_)))
-            .count() as u32
-    }
-
-    /// Check if a non-choice rule is "used" (actively supports one of its heads).
-    fn is_non_choice_rule_used(
-        &self,
-        nc_idx: usize,
-        target_atoms: &std::collections::HashSet<Atom>,
-    ) -> bool {
-        use crate::types::Rule;
-        // Find the nc_idx-th non-choice rule
-        let mut count = 0usize;
-        for rule in &self.program.rules {
-            if let Rule::Disjunctive(r) = rule {
-                if count == nc_idx {
-                    // Rule is used if body is satisfied and exactly one head is true
-                    if !self.is_rule_body_satisfied_disj(r, target_atoms) {
-                        return false;
-                    }
-                    let heads_true: Vec<_> = r
-                        .heads
-                        .iter()
-                        .filter(|h| target_atoms.contains(h))
-                        .collect();
-                    return heads_true.len() == 1;
-                }
-                count += 1;
-            }
-        }
-        false
-    }
-
-    /// Check if a disjunctive rule's body is satisfied.
-    fn is_rule_body_satisfied_disj(
-        &self,
-        rule: &crate::types::DisjunctiveRule,
-        target_atoms: &std::collections::HashSet<Atom>,
-    ) -> bool {
-        let mut sum = 0i64;
-        for lit in &rule.body {
-            let atom_in = target_atoms.contains(&lit.atom);
-            let satisfied = if lit.positive { atom_in } else { !atom_in };
-            if satisfied {
-                sum += lit.weight as i64;
-            }
-        }
-        sum >= rule.bound as i64
-    }
-
-    /// Check if a specific head is actively derived by its rule.
-    fn is_active_head_cand(
-        &self,
-        var_raw: u32,
-        active_head_base: u32,
-        target_atoms: &std::collections::HashSet<Atom>,
-    ) -> bool {
-        use crate::types::Rule;
-        // Map var_raw back to (rule_idx, head_idx)
-        let offset = var_raw - active_head_base;
-        let mut cumulative = 0u32;
-        for (_rule_idx, rule) in self.program.rules.iter().enumerate() {
-            if let Rule::Disjunctive(r) = rule {
-                let num_heads = r.heads.len() as u32;
-                if offset < cumulative + num_heads {
-                    let head_idx = (offset - cumulative) as usize;
-                    let head = r.heads[head_idx];
-                    // This head is actively derived if:
-                    // 1. The head is true
-                    // 2. The body is satisfied
-                    // 3. This rule is "chosen" to derive this head (used and this is the selected head)
-                    if !target_atoms.contains(&head) {
-                        return false;
-                    }
-                    if !self.is_rule_body_satisfied_disj(r, target_atoms) {
-                        return false;
-                    }
-                    // For simplicity, assume this head is actively derived if it's the only true head
-                    let heads_true: Vec<_> = r
-                        .heads
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, h)| target_atoms.contains(h))
-                        .collect();
-                    return heads_true.len() == 1 && heads_true[0].0 == head_idx;
-                }
-                cumulative += num_heads;
-            }
-        }
-        false
     }
 }
 
@@ -1165,26 +625,13 @@ mod tests {
 
     #[test]
     fn test_loop_constraint_should_be_added_not_blocked() {
-        // This test verifies bug 2: we should add loop constraints, not block candidates.
-        //
         // Program:
         //   a :- {b, c} >= 1.
         //   b :- a.
         //   {c}.
         //   :- c.       (c must be false)
         //
-        // When the solver tries candidate {a, b} (with c=false due to constraint):
-        // - Check solver finds {} as smaller model
-        // - UFS = {a, b, aux4, aux6}
-        // - Due to bug 1, we incorrectly find "no external support"
-        // - Bug 2: we block the candidate instead of adding ¬chosen_atom
-        //
-        // Expected: loop_constraints > 0 (we should add constraints, not just block)
-        // Actual: loop_constraints = 0 (we're blocking instead)
-        //
-        // This test documents the bug - it currently passes because we're testing
-        // the CURRENT (buggy) behavior. After fixing bug 2, the loop_constraints
-        // count should increase.
+        // Only valid stable model is {} (empty set).
 
         let input = "3 1 2 0 0\n1 1 1 0 2\n1 3 1 0 4\n1 5 1 0 3\n2 6 2 0 1 2 5\n1 4 1 0 6\n0\n2 c\n3 a\n5 b\n0\n";
         let program = crate::parse_smodels(input).unwrap();
@@ -1195,15 +642,5 @@ mod tests {
         // The result is correct (empty set only)
         assert_eq!(results.len(), 1);
         assert!(results[0].is_empty());
-
-        // BUG: We're blocking candidates instead of adding loop constraints.
-        // The recorded_constraints should have entries, but due to bug 2, it's empty.
-        // This assertion documents the bug - it will FAIL once bug 2 is fixed.
-        let loop_constraint_count = solver.recorded_constraints().len();
-        assert!(
-            loop_constraint_count > 0,
-            "BUG: No loop constraints recorded. We're blocking instead of adding constraints. Count: {}",
-            loop_constraint_count
-        );
     }
 }
