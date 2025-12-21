@@ -98,8 +98,9 @@ version = "0.1.0"
 dependencies = [
  "cdcl",
  "contiguous_data",
- "rand",
  "relational",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
