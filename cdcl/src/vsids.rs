@@ -122,14 +122,4 @@ impl Vsids {
             self.stashed.insert(var, priority);
         }
     }
-
-    /// Get all variables currently in the queue (available for decision).
-    pub(crate) fn queue_vars(&self) -> HashSet<Var> {
-        self.queue.iter().map(|(&var, _)| var).collect()
-    }
-
-    /// Get all variables currently stashed (assigned, waiting to be restored).
-    pub(crate) fn stashed_vars(&self) -> HashSet<Var> {
-        self.stashed.keys().copied().collect()
-    }
 }

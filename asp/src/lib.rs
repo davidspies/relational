@@ -6,9 +6,7 @@
 
 pub mod encoding;
 pub mod parser;
-pub mod scc;
 mod solver;
-pub mod solver_log;
 pub mod types;
 
 pub use parser::parse_smodels;

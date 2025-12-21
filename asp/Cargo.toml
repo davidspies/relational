@@ -7,8 +7,7 @@ edition = "2024"
 cdcl = { path = "../cdcl" }
 relational = { path = "../relational" }
 contiguous_data = { path = "../contiguous_data" }
-serde = { version = "*", features = ["derive"] }
-serde_json = "*"
+rand = "*"
 
 [[bin]]
 name = "asp"

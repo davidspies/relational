@@ -3,7 +3,7 @@
 use std::cell::Ref;
 use std::time::Instant;
 
-use contiguous_data::{HashMap, HashSet, Multiset};
+use contiguous_data::{HashMap, Multiset};
 use relational::database::Database;
 
 use crate::Lit;
@@ -54,49 +54,6 @@ impl Solver {
     /// Backtrack to a specific level (public for incremental solving).
     pub fn backtrack(&mut self, db: &mut Database, level: Level) {
         self.backtrack_to(db, level);
-    }
-
-    /// Sanity check: every decision variable should be either assigned or selectable.
-    ///
-    /// Returns Ok(()) if the invariant holds, Err with details if it doesn't.
-    pub fn sanity_check_vars(&self, decision_vars: &HashSet<Var>) -> Result<(), String> {
-        let assigned: HashSet<Var> = self
-            .outputs
-            .assigned
-            .get()
-            .iter()
-            .map(|lit| lit.var())
-            .collect();
-
-        // Check which vars are in VSIDS queue vs stashed
-        let in_queue: HashSet<Var> = self.state.vsids.queue_vars();
-        let in_stashed: HashSet<Var> = self.state.vsids.stashed_vars();
-
-        let mut errors = Vec::new();
-
-        for &var in decision_vars {
-            let is_assigned = assigned.contains(&var);
-            let is_in_queue = in_queue.contains(&var);
-            let is_in_stashed = in_stashed.contains(&var);
-
-            // Variable must be reachable: either assigned, in queue, or in stashed
-            // Note: assigned + in_queue is OK (queue uses lazy cleanup)
-            // Note: assigned + stashed is OK (stashed means "was assigned via pick")
-            let reachable = is_assigned || is_in_queue || is_in_stashed;
-
-            if !reachable {
-                errors.push(format!(
-                    "var {} is MISSING: not assigned, not in queue, not in stashed",
-                    var.raw()
-                ));
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors.join("\n"))
-        }
     }
 
     /// Solve with optional DRAT proof logging.
