@@ -98,6 +98,15 @@ impl Vsids {
         }
     }
 
+    /// Restore all stashed variables back to the queue.
+    /// Call this when backtracking to Level::TOP to handle external input changes.
+    pub(crate) fn restore_all_stashed(&mut self) {
+        for (var, mut priority) in self.stashed.drain() {
+            priority.nonce = self.rng.random();
+            self.queue.push(var, priority);
+        }
+    }
+
     pub(crate) fn get_phase(&self, var: Var) -> bool {
         self.phase.get(&var).copied().unwrap_or(false)
     }
@@ -112,5 +121,15 @@ impl Vsids {
             let (var, priority) = self.queue.pop().unwrap();
             self.stashed.insert(var, priority);
         }
+    }
+
+    /// Get all variables currently in the queue (available for decision).
+    pub(crate) fn queue_vars(&self) -> HashSet<Var> {
+        self.queue.iter().map(|(&var, _)| var).collect()
+    }
+
+    /// Get all variables currently stashed (assigned, waiting to be restored).
+    pub(crate) fn stashed_vars(&self) -> HashSet<Var> {
+        self.stashed.keys().copied().collect()
     }
 }

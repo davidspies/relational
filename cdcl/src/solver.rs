@@ -183,6 +183,15 @@ impl Solver {
             assert!(popped, "Tried to backtrack past level 0");
             self.state.current_level.dec();
         }
+
+        // When backtracking to Level::TOP, restore all stashed vars.
+        // This is needed because external inputs can change between solves,
+        // so vars that were assigned via propagation at Level::TOP may become
+        // unassigned and need to be available for decision again.
+        if level == Level::TOP {
+            self.state.vsids.restore_all_stashed();
+        }
+
         // Trigger propagation after backtracking to pick up any unit learned clauses
         db.commit();
     }

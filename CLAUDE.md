@@ -69,6 +69,30 @@ Blindly trying alternatives wastes time and teaches nothing. Understand the fail
 
 Debug scripts should be placed in the workspace directory, not in `/tmp`. Operations outside the workspace require manual approval for each action, with no way to grant blanket approval.
 
+### ASP Solver
+
+When running gringo to ground ASP programs for our solver, always use `--output=smodels`:
+
+```bash
+gringo --output=smodels program.lp | target/release/asp
+```
+
+The parser only supports smodels format, not the default gringo output format.
+
+### Environment Variables in Pipelines
+
+When setting environment variables for a command in a pipeline, put the variable directly before the command that needs it, not at the start of the pipeline:
+
+```bash
+# WRONG - ASP_DEBUG is set for gringo, not for asp
+ASP_DEBUG=1 gringo --output=smodels program.lp | target/release/asp
+
+# RIGHT - ASP_DEBUG is set for asp
+gringo --output=smodels program.lp | ASP_DEBUG=1 target/release/asp
+```
+
+Each command in a pipeline runs in its own process, so environment variables only apply to the command they directly precede.
+
 ### Search Commands
 
 When using `find` or `grep` commands, always exclude the `target` directory:
