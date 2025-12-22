@@ -52,14 +52,16 @@ This is the minimum total weight of falsified literals needed to guarantee the b
 - $used_{r,s,\text{cand}}$ for each non-choice rule $r \in R$ and each $s \in \{t_r, \ldots, W_r\}$
 - $active_{r,h,s,\text{cand}}$ for each non-choice rule $r \in R$, head $h \in heads(r)$, and each $s \in \{t_r, \ldots, W_r\}$
 
-**Multi-level semantics**: $active_{r,s,\text{cand}}$ being true implies the body's weighted sum is at least $s$. This is a unidirectional implication: the variable may be false even when the sum is sufficient. For basic bodies (where $t_r = W_r$), there is only one level.
+**Multi-level semantics**: $active_{r,s,\text{cand}}$ is true if and only if the body's weighted sum is at least $s$. For basic bodies (where $t_r = W_r$), there is only one level.
 
 For conciseness, we write $active_{r,\text{cand}}$ to mean $active_{r,t_r,\text{cand}}$ (the base level).
 
-### Constraint 1: Body Satisfaction (when active) — Base Level Only
-For a rule $r$ with positive body atoms $B^+ = \{b_1, \ldots, b_n\}$ with weights $\{w_1, \ldots, w_n\}$, and negative body atoms $B^- = \{c_1, \ldots, c_k\}$ with weights $\{u_1, \ldots, u_k\}$:
+### Constraint 1: Body Satisfaction (when active)
+For a rule $r$ with positive body atoms $B^+ = \{b_1, \ldots, b_n\}$ with weights $\{w_1, \ldots, w_n\}$, and negative body atoms $B^- = \{c_1, \ldots, c_k\}$ with weights $\{u_1, \ldots, u_k\}$, and for each level $s \in \{t_r, \ldots, W_r\}$:
 
-$$F_r \cdot active_{r,\text{cand}} + \sum_{b_i \in B^+} w_i \cdot \overline{b_{i,\text{cand}}} + \sum_{c_j \in B^-} u_j \cdot c_{j,\text{cand}} \geq F_r$$
+Let $F_s = W_r - s + 1$ (falsification weight for level $s$).
+
+$$F_s \cdot active_{r,s,\text{cand}} + \sum_{b_i \in B^+} w_i \cdot \overline{b_{i,\text{cand}}} + \sum_{c_j \in B^-} u_j \cdot c_{j,\text{cand}} \geq F_s$$
 
 ### Constraint 2: Body Falsification (when inactive)
 For each level $s \in \{t_r, t_r+1, \ldots, W_r\}$:
@@ -79,7 +81,7 @@ $$\overline{used_{r,s,\text{cand}}} + active_{r,s,\text{cand}} \geq 1$$
 
 This ensures that if a rule is "used" at level $s$ (i.e., it supports one of its heads with body weight $\geq s$), then it must be active at that level.
 
-### Constraint 5: Head Selection — Non-Choice Rules Only
+### Constraint 5a: Head Selection (used implies at most one) — Non-Choice Rules Only
 For a non-choice rule $r$ with $n = |heads(r)|$ heads and each level $s \in \{t_r, \ldots, W_r\}$:
 $$\sum_{h \in heads(r)} \overline{active_{r,h,s,\text{cand}}} + used_{r,s,\text{cand}} \geq n$$
 
@@ -87,15 +89,25 @@ This ensures:
 - If the rule is not used at level $s$, all head-activations at level $s$ must be false
 - If the rule is used at level $s$, at most one head-activation can be true at level $s$
 
-(We don't require at least one head-activation — these variables track which head a rule *supports*, not which heads are true.)
+### Constraint 5b: Head Selection (used implies some head-activation) — Non-Choice Rules Only
+For a non-choice rule $r$ and each level $s \in \{t_r, \ldots, W_r\}$:
+$$\overline{used_{r,s,\text{cand}}} + \sum_{h \in heads(r)} active_{r,h,s,\text{cand}} \geq 1$$
 
-### Constraint 6: Exclusive Head — Non-Choice Rules Only (Base Level)
-For a non-choice rule $r$ with $n = |heads(r)|$ heads:
-$$\sum_{h \in heads(r)} \overline{h_{\text{cand}}} + (n-1) \cdot \overline{used_{r,\text{cand}}} \geq n - 1$$
+This ensures that if used is true at level $s$, then at least one head-activation must be true.
 
-(Uses base level $used_{r,\text{cand}} = used_{r,t_r,\text{cand}}$)
+(Combined with 5a: used is true iff exactly one head-activation is true.)
 
-This ensures that if a rule is used, at most one of its heads can be true. (Combined with Constraint 5, if the rule supports head $h$, then $h$ is true and all other heads are false.)
+### Constraint 6a: Exclusive Head — Non-Choice Rules Only
+For a non-choice rule $r$ with $n = |heads(r)|$ heads and each level $s \in \{t_r, \ldots, W_r\}$:
+$$\sum_{h \in heads(r)} \overline{h_{\text{cand}}} + (n-1) \cdot \overline{used_{r,s,\text{cand}}} \geq n - 1$$
+
+This ensures that if a rule is used at level $s$, at most one of its heads can be true.
+
+### Constraint 6b: Used Iff Active With One Head — Non-Choice Rules Only
+For a non-choice rule $r$ and each level $s \in \{t_r, \ldots, W_r\}$:
+$$\sum_{h \in heads(r)} h_{\text{cand}} + used_{r,s,\text{cand}} + 2 \cdot \overline{active_{r,s,\text{cand}}} \geq 2$$
+
+This ensures that used is true exactly when the rule is active and exactly one head is true.
 
 ### Constraint 7: Head Propagation — Non-Choice Rules Only (Base Level)
 For each head $h$ of a non-choice rule $r$:
@@ -103,7 +115,7 @@ $$h_{\text{cand}} + \overline{active_{r,h,\text{cand}}} \geq 1$$
 
 (Uses base level $active_{r,h,\text{cand}} = active_{r,h,t_r,\text{cand}}$)
 
-*Note: Constraints 3–7 are omitted for choice rules. Constraints 3, 6, 7 are only at base level; Constraints 4, 5 are at each level.*
+*Note: Constraints 3–7 are omitted for choice rules. Constraints 1, 2, 4, 5a, 5b, 6a, 6b are at each level; Constraints 3, 7 are only at base level.*
 
 ---
 
@@ -114,7 +126,7 @@ $$h_{\text{cand}} + \overline{active_{r,h,\text{cand}}} \geq 1$$
 - $x_{\text{dim}}$ (diminished) for each atom $x \in A$
 - $active_{r,\text{check}}$ for each rule $r \in R$
 
-### Constraint 8: Subset Relationship
+### Constraint 8a: Subset Relationship
 For each atom $x$:
 $$\overline{x_{\text{check}}} + x_{\text{cand}} + \overline{x_{\text{dim}}} \geq 2$$
 
@@ -123,15 +135,35 @@ This enforces:
 - $x_{\text{dim}} \implies x_{\text{cand}}$ (diminished atoms must be candidate atoms)
 - $x_{\text{check}} \land x_{\text{dim}}$ is false (an atom cannot be both checked and diminished)
 
+### Constraint 8b: Diminished Propagation
+For each atom $x$:
+$$x_{\text{check}} + \overline{x_{\text{cand}}} + x_{\text{dim}} \geq 1$$
+
+This ensures that if $x$ is in the candidate but not in check, then $x_{\text{dim}}$ must be true.
+
+(Combined with 8a: $x_{\text{dim}}$ is true iff $x \in S_{\text{cand}} \setminus S_{\text{check}}$.)
+
 ### Constraint 9: Strict Subset
 $$\sum_{x \in A} x_{\text{dim}} \geq 1$$
 
 At least one atom must be diminished.
 
-### Constraint 10: Reduct Body Satisfaction
+### Constraint 10a: Reduct Body Satisfaction
 If a rule is active in the candidate solver (at base level), its positive body must be satisfiable in the check (reduct) interpretation:
 
 $$F_r \cdot \overline{active_{r,\text{cand}}} + F_r \cdot active_{r,\text{check}} + \sum_{b_i \in B^+} w_i \cdot \overline{b_{i,\text{check}}} + \sum_{c_j \in B^-} u_j \cdot c_{j,\text{cand}} \geq F_r$$
+
+### Constraint 10b: Reduct Body Falsification
+$$t_r \cdot \overline{active_{r,\text{check}}} + \sum_{b_i \in B^+} w_i \cdot b_{i,\text{check}} + \sum_{c_j \in B^-} u_j \cdot \overline{c_{j,\text{cand}}} \geq t_r$$
+
+This enforces: $active_{r,\text{check}} \implies \text{body satisfied in check}$.
+
+### Constraint 10c: Check Active Implies Cand Active
+$$active_{r,\text{cand}} + \overline{active_{r,\text{check}}} \geq 1$$
+
+This enforces: $active_{r,\text{check}} \implies active_{r,\text{cand}}$.
+
+(Combined with 10a and 10b: $active_{r,\text{check}}$ is true iff the rule is active in cand and the body is satisfied in check.)
 
 ### Constraint 11: Reduct Head Implication — Non-Choice Rules Only
 For a non-choice rule $r$:
@@ -191,8 +223,8 @@ These are loop constraints where $U = \{x\}$, added to bootstrap supportedness w
 Choice rules (e.g., `{h1; h2} :- body.`) differ from non-choice (disjunctive) rules:
 - **Omit Constraints 3–7** (head requirement, used, head selection, exclusive head, and head propagation in candidate solver)
 - **Use Constraint 12 instead of 11** (head propagation instead of head implication in check solver)
-- No $used_{r,\text{cand}}$ or $active_{r,h,\text{cand}}$ variables needed — choice rules don't require any head to be true
-- Loop constraints use $active_{r,\text{cand}}$ directly (not head-specific)
+- No $used_{r,s,\text{cand}}$ or $active_{r,h,s,\text{cand}}$ variables needed — choice rules don't require any head to be true
+- Loop constraints use $active_{r,s,\text{cand}}$ directly (not head-specific)
 
 ---
 
@@ -211,10 +243,10 @@ Variable levels: $s \in \{3, 4, 5, 6, 7, 8, 9, 10\}$ (8 levels)
 
 **Candidate Solver Constraints:**
 
-Constraint 1 (base level only):
-$F_r \cdot active_{r,3,\text{cand}} + 1 \cdot \overline{b1_{\text{cand}}} + 2 \cdot \overline{b2_{\text{cand}}} + 3 \cdot \overline{b3_{\text{cand}}} + 4 \cdot b4_{\text{cand}} \geq F_r$
+Constraint 1 (for each level $s \in \{3, \ldots, 10\}$, with $F_s = W_r - s + 1$):
+$F_s \cdot active_{r,s,\text{cand}} + 1 \cdot \overline{b1_{\text{cand}}} + 2 \cdot \overline{b2_{\text{cand}}} + 3 \cdot \overline{b3_{\text{cand}}} + 4 \cdot b4_{\text{cand}} \geq F_s$
 
-i.e., $8 \cdot active_{r,3,\text{cand}} + 1 \cdot \overline{b1_{\text{cand}}} + 2 \cdot \overline{b2_{\text{cand}}} + 3 \cdot \overline{b3_{\text{cand}}} + 4 \cdot b4_{\text{cand}} \geq 8$
+e.g., at $s=3$: $8 \cdot active_{r,3,\text{cand}} + 1 \cdot \overline{b1_{\text{cand}}} + 2 \cdot \overline{b2_{\text{cand}}} + 3 \cdot \overline{b3_{\text{cand}}} + 4 \cdot b4_{\text{cand}} \geq 8$
 
 Constraint 2 (for each level $s \in \{3, \ldots, 10\}$):
 $s \cdot \overline{active_{r,s,\text{cand}}} + 1 \cdot b1_{\text{cand}} + 2 \cdot b2_{\text{cand}} + 3 \cdot b3_{\text{cand}} + 4 \cdot \overline{b4_{\text{cand}}} \geq s$
@@ -225,21 +257,30 @@ $h_{\text{cand}} + \overline{active_{r,3,\text{cand}}} \geq 1$
 Constraint 4 (used implies active, for each level $s$):
 $\overline{used_{r,s,\text{cand}}} + active_{r,s,\text{cand}} \geq 1$
 
-Constraint 5 (head selection, $n=1$, for each level $s$):
+Constraint 5a (head selection, $n=1$, for each level $s$):
 $\overline{active_{r,h,s,\text{cand}}} + used_{r,s,\text{cand}} \geq 1$
 
-Constraint 6 (exclusive head, $n=1$, base level):
+Constraint 5b (head-activation implies used, for each level $s$):
+$\overline{used_{r,s,\text{cand}}} + active_{r,h,s,\text{cand}} \geq 1$
+
+Constraint 6a (exclusive head, $n=1$, for each level $s$):
 $\overline{h_{\text{cand}}} \geq 0$ (trivially satisfied when $n=1$)
+
+Constraint 6b (used iff active with one head, for each level $s$):
+$h_{\text{cand}} + used_{r,s,\text{cand}} + 2 \cdot \overline{active_{r,s,\text{cand}}} \geq 2$
 
 Constraint 7 (head propagation, base level):
 $h_{\text{cand}} + \overline{active_{r,h,3,\text{cand}}} \geq 1$
 
 **Check Solver Constraints:**
 
-Constraint 10 (uses base level):
+Constraint 10a (uses base level):
 $F_r \cdot \overline{active_{r,3,\text{cand}}} + F_r \cdot active_{r,\text{check}} + 1 \cdot \overline{b1_{\text{check}}} + 2 \cdot \overline{b2_{\text{check}}} + 3 \cdot \overline{b3_{\text{check}}} + 4 \cdot b4_{\text{check}} \geq F_r$
 
 i.e., $8 \cdot \overline{active_{r,3,\text{cand}}} + 8 \cdot active_{r,\text{check}} + 1 \cdot \overline{b1_{\text{check}}} + 2 \cdot \overline{b2_{\text{check}}} + 3 \cdot \overline{b3_{\text{check}}} + 4 \cdot b4_{\text{check}} \geq 8$
+
+Constraint 10b (reduct body falsification):
+$3 \cdot \overline{active_{r,\text{check}}} + 1 \cdot b1_{\text{check}} + 2 \cdot b2_{\text{check}} + 3 \cdot b3_{\text{check}} + 4 \cdot \overline{b4_{\text{cand}}} \geq 3$
 
 Constraint 11 (head implication, $n=1$):
 $h_{\text{check}} + \overline{active_{r,\text{check}}} \geq 1$
