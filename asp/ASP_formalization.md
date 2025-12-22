@@ -143,14 +143,13 @@ If $h$ was in the candidate and the rule is active in check, then $h$ must be in
 
 When the candidate solver finds a solution $S_{\text{cand}}$ and the check solver finds a strict subset $S_{\text{check}} \subset S_{\text{cand}}$:
 
-1. Compute the **unfounded set**: $U = S_{\text{cand}} \setminus S_{\text{check}}$
+1. Read the **unfounded set** $U$ directly from the $x_{\text{dim}}$ variables (since constraints are bidirectional, $x_{\text{dim}}$ is true iff $x \in S_{\text{cand}} \setminus S_{\text{check}}$)
 2. Find all **external support**: for each atom $x \in U$ and each rule $r$ where $x \in heads(r)$:
    - Let $overlap = \sum \{w_i : b_i \in body^+(r) \cap U\}$ (weight of positive body atoms in $U$)
    - Let $s = t_r + overlap$ (external support level)
    - If $s > W_r$: rule cannot provide external support (skip)
-   - Let $W_\text{sat} = \sum \{w_i : b_i \in body^+(r), b_i \in S_\text{cand}\} + \sum \{u_j : c_j \in body^-(r), c_j \notin S_\text{cand}\}$
-   - Define $\text{reason}_r$ based on current state:
-     - If $W_\text{sat} < s$: set $\text{reason}_r = active_{r,s,\text{cand}}$
+   - Define $\text{reason}_r$ based on current assignment:
+     - If $active_{r,s,\text{cand}}$ is false: set $\text{reason}_r = active_{r,s,\text{cand}}$
      - Else if some $z \in heads(r) \setminus U$ is true: select one such $z$ at random and set $\text{reason}_r = \overline{z}$
      - Else: panic (bug — U is not unfounded)
 3. Add to the candidate solver:
@@ -158,7 +157,7 @@ $$\sum_{x \in U} \overline{x_{\text{cand}}} + \sum_{r} \text{reason}_r \geq 1$$
 
 This is a simple disjunctive clause: either at least one atom in $U$ is false, or at least one external support rule is active at the appropriate level. The constraint only forces external support when ALL atoms in U would otherwise be true.
 
-**Key insight**: For weight bodies, a rule can provide external support even if some positive body atoms are in $U$, as long as the remaining atoms can satisfy the bound. By using level $s = t_r + overlap$, we ensure the external support variable is only true when the body weight from atoms *outside* $U$ is at least $t_r$.
+**Key insight**: For weight bodies, a rule can provide external support even if some positive body atoms are in $U$, as long as the remaining atoms can satisfy the bound. By using level $s = t_r + overlap$, we ensure the external support variable is only true when the body weight from atoms *outside* $U$ is at least $t_r$. Since constraints are bidirectional, we can simply check if $active_{r,s,\text{cand}}$ is currently false instead of computing $W_\text{sat}$.
 
 Repeat until the check solver returns UNSAT, indicating no unfounded set exists.
 

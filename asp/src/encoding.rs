@@ -652,31 +652,15 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                 continue;
             }
 
-            // Compute W_sat: weight of body atoms satisfied in S_cand
-            // W_sat = sum of weights of positive atoms that are TRUE
-            //       + sum of weights of negative atoms that are FALSE
-            // Note: unassigned atoms don't contribute (they're neither true nor false)
-            let w_sat: Weight = body
-                .iter()
-                .filter_map(|lit| {
-                    let var = layout.cand(lit.atom);
-                    let is_true = assignment.contains(&Lit::pos(var));
-                    let is_false = assignment.contains(&Lit::neg(var));
-                    if lit.positive {
-                        if is_true { Some(lit.weight) } else { None }
-                    } else {
-                        // Negative literal: satisfied if atom is actually FALSE
-                        if is_false { Some(lit.weight) } else { None }
-                    }
-                })
-                .sum();
+            // Step 2: Check if active_{r,s,cand} is NOT true (false or unassigned)
+            // Since constraints are bidirectional, active is true iff body weight sum >= s
+            let active_var = layout.active_cand(entry.rule_idx, level);
+            let active_is_true = assignment.contains(&Lit::pos(active_var));
 
-            // Step 2: If W_sat < s, the body isn't satisfied at this level
-            // Add active variable as reason (both choice and non-choice use active_r,s_cand)
-            if w_sat < level {
+            if !active_is_true {
+                // Body isn't satisfied at this level (or unassigned during init) - add active as reason
                 if added_rule_levels.insert((entry.rule_idx, level)) {
-                    let var = layout.active_cand(entry.rule_idx, level);
-                    let reason = Lit::pos(var);
+                    let reason = Lit::pos(active_var);
                     if seen_reasons.insert(reason) {
                         terms.push((reason, 1));
                     }
@@ -684,66 +668,41 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                 continue;
             }
 
-            // Step 3: W_sat >= s, so body is satisfied. Check for stealing head.
-            // For choice rules, there's no stealing (heads are optional)
-            if entry.is_choice {
-                // Choice rules use active_r,s_cand (deduplicate by rule+level)
-                if added_rule_levels.insert((entry.rule_idx, level)) {
-                    let var = layout.active_cand(entry.rule_idx, level);
-                    let reason = Lit::pos(var);
-                    if seen_reasons.insert(reason) {
-                        terms.push((reason, 1));
-                    }
-                }
-                continue;
-            }
-
-            // Non-choice rule with satisfied body - find stealing heads
-            let stealing_heads: Vec<Atom> = heads
-                .iter()
-                .copied()
-                .filter(|&head| {
-                    if u_set.contains(&head) {
-                        return false; // Skip UFS heads
-                    }
-                    let head_var = layout.cand(head);
-                    assignment.contains(&Lit::pos(head_var))
-                })
-                .collect();
-
-            if !stealing_heads.is_empty() {
-                // Select one stealing head at random for determinism
-                let idx = rng.random_range(0..stealing_heads.len());
-                let stealing_head = stealing_heads[idx];
-                let reason = Lit::neg(layout.cand(stealing_head));
-                if seen_reasons.insert(reason) {
-                    terms.push((reason, 1));
-                }
-            } else if assignment.is_empty() {
-                // During initialization (empty assignment), just add active var
-                // The stealing head logic only applies during solving
-                // This should only happen for facts (empty body with level = 0)
-                assert_eq!(
-                    level, 0,
-                    "assignment.is_empty() branch should only trigger for facts (level=0), got level={}",
-                    level
-                );
-                // Use active_r,s_cand (same as choice rules now)
-                if added_rule_levels.insert((entry.rule_idx, level)) {
-                    let var = layout.active_cand(entry.rule_idx, level);
-                    let reason = Lit::pos(var);
-                    if seen_reasons.insert(reason) {
-                        terms.push((reason, 1));
-                    }
-                }
+            // Step 3: active is true - rule provides external support
+            // For choice rules, this means U is not unfounded
+            let stealing_heads: Vec<Atom> = if entry.is_choice {
+                vec![]
             } else {
+                // Non-choice rule with active=true - must have a stealing head
+                heads
+                    .iter()
+                    .copied()
+                    .filter(|&head| {
+                        if u_set.contains(&head) {
+                            return false; // Skip UFS heads
+                        }
+                        let head_var = layout.cand(head);
+                        assignment.contains(&Lit::pos(head_var))
+                    })
+                    .collect()
+            };
+
+            if stealing_heads.is_empty() {
                 // Body is satisfied, no stealing head - U is not unfounded!
                 panic!(
                     "Bug: unfounded set {:?} is not unfounded. \
-                     Rule {} has atom {:?} in head, body satisfied (W_sat={} >= s={}), \
-                     but no non-UFS head is true.",
-                    unfounded_set, entry.rule_idx, atom, w_sat, level
+                     Rule {} has atom {:?} in head, body satisfied at level {}, \
+                     but no non-UFS stealing head is true.",
+                    unfounded_set, entry.rule_idx, atom, level
                 );
+            }
+
+            // Select one stealing head at random
+            let idx = rng.random_range(0..stealing_heads.len());
+            let stealing_head = stealing_heads[idx];
+            let reason = Lit::neg(layout.cand(stealing_head));
+            if seen_reasons.insert(reason) {
+                terms.push((reason, 1));
             }
         }
     }
