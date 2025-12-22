@@ -84,7 +84,7 @@ If the rule is active, at least one head must be true.
 - $x_{\text{dim}}$ (diminished) for each atom $x \in A$
 - $active_{r,\text{check}}$ for each rule $r \in R$
 
-### Constraint 8a: Subset Relationship
+### Constraint 4: Subset Relationship
 For each atom $x$:
 $$\overline{x_{\text{check}}} + x_{\text{cand}} + \overline{x_{\text{dim}}} \geq 2$$
 
@@ -93,43 +93,43 @@ This enforces:
 - $x_{\text{dim}} \implies x_{\text{cand}}$ (diminished atoms must be candidate atoms)
 - $x_{\text{check}} \land x_{\text{dim}}$ is false (an atom cannot be both checked and diminished)
 
-### Constraint 8b: Diminished Propagation
+### Constraint 5: Diminished Propagation
 For each atom $x$:
 $$x_{\text{check}} + \overline{x_{\text{cand}}} + x_{\text{dim}} \geq 1$$
 
 This ensures that if $x$ is in the candidate but not in check, then $x_{\text{dim}}$ must be true.
 
-(Combined with 8a: $x_{\text{dim}}$ is true iff $x \in S_{\text{cand}} \setminus S_{\text{check}}$.)
+(Combined with Constraint 4: $x_{\text{dim}}$ is true iff $x \in S_{\text{cand}} \setminus S_{\text{check}}$.)
 
-### Constraint 9: Strict Subset
+### Constraint 6: Strict Subset
 $$\sum_{x \in A} x_{\text{dim}} \geq 1$$
 
 At least one atom must be diminished.
 
-### Constraint 10a: Reduct Body Satisfaction
-If a rule is active in the candidate solver (at base level), its positive body must be satisfiable in the check (reduct) interpretation:
+### Constraint 7: Reduct Body Satisfaction
+If a rule is active in the candidate solver (at base level), its body must be satisfiable in the check (reduct) interpretation:
 
 $$F_r \cdot \overline{active_{r,\text{cand}}} + F_r \cdot active_{r,\text{check}} + \sum_{b_i \in B^+} w_i \cdot \overline{b_{i,\text{check}}} + \sum_{c_j \in B^-} u_j \cdot c_{j,\text{cand}} \geq F_r$$
 
-### Constraint 10b: Reduct Body Falsification
+### Constraint 8: Reduct Body Falsification
 $$t_r \cdot \overline{active_{r,\text{check}}} + \sum_{b_i \in B^+} w_i \cdot b_{i,\text{check}} + \sum_{c_j \in B^-} u_j \cdot \overline{c_{j,\text{cand}}} \geq t_r$$
 
 This enforces: $active_{r,\text{check}} \implies \text{body satisfied in check}$.
 
-### Constraint 10c: Check Active Implies Cand Active
+### Constraint 9: Check Active Implies Cand Active
 $$active_{r,\text{cand}} + \overline{active_{r,\text{check}}} \geq 1$$
 
 This enforces: $active_{r,\text{check}} \implies active_{r,\text{cand}}$.
 
-(Combined with 10a and 10b: $active_{r,\text{check}}$ is true iff the rule is active in cand and the body is satisfied in check.)
+(Combined with Constraints 7 and 8: $active_{r,\text{check}}$ is true iff the rule is active in cand and the body is satisfied in check.)
 
-### Constraint 11: Reduct Head Implication — Non-Choice Rules Only
+### Constraint 10: Reduct Head Implication — Non-Choice Rules Only
 For a non-choice rule $r$:
 $$\sum_{h \in heads(r)} h_{\text{check}} + \overline{active_{r,\text{check}}} \geq 1$$
 
 If the rule is active in check, at least one head must be true in check.
 
-### Constraint 12: Reduct Head Propagation — Choice Rules Only
+### Constraint 11: Reduct Head Propagation — Choice Rules Only
 For each head $h$ of a choice rule $r$:
 $$\overline{h_{\text{cand}}} + h_{\text{check}} + \overline{active_{r,\text{check}}} \geq 1$$
 
@@ -139,7 +139,7 @@ If $h$ was in the candidate and the rule is active in check, then $h$ must be in
 
 ## Loop Constraints
 
-### Constraint 13: Loop Constraints
+### Constraint 12: Loop Constraints
 
 When the candidate solver finds a solution $S_{\text{cand}}$ and the check solver finds a strict subset $S_{\text{check}} \subset S_{\text{cand}}$:
 
@@ -150,11 +150,11 @@ When the candidate solver finds a solution $S_{\text{cand}}$ and the check solve
    - If $s > W_r$: rule cannot provide external support (skip)
    - Let $W_\text{sat} = \sum \{w_i : b_i \in body^+(r), b_i \in S_\text{cand}\} + \sum \{u_j : c_j \in body^-(r), c_j \notin S_\text{cand}\}$
    - Define $\text{reason}_r$ based on current state:
-     - If $W_\text{sat} < s$: set $\text{reason}_r = active_{r,s,\text{cand}}$ (non-choice) or $active_{r,s,\text{cand}}$ (choice)
+     - If $W_\text{sat} < s$: set $\text{reason}_r = active_{r,s,\text{cand}}$
      - Else if some $z \in heads(r) \setminus U$ is true: select one such $z$ at random and set $\text{reason}_r = \overline{z}$
      - Else: panic (bug — U is not unfounded)
 3. Add to the candidate solver:
-$$\sum_{x \in U} \overline{x_{\text{cand}}} + \sum_{r \in \text{external}} \text{reason}_r \geq 1$$
+$$\sum_{x \in U} \overline{x_{\text{cand}}} + \sum_{r} \text{reason}_r \geq 1$$
 
 This is a simple disjunctive clause: either at least one atom in $U$ is false, or at least one external support rule is active at the appropriate level. The constraint only forces external support when ALL atoms in U would otherwise be true.
 
@@ -162,27 +162,23 @@ This is a simple disjunctive clause: either at least one atom in $U$ is false, o
 
 Repeat until the check solver returns UNSAT, indicating no unfounded set exists.
 
-### Constraint 13 Initialization: Single-Atom Loop Constraints
+### Constraint 12 Initialization: Single-Atom Loop Constraints
 As a special case, for each atom $x$ we add single-atom loop constraints upfront. For each rule $r$ with $x \in heads(r)$:
 - If $x \in body^+(r)$: let $s = t_r + w_x$ (where $w_x$ is the weight of $x$ in the body)
 - Otherwise: $s = t_r$ (base level)
 - If $s > W_r$: skip (rule cannot provide external support for $x$)
 
-$$\overline{x_{\text{cand}}} + \sum_{(r,s)} active_{r,x,s,\text{cand}} \geq 1$$
+$$\overline{x_{\text{cand}}} + \sum_{(r,s)} active_{r,s,\text{cand}} \geq 1$$
 
 These are loop constraints where $U = \{x\}$, added to bootstrap supportedness without needing check solver iterations.
-
-*Note: For choice rules, use $active_{r,s,\text{cand}}$ instead of $active_{r,x,s,\text{cand}}$.*
 
 ---
 
 ## Choice Rules
 
 Choice rules (e.g., `{h1; h2} :- body.`) differ from non-choice (disjunctive) rules:
-- **Omit Constraints 3–7** (head requirement, used, head selection, exclusive head, and head propagation in candidate solver)
-- **Use Constraint 12 instead of 11** (head propagation instead of head implication in check solver)
-- No $used_{r,s,\text{cand}}$ or $active_{r,h,s,\text{cand}}$ variables needed — choice rules don't require any head to be true
-- Loop constraints use $active_{r,s,\text{cand}}$ directly (not head-specific)
+- **Omit Constraint 3** (head requirement) in candidate solver
+- **Use Constraint 11 instead of 10** (head propagation instead of head implication in check solver)
 
 ---
 
@@ -209,38 +205,18 @@ e.g., at $s=3$: $8 \cdot active_{r,3,\text{cand}} + 1 \cdot \overline{b1_{\text{
 Constraint 2 (for each level $s \in \{3, \ldots, 10\}$):
 $s \cdot \overline{active_{r,s,\text{cand}}} + 1 \cdot b1_{\text{cand}} + 2 \cdot b2_{\text{cand}} + 3 \cdot b3_{\text{cand}} + 4 \cdot \overline{b4_{\text{cand}}} \geq s$
 
-Constraint 3 (head requirement, $n=1$, base level):
+Constraint 3 (head requirement, base level):
 $h_{\text{cand}} + \overline{active_{r,3,\text{cand}}} \geq 1$
-
-Constraint 4 (used implies active, for each level $s$):
-$\overline{used_{r,s,\text{cand}}} + active_{r,s,\text{cand}} \geq 1$
-
-Constraint 5a (head selection, $n=1$, for each level $s$):
-$\overline{active_{r,h,s,\text{cand}}} + used_{r,s,\text{cand}} \geq 1$
-
-Constraint 5b (head-activation implies used, for each level $s$):
-$\overline{used_{r,s,\text{cand}}} + active_{r,h,s,\text{cand}} \geq 1$
-
-Constraint 6a (exclusive head, $n=1$, for each level $s$):
-$\overline{h_{\text{cand}}} \geq 0$ (trivially satisfied when $n=1$)
-
-Constraint 6b (used iff active with one head, for each level $s$):
-$h_{\text{cand}} + used_{r,s,\text{cand}} + 2 \cdot \overline{active_{r,s,\text{cand}}} \geq 2$
-
-Constraint 7 (head propagation, base level):
-$h_{\text{cand}} + \overline{active_{r,h,3,\text{cand}}} \geq 1$
 
 **Check Solver Constraints:**
 
-Constraint 10a (uses base level):
-$F_r \cdot \overline{active_{r,3,\text{cand}}} + F_r \cdot active_{r,\text{check}} + 1 \cdot \overline{b1_{\text{check}}} + 2 \cdot \overline{b2_{\text{check}}} + 3 \cdot \overline{b3_{\text{check}}} + 4 \cdot b4_{\text{check}} \geq F_r$
+Constraint 7 (reduct body satisfaction):
+$8 \cdot \overline{active_{r,3,\text{cand}}} + 8 \cdot active_{r,\text{check}} + 1 \cdot \overline{b1_{\text{check}}} + 2 \cdot \overline{b2_{\text{check}}} + 3 \cdot \overline{b3_{\text{check}}} + 4 \cdot b4_{\text{check}} \geq 8$
 
-i.e., $8 \cdot \overline{active_{r,3,\text{cand}}} + 8 \cdot active_{r,\text{check}} + 1 \cdot \overline{b1_{\text{check}}} + 2 \cdot \overline{b2_{\text{check}}} + 3 \cdot \overline{b3_{\text{check}}} + 4 \cdot b4_{\text{check}} \geq 8$
-
-Constraint 10b (reduct body falsification):
+Constraint 8 (reduct body falsification):
 $3 \cdot \overline{active_{r,\text{check}}} + 1 \cdot b1_{\text{check}} + 2 \cdot b2_{\text{check}} + 3 \cdot b3_{\text{check}} + 4 \cdot \overline{b4_{\text{cand}}} \geq 3$
 
-Constraint 11 (head implication, $n=1$):
+Constraint 10 (head implication):
 $h_{\text{check}} + \overline{active_{r,\text{check}}} \geq 1$
 
 **Loop Constraint Example with Weight Bodies:**
@@ -252,6 +228,6 @@ If $U = \{aux, b\}$ (unfounded set) but $c \notin U$:
 - $s = t_r + overlap = 1 + 1 = 2$
 - Since $s = 2 \leq W_r = 2$, the rule *can* provide external support
 
-We add $active_{r,aux,2,\text{cand}}$ to the loop constraint. This variable is true only when the body's non-$U$ weight (from $c$ alone) satisfies threshold 1, which it does when $c$ is true.
+We add $active_{r,2,\text{cand}}$ to the loop constraint. This variable is true only when the body's weight is at least 2, which requires the non-$U$ weight (from $c$ alone) to satisfy threshold 1.
 
 Compare to the old (buggy) behavior: since $b \in body^+(r) \cap U \neq \emptyset$, the rule was incorrectly marked as INTERNAL and excluded from external support.
