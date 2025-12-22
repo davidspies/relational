@@ -14,6 +14,8 @@
 use std::collections::HashMap;
 
 use cdcl::{Lit, Var, Weight};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 use crate::types::{Atom, ChoiceRule, DisjunctiveRule, Program, Rule, WeightedLit};
 
@@ -454,10 +456,11 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     // Add single-atom loop constraints for each atom (Constraint 13 initialization)
     // At initialization, no assignments exist, so use empty multiset
     let empty_assignment = contiguous_data::Multiset::new();
+    let mut rng = StdRng::seed_from_u64(42);
     for atom_id in 2..=layout.num_atoms {
         let atom = Atom(atom_id);
         let pb_constraint =
-            generate_loop_constraint(atom, &[atom], program, &layout, &empty_assignment);
+            generate_loop_constraint(atom, &[atom], program, &layout, &empty_assignment, &mut rng);
         cand_pb_constraints.push(pb_constraint);
     }
 
@@ -552,7 +555,7 @@ fn encode_choice_rule(
     // NOTE: No Constraint 3 - heads are OPTIONAL in choice rules
 
     // Constraint 10 (reduct body satisfaction)
-    // Same polarity as Constraint 1, but on check variables
+    // Positive body uses check variables, negative body uses cand variables
     let mut constraint6_terms = vec![
         (Lit::neg(active_cand), falsification_weight),
         (Lit::pos(active_check), falsification_weight),
@@ -561,7 +564,8 @@ fn encode_choice_rule(
         let cdcl_lit = if lit.positive {
             Lit::neg(layout.check(lit.atom))
         } else {
-            Lit::pos(layout.check(lit.atom))
+            // Negative body uses cand, not check (per formalization Constraint 10)
+            Lit::pos(layout.cand(lit.atom))
         };
         constraint6_terms.push((cdcl_lit, lit.weight));
     }
@@ -702,8 +706,8 @@ fn encode_disjunctive_rule(
     }
 
     // Constraint 10 (reduct body satisfaction):
-    // W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_check >= W_r
-    // Same polarity as Constraint 1, but on check variables
+    // W_r · ¬active_r_cand + W_r · active_r_check + Σ w_i · ¬b_i_check + Σ u_j · c_j_cand >= W_r
+    // Positive body uses check variables, negative body uses cand variables
     let mut constraint10_terms = vec![
         (Lit::neg(active_cand), falsification_weight),
         (Lit::pos(active_check), falsification_weight),
@@ -712,7 +716,8 @@ fn encode_disjunctive_rule(
         let cdcl_lit = if lit.positive {
             Lit::neg(layout.check(lit.atom))
         } else {
-            Lit::pos(layout.check(lit.atom))
+            // Negative body uses cand, not check (per formalization Constraint 10)
+            Lit::pos(layout.cand(lit.atom))
         };
         constraint10_terms.push((cdcl_lit, lit.weight));
     }
@@ -741,12 +746,13 @@ fn encode_disjunctive_rule(
 ///
 /// For choice rules, use active_r,s_cand.
 /// For non-choice rules, use active_r,h,s_cand for each head h in U.
-pub fn generate_loop_constraint(
+pub fn generate_loop_constraint<R: rand::Rng>(
     _chosen_atom: Atom,
     unfounded_set: &[Atom],
     program: &Program,
     layout: &VarLayout,
     assignment: &contiguous_data::Multiset<Lit>,
+    rng: &mut R,
 ) -> PBConstraint {
     let u_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
 
@@ -789,32 +795,50 @@ pub fn generate_loop_constraint(
                 continue;
             }
 
-            // Step 2: Check if a non-UFS head is TRUE (stealing support)
-            // If so, add ¬z as reason - if z becomes false, rule could support UFS
-            let mut found_stealing_head = false;
-            if !entry.is_choice {
-                for &head in heads {
-                    if u_set.contains(&head) {
-                        continue; // Skip UFS heads
+            // Compute W_sat: weight of body atoms satisfied in S_cand
+            // W_sat = sum of weights of positive atoms that are TRUE
+            //       + sum of weights of negative atoms that are FALSE
+            // Note: unassigned atoms don't contribute (they're neither true nor false)
+            let w_sat: Weight = body
+                .iter()
+                .filter_map(|lit| {
+                    let var = layout.cand(lit.atom);
+                    let is_true = assignment.contains(&Lit::pos(var));
+                    let is_false = assignment.contains(&Lit::neg(var));
+                    if lit.positive {
+                        if is_true { Some(lit.weight) } else { None }
+                    } else {
+                        // Negative literal: satisfied if atom is actually FALSE
+                        if is_false { Some(lit.weight) } else { None }
                     }
-                    let head_var = layout.cand(head);
-                    let head_true = assignment.contains(&Lit::pos(head_var));
-                    if head_true {
-                        // This head is stealing support - add ¬head as reason
-                        let reason = Lit::neg(head_var);
+                })
+                .sum();
+
+            // Step 2: If W_sat < s, the body isn't satisfied at this level
+            // Add active variable as reason
+            if w_sat < level {
+                if entry.is_choice {
+                    // Choice rules use active_r,s_cand (deduplicate by rule+level)
+                    if added_choice_rules.insert((entry.rule_idx, level)) {
+                        let var = layout.active_cand(entry.rule_idx, level);
+                        let reason = Lit::pos(var);
                         if seen_reasons.insert(reason) {
                             terms.push((reason, 1));
                         }
-                        found_stealing_head = true;
-                        break; // Only need one stealing head
+                    }
+                } else {
+                    // Non-choice rules use active_r,h,s_cand for this specific head
+                    let var = layout.active_head_cand(entry.rule_idx, entry.head_idx, level);
+                    let reason = Lit::pos(var);
+                    if seen_reasons.insert(reason) {
+                        terms.push((reason, 1));
                     }
                 }
-            }
-            if found_stealing_head {
-                continue; // Don't add active var, we have the stealing head reason
+                continue;
             }
 
-            // Step 3: No stealing head - add the active variable as reason
+            // Step 3: W_sat >= s, so body is satisfied. Check for stealing head.
+            // For choice rules, there's no stealing (heads are optional)
             if entry.is_choice {
                 // Choice rules use active_r,s_cand (deduplicate by rule+level)
                 if added_choice_rules.insert((entry.rule_idx, level)) {
@@ -824,13 +848,52 @@ pub fn generate_loop_constraint(
                         terms.push((reason, 1));
                     }
                 }
-            } else {
-                // Non-choice rules use active_r,h,s_cand for this specific head
+                continue;
+            }
+
+            // Non-choice rule with satisfied body - find stealing heads
+            let stealing_heads: Vec<Atom> = heads
+                .iter()
+                .copied()
+                .filter(|&head| {
+                    if u_set.contains(&head) {
+                        return false; // Skip UFS heads
+                    }
+                    let head_var = layout.cand(head);
+                    assignment.contains(&Lit::pos(head_var))
+                })
+                .collect();
+
+            if !stealing_heads.is_empty() {
+                // Select one stealing head at random for determinism
+                let idx = rng.random_range(0..stealing_heads.len());
+                let stealing_head = stealing_heads[idx];
+                let reason = Lit::neg(layout.cand(stealing_head));
+                if seen_reasons.insert(reason) {
+                    terms.push((reason, 1));
+                }
+            } else if assignment.is_empty() {
+                // During initialization (empty assignment), just add active var
+                // The stealing head logic only applies during solving
+                // This should only happen for facts (empty body with level = 0)
+                assert_eq!(
+                    level, 0,
+                    "assignment.is_empty() branch should only trigger for facts (level=0), got level={}",
+                    level
+                );
                 let var = layout.active_head_cand(entry.rule_idx, entry.head_idx, level);
                 let reason = Lit::pos(var);
                 if seen_reasons.insert(reason) {
                     terms.push((reason, 1));
                 }
+            } else {
+                // Body is satisfied, no stealing head - U is not unfounded!
+                panic!(
+                    "Bug: unfounded set {:?} is not unfounded. \
+                     Rule {} has atom {:?} in head, body satisfied (W_sat={} >= s={}), \
+                     but no non-UFS head is true.",
+                    unfounded_set, entry.rule_idx, atom, w_sat, level
+                );
             }
         }
     }
@@ -1014,12 +1077,14 @@ mod tests {
 
         // At test time, use empty assignment (no stealing heads)
         let empty_assignment = contiguous_data::Multiset::new();
+        let mut rng = StdRng::seed_from_u64(42);
         let (terms, bound) = generate_loop_constraint(
             chosen_atom,
             &unfounded_set,
             &program,
             &layout,
             &empty_assignment,
+            &mut rng,
         );
 
         assert_eq!(bound, 1);

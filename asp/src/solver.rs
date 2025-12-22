@@ -175,6 +175,7 @@ impl AspSolver {
                             &self.program,
                             &self.encoded.layout,
                             &*assignment,
+                            &mut self.rng,
                         )
                     };
 
