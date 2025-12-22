@@ -49,8 +49,6 @@ This is the minimum total weight of falsified literals needed to guarantee the b
 ### Variables
 - $x_{\text{cand}}$ for each atom $x \in A$
 - $active_{r,s,\text{cand}}$ for each rule $r \in R$ and each $s \in \{t_r, t_r+1, \ldots, W_r\}$ where $t_r$ is the threshold and $W_r = \sum w_i$ is the sum of all body weights
-- $used_{r,s,\text{cand}}$ for each non-choice rule $r \in R$ and each $s \in \{t_r, \ldots, W_r\}$
-- $active_{r,h,s,\text{cand}}$ for each non-choice rule $r \in R$, head $h \in heads(r)$, and each $s \in \{t_r, \ldots, W_r\}$
 
 **Multi-level semantics**: $active_{r,s,\text{cand}}$ is true if and only if the body's weighted sum is at least $s$. For basic bodies (where $t_r = W_r$), there is only one level.
 
@@ -75,47 +73,7 @@ $$\sum_{h \in heads(r)} h_{\text{cand}} + \overline{active_{r,\text{cand}}} \geq
 
 If the rule is active, at least one head must be true.
 
-### Constraint 4: Used Implies Active — Non-Choice Rules Only
-For a non-choice rule $r$ and each level $s \in \{t_r, \ldots, W_r\}$:
-$$\overline{used_{r,s,\text{cand}}} + active_{r,s,\text{cand}} \geq 1$$
-
-This ensures that if a rule is "used" at level $s$ (i.e., it supports one of its heads with body weight $\geq s$), then it must be active at that level.
-
-### Constraint 5a: Head Selection (used implies at most one) — Non-Choice Rules Only
-For a non-choice rule $r$ with $n = |heads(r)|$ heads and each level $s \in \{t_r, \ldots, W_r\}$:
-$$\sum_{h \in heads(r)} \overline{active_{r,h,s,\text{cand}}} + used_{r,s,\text{cand}} \geq n$$
-
-This ensures:
-- If the rule is not used at level $s$, all head-activations at level $s$ must be false
-- If the rule is used at level $s$, at most one head-activation can be true at level $s$
-
-### Constraint 5b: Head Selection (used implies some head-activation) — Non-Choice Rules Only
-For a non-choice rule $r$ and each level $s \in \{t_r, \ldots, W_r\}$:
-$$\overline{used_{r,s,\text{cand}}} + \sum_{h \in heads(r)} active_{r,h,s,\text{cand}} \geq 1$$
-
-This ensures that if used is true at level $s$, then at least one head-activation must be true.
-
-(Combined with 5a: used is true iff exactly one head-activation is true.)
-
-### Constraint 6a: Exclusive Head — Non-Choice Rules Only
-For a non-choice rule $r$ with $n = |heads(r)|$ heads and each level $s \in \{t_r, \ldots, W_r\}$:
-$$\sum_{h \in heads(r)} \overline{h_{\text{cand}}} + (n-1) \cdot \overline{used_{r,s,\text{cand}}} \geq n - 1$$
-
-This ensures that if a rule is used at level $s$, at most one of its heads can be true.
-
-### Constraint 6b: Used Iff Active With One Head — Non-Choice Rules Only
-For a non-choice rule $r$ and each level $s \in \{t_r, \ldots, W_r\}$:
-$$\sum_{h \in heads(r)} h_{\text{cand}} + used_{r,s,\text{cand}} + 2 \cdot \overline{active_{r,s,\text{cand}}} \geq 2$$
-
-This ensures that used is true exactly when the rule is active and exactly one head is true.
-
-### Constraint 7: Head Propagation — Non-Choice Rules Only (Base Level)
-For each head $h$ of a non-choice rule $r$:
-$$h_{\text{cand}} + \overline{active_{r,h,\text{cand}}} \geq 1$$
-
-(Uses base level $active_{r,h,\text{cand}} = active_{r,h,t_r,\text{cand}}$)
-
-*Note: Constraints 3–7 are omitted for choice rules. Constraints 1, 2, 4, 5a, 5b, 6a, 6b are at each level; Constraints 3, 7 are only at base level.*
+*Note: Constraint 3 is omitted for choice rules. Constraints 1, 2 are at each level; Constraint 3 is only at base level.*
 
 ---
 
@@ -191,12 +149,12 @@ When the candidate solver finds a solution $S_{\text{cand}}$ and the check solve
    - Let $s = t_r + overlap$ (external support level)
    - If $s > W_r$: rule cannot provide external support (skip)
    - Let $W_\text{sat} = \sum \{w_i : b_i \in body^+(r), b_i \in S_\text{cand}\} + \sum \{u_j : c_j \in body^-(r), c_j \notin S_\text{cand}\}$
-   - Define $\text{reason}_{x,r}$ based on current state:
-     - If $W_\text{sat} < s$: set $\text{reason}_{x,r} = active_{r,x,s,\text{cand}}$ (non-choice) or $active_{r,s,\text{cand}}$ (choice)
-     - Else if some $z \in heads(r) \setminus U$ is true: select one such $z$ at random and set $\text{reason}_{x,r} = \overline{z}$
+   - Define $\text{reason}_r$ based on current state:
+     - If $W_\text{sat} < s$: set $\text{reason}_r = active_{r,s,\text{cand}}$ (non-choice) or $active_{r,s,\text{cand}}$ (choice)
+     - Else if some $z \in heads(r) \setminus U$ is true: select one such $z$ at random and set $\text{reason}_r = \overline{z}$
      - Else: panic (bug — U is not unfounded)
 3. Add to the candidate solver:
-$$\sum_{x \in U} \overline{x_{\text{cand}}} + \sum_{\substack{x \in U,\, r : x \in heads(r) \\ s \leq W_r}} \text{reason}_{x,r} \geq 1$$
+$$\sum_{x \in U} \overline{x_{\text{cand}}} + \sum_{r \in \text{external}} \text{reason}_r \geq 1$$
 
 This is a simple disjunctive clause: either at least one atom in $U$ is false, or at least one external support rule is active at the appropriate level. The constraint only forces external support when ALL atoms in U would otherwise be true.
 
