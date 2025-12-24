@@ -31,6 +31,16 @@ pub type Clause = Vec<Lit>;
 /// A PB constraint: sum of (lit * weight) >= bound.
 pub type PBConstraint = (Vec<(Lit, Weight)>, Weight);
 
+/// Normalize PB terms by combining duplicate literals.
+/// Returns a new Vec with each literal appearing at most once, weights summed.
+fn normalize_pb_terms(terms: Vec<(Lit, Weight)>) -> Vec<(Lit, Weight)> {
+    let mut combined: HashMap<Lit, Weight> = HashMap::new();
+    for (lit, weight) in terms {
+        *combined.entry(lit).or_insert(0) += weight;
+    }
+    combined.into_iter().collect()
+}
+
 /// Per-rule info for variable layout.
 #[derive(Debug, Clone)]
 struct RuleInfo {
@@ -404,7 +414,7 @@ fn encode_choice_rule(
             };
             constraint1_terms.push((cdcl_lit, lit.weight));
         }
-        cand_pb_constraints.push((constraint1_terms, falsification_weight));
+        cand_pb_constraints.push((normalize_pb_terms(constraint1_terms), falsification_weight));
     }
 
     // Constraint 2 (body falsification when inactive) - at each level s:
@@ -421,7 +431,7 @@ fn encode_choice_rule(
             };
             constraint2_terms.push((cdcl_lit, lit.weight));
         }
-        cand_pb_constraints.push((constraint2_terms, level));
+        cand_pb_constraints.push((normalize_pb_terms(constraint2_terms), level));
     }
 
     // NOTE: No Constraint 3 - heads are OPTIONAL in choice rules
@@ -442,7 +452,7 @@ fn encode_choice_rule(
         };
         constraint7_terms.push((cdcl_lit, lit.weight));
     }
-    check_pb_constraints.push((constraint7_terms, falsification_weight));
+    check_pb_constraints.push((normalize_pb_terms(constraint7_terms), falsification_weight));
 
     // Constraint 8 (reduct body falsification):
     // t_r · ¬active_r_check + Σ w_i · b_i_check + Σ u_j · ¬c_j_cand >= t_r
@@ -456,7 +466,7 @@ fn encode_choice_rule(
         };
         constraint8_terms.push((cdcl_lit, lit.weight));
     }
-    check_pb_constraints.push((constraint8_terms, bound));
+    check_pb_constraints.push((normalize_pb_terms(constraint8_terms), bound));
 
     // Constraint 11 (reduct head propagation): ¬h_cand ∨ h_check ∨ ¬active_r_check (for each head)
     for &head in &rule.heads {
@@ -518,7 +528,7 @@ fn encode_disjunctive_rule(
             };
             constraint1_terms.push((cdcl_lit, lit.weight));
         }
-        cand_pb_constraints.push((constraint1_terms, falsification_weight));
+        cand_pb_constraints.push((normalize_pb_terms(constraint1_terms), falsification_weight));
     }
 
     // Constraint 2 (body falsification when inactive) - at each level s:
@@ -535,7 +545,7 @@ fn encode_disjunctive_rule(
             };
             constraint2_terms.push((cdcl_lit, lit.weight));
         }
-        cand_pb_constraints.push((constraint2_terms, level));
+        cand_pb_constraints.push((normalize_pb_terms(constraint2_terms), level));
     }
 
     // Constraint 3 (head requirement) - base level: Σ h_cand + ¬active_r_cand >= 1
@@ -565,7 +575,7 @@ fn encode_disjunctive_rule(
         };
         constraint7_terms.push((cdcl_lit, lit.weight));
     }
-    check_pb_constraints.push((constraint7_terms, falsification_weight));
+    check_pb_constraints.push((normalize_pb_terms(constraint7_terms), falsification_weight));
 
     // Constraint 8 (reduct body falsification):
     // t_r · ¬active_r_check + Σ w_i · b_i_check + Σ u_j · ¬c_j_cand >= t_r
@@ -579,7 +589,7 @@ fn encode_disjunctive_rule(
         };
         constraint8_terms.push((cdcl_lit, lit.weight));
     }
-    check_pb_constraints.push((constraint8_terms, bound));
+    check_pb_constraints.push((normalize_pb_terms(constraint8_terms), bound));
 
     // Constraint 10 (reduct head implication): Σ h_check + ¬active_r_check >= 1
     // For integrity constraints (empty heads), this is just ¬active_r_check >= 1

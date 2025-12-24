@@ -648,6 +648,41 @@ mod tests {
     }
 
     #[test]
+    fn test_self_loop_rule() {
+        // Program:
+        //   {a}.
+        //   b :- a.
+        //   c :- a.
+        //   d :- b, c.
+        //   d :- d, d.  % Self-loop
+        //   :- not d, a.
+        //
+        // Two stable models: {} and {a, b, c, d}
+        //
+        // From gringo --output=smodels:
+        // 3 1 2 0 0      -> {a}.
+        // 1 3 1 0 2      -> b :- a
+        // 1 4 1 0 2      -> c :- a
+        // 1 5 2 0 3 4    -> d :- b, c
+        // 1 5 2 0 5 5    -> d :- d, d
+        // 1 1 2 1 5 2    -> :- not d, a
+        // Symbols: 2=a, 5=d
+        let input = "3 1 2 0 0\n1 3 1 0 2\n1 4 1 0 2\n1 5 2 0 3 4\n1 5 2 0 5 5\n1 1 2 1 5 2\n0\n2 a\n5 d\n0\n";
+        let results = solve_asp(input);
+        assert_eq!(results.len(), 2, "Expected 2 models but got: {:?}", results);
+        assert!(
+            results.iter().any(|m| m.is_empty()),
+            "Expected empty model but got: {:?}",
+            results
+        );
+        assert!(
+            results.iter().any(|m| m == &vec!["a", "d"]),
+            "Expected {{a, d}} but got: {:?}",
+            results
+        );
+    }
+
+    #[test]
     fn test_loop_constraint_should_be_added_not_blocked() {
         // Program:
         //   a :- {b, c} >= 1.
