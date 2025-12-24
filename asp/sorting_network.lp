@@ -20,9 +20,9 @@ touched(L, W) :- right(L, W).
 
 connected(L, I, J) :- comp(L, I, J).
 connected(L, I, J) :- connected(L-1, I, J); layer(L).
-connected(L, I, K) :- connected(L, I, W); connected(L, W, K).
-connected(L, I, K) :- connected(L, W, I); connected(L, W, K).
-connected(L, I, K) :- connected(L, I, W); connected(L, K, W).
+connected(L, I, J) :- connected(L, I, W); connected(L, W, J).
+connected(L, I, J) :- connected(L, W, I); connected(L, W, J); I < J.
+connected(L, I, J) :- connected(L, I, W); connected(L, J, W); I < J.
 :- connected(L, I, J); not connected(L, I, W); wire(W); I < W; W < J.
 :- connected(L, I, J); not connected(L, W, J); wire(W); I < W; W < J.
 
