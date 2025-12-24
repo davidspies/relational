@@ -123,7 +123,11 @@ impl AspSolver {
     where
         F: FnMut(AnswerSet),
     {
+        use std::time::Duration;
+        const STATS_INTERVAL: Duration = Duration::from_secs(5);
+
         let start = Instant::now();
+        let mut last_stats = Instant::now();
         let mut count = 0usize;
         let mut cand_calls = 0u64;
         let mut check_calls = 0u64;
@@ -133,6 +137,19 @@ impl AspSolver {
             // NECESSARY: limit=0 means unlimited, limit>0 means stop after that many
             if limit > 0 && count >= limit {
                 break;
+            }
+
+            // Periodic stats for long solves
+            if last_stats.elapsed() >= STATS_INTERVAL {
+                eprintln!(
+                    "c asp: {:.1}s models={} cand={} check={} loops={}",
+                    start.elapsed().as_secs_f64(),
+                    count,
+                    cand_calls,
+                    check_calls,
+                    loop_constraints
+                );
+                last_stats = Instant::now();
             }
 
             // Step 1: Solve candidate to find a candidate answer set

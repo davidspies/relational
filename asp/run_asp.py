@@ -168,12 +168,12 @@ def run_solver(
         stderr=subprocess.PIPE,
     )
 
-    # Run our solver
+    # Run our solver (inherit stderr for real-time stats)
     solver = subprocess.Popen(
         [str(asp_bin), str(limit)],
         stdin=gringo.stdout,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=None,  # Inherit stderr
         text=True,
     )
     gringo.stdout.close()
@@ -200,11 +200,6 @@ def run_solver(
             if match:
                 atoms = match.group(1).split() if match.group(1).strip() else []
                 answer_sets.append(atoms)
-
-    # Print stderr from solver
-    stderr = solver.stderr.read()
-    if stderr:
-        sys.stderr.write(stderr)
 
     solver.wait()
     gringo.wait()

@@ -613,21 +613,16 @@ pub fn generate_loop_constraint<R: rand::Rng>(
 ) -> PBConstraint {
     let u_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
 
-    let mut terms: Vec<(Lit, Weight)> = Vec::new();
+    // Collect reason literals and overlap atoms
+    let mut reason_terms: Vec<Lit> = Vec::new();
     let mut seen_reasons: std::collections::HashSet<Lit> = std::collections::HashSet::new();
-
-    // Add UFS atoms with weight 1 each
-    // If no reason is true, we need all k atoms to be false
-    for &atom in unfounded_set {
-        terms.push((Lit::neg(layout.cand(atom)), 1));
-    }
+    let mut overlap_atoms: std::collections::HashSet<Atom> = std::collections::HashSet::new();
 
     // Track which (rule, level) pairs we've already added
     let mut added_rule_levels: std::collections::HashSet<(u32, Weight)> =
         std::collections::HashSet::new();
 
     // Find external support for ANY atom in the UFS
-    // Reason literals have weight k, so if ANY is true → constraint satisfied
     for &atom in unfounded_set {
         for entry in layout.rules_for_head(atom) {
             let rule = &program.rules[entry.rule_idx as usize];
@@ -636,7 +631,13 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                 Rule::Disjunctive(r) => (&r.heads, &r.body, r.bound),
             };
 
-            // Calculate overlap_weight: sum of weights for positive body atoms in UFS
+            // Calculate overlap: positive body atoms in UFS
+            let overlap_body_atoms: Vec<Atom> = body
+                .iter()
+                .filter(|lit| lit.positive && u_set.contains(&lit.atom))
+                .map(|lit| lit.atom)
+                .collect();
+
             let overlap_weight: Weight = body
                 .iter()
                 .filter(|lit| lit.positive && u_set.contains(&lit.atom))
@@ -647,28 +648,31 @@ pub fn generate_loop_constraint<R: rand::Rng>(
             let level = bound + overlap_weight;
             let sum_weights = layout.sum_weights(entry.rule_idx);
 
-            // Step 1: If s > W_r, rule cannot provide external support (skip)
+            // If s > W_r, rule cannot provide external support (skip, do NOT add to O)
             if level > sum_weights {
                 continue;
             }
 
-            // Step 2: Check if active_{r,s,cand} is NOT true (false or unassigned)
-            // Since constraints are bidirectional, active is true iff body weight sum >= s
+            // Check if active_{r,s,cand} is NOT true (false or unassigned)
             let active_var = layout.active_cand(entry.rule_idx, level);
             let active_is_true = assignment.contains(&Lit::pos(active_var));
 
             if !active_is_true {
-                // Body isn't satisfied at this level (or unassigned during init) - add active as reason
+                // Body isn't satisfied - add active as reason AND add overlap atoms to O
                 if added_rule_levels.insert((entry.rule_idx, level)) {
                     let reason = Lit::pos(active_var);
                     if seen_reasons.insert(reason) {
-                        terms.push((reason, 1));
+                        reason_terms.push(reason);
+                    }
+                    // Add overlap atoms to O (only when reason is active variable)
+                    for &overlap_atom in &overlap_body_atoms {
+                        overlap_atoms.insert(overlap_atom);
                     }
                 }
                 continue;
             }
 
-            // Step 3: active is true - rule provides external support
+            // active is true - rule provides external support
             // For choice rules, this means U is not unfounded
             let stealing_heads: Vec<Atom> = if entry.is_choice {
                 vec![]
@@ -697,20 +701,39 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                 );
             }
 
-            // Select one stealing head at random
+            // Select one stealing head at random (do NOT add to O)
             let idx = rng.random_range(0..stealing_heads.len());
             let stealing_head = stealing_heads[idx];
             let reason = Lit::neg(layout.cand(stealing_head));
             if seen_reasons.insert(reason) {
-                terms.push((reason, 1));
+                reason_terms.push(reason);
             }
         }
     }
 
-    // If no external support exists, the constraint is:
-    // ¬a1 + ... + ¬ak >= k (all UFS atoms must be false)
-    // This is valid for pure self-loops like "a :- b. b :- a."
-    (terms, 1)
+    // Build the final constraint based on whether O is empty
+    if !overlap_atoms.is_empty() {
+        // O ≠ ∅: sum(¬x for x in O) + sum(reason_r) >= 1
+        let mut terms: Vec<(Lit, Weight)> = Vec::new();
+        for &atom in &overlap_atoms {
+            terms.push((Lit::neg(layout.cand(atom)), 1));
+        }
+        for reason in reason_terms {
+            terms.push((reason, 1));
+        }
+        (terms, 1)
+    } else {
+        // O = ∅: sum(¬x for x in U) + sum(n * reason_r) >= n
+        let n = unfounded_set.len() as Weight;
+        let mut terms: Vec<(Lit, Weight)> = Vec::new();
+        for &atom in unfounded_set {
+            terms.push((Lit::neg(layout.cand(atom)), 1));
+        }
+        for reason in reason_terms {
+            terms.push((reason, n));
+        }
+        (terms, n)
+    }
 }
 
 #[cfg(test)]
@@ -825,13 +848,13 @@ mod tests {
         //   b :- a.
         //   {c}.
         //
-        // With UFS = {a, b, aux} (atoms 2, 3, 4), the cardinality rule should
-        // provide external support because c (atom 5) is NOT in UFS and
-        // c alone satisfies the bound (weight 1 >= 1).
+        // With UFS = {a, b, aux} = {Atom(5), Atom(3), Atom(2)}:
+        // - Rule 0 (aux :- {c, b} >= 1): overlap = {b}, level = 1+1=2 <= W_r=2, adds active and b to O
+        // - Rule 1 (a :- aux): overlap = {aux}, level = 1+1=2 > W_r=1, SKIPPED
+        // - Rule 2 (b :- a): overlap = {a}, level = 1+1=2 > W_r=1, SKIPPED
         //
-        // Bug: current code checks "any positive body atom in UFS" which is true (b is there),
-        // so it incorrectly marks the rule as INTERNAL.
-        // Fix: should check "can body be satisfied without UFS atoms" which is YES (c alone works).
+        // Result: O = {b}, one reason (active_{0,2})
+        // Constraint: ¬b + active_{0,2} >= 1
 
         let program = make_program(
             vec![
@@ -886,12 +909,22 @@ mod tests {
             &mut rng,
         );
 
+        // O = {b} (only rule 0 contributes), plus one reason term
+        // Constraint: ¬b + active_{0,2} >= 1
         assert_eq!(bound, 1);
-        assert!(
-            terms.len() > unfounded_set.len(),
-            "Expected external support for cardinality rule, but got only {} term(s): {:?}",
+        assert_eq!(
             terms.len(),
+            2,
+            "Expected 2 terms (1 overlap atom + 1 reason), got {:?}",
             terms
         );
+
+        // Verify we have the overlap atom (¬b = Lit::neg(Var(3)))
+        let has_neg_b = terms.iter().any(|(lit, _)| *lit == Lit::neg(layout.cand(Atom(3))));
+        assert!(has_neg_b, "Expected ¬b in terms, got {:?}", terms);
+
+        // Verify we have the active variable reason
+        let has_active = terms.iter().any(|(lit, _)| lit.is_positive());
+        assert!(has_active, "Expected active variable in terms, got {:?}", terms);
     }
 }

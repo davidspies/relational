@@ -4,3 +4,6 @@
 [submodule "vendor/clasp"]
 	path = vendor/clasp
 	url = https://github.com/potassco/clasp.git
+[submodule "vendor/clingo"]
+	path = vendor/clingo
+	url = git@github.com:potassco/clingo.git
