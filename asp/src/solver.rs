@@ -80,6 +80,10 @@ impl AspSolver {
         let mut check_calls = 0u64;
         let mut loop_constraints_added = 0u64;
 
+        // Timing metrics
+        let mut cand_solve_time = Duration::ZERO;
+        let mut check_solve_time = Duration::ZERO;
+
         // Create both solvers once
         let mut cand_solver = self.create_cand_solver();
         let mut check_solver = self.create_check_solver();
@@ -92,19 +96,27 @@ impl AspSolver {
 
             // Periodic stats for long solves
             if last_stats.elapsed() >= STATS_INTERVAL {
+                let total = start.elapsed();
+                let rs_time = cand_solve_time + check_solve_time;
                 eprintln!(
-                    "c asp: {:.1}s models={} cand={} check={} loops={}",
-                    start.elapsed().as_secs_f64(),
+                    "c asp: {:.1}s models={} cand={} check={} loops={} | roundingsat={:.1}s ({:.0}%) other={:.1}s ({:.0}%)",
+                    total.as_secs_f64(),
                     count,
                     cand_calls,
                     check_calls,
-                    loop_constraints_added
+                    loop_constraints_added,
+                    rs_time.as_secs_f64(),
+                    100.0 * rs_time.as_secs_f64() / total.as_secs_f64(),
+                    (total - rs_time).as_secs_f64(),
+                    100.0 * (total - rs_time).as_secs_f64() / total.as_secs_f64(),
                 );
                 last_stats = Instant::now();
             }
 
             // Step 1: Solve candidate solver
+            let solve_start = Instant::now();
             let result = cand_solver.solve();
+            cand_solve_time += solve_start.elapsed();
             cand_calls += 1;
 
             if result != SolveResult::Sat {
@@ -115,7 +127,12 @@ impl AspSolver {
             let cand_assignment = self.extract_cand_assignment(&cand_solver);
 
             // Step 2: Check if this candidate is a stable model
-            match self.check_minimality(&cand_assignment, &mut check_solver, &mut check_calls) {
+            match self.check_minimality(
+                &cand_assignment,
+                &mut check_solver,
+                &mut check_calls,
+                &mut check_solve_time,
+            ) {
                 MinimalityResult::IsMinimal => {
                     // Found a stable model!
                     let answer_set = self.extract_answer_set(&cand_assignment);
@@ -159,13 +176,24 @@ impl AspSolver {
             }
         }
 
+        let total = start.elapsed();
+        let rs_time = cand_solve_time + check_solve_time;
         eprintln!(
             "c asp: {:.3}s models={} cand_calls={} check_calls={} loop_constraints={}",
-            start.elapsed().as_secs_f64(),
+            total.as_secs_f64(),
             count,
             cand_calls,
             check_calls,
-            loop_constraints_added
+            loop_constraints_added,
+        );
+        eprintln!(
+            "c timing: roundingsat={:.3}s ({:.1}%) cand={:.3}s check={:.3}s | other={:.3}s ({:.1}%)",
+            rs_time.as_secs_f64(),
+            100.0 * rs_time.as_secs_f64() / total.as_secs_f64(),
+            cand_solve_time.as_secs_f64(),
+            check_solve_time.as_secs_f64(),
+            (total - rs_time).as_secs_f64(),
+            100.0 * (total - rs_time).as_secs_f64() / total.as_secs_f64(),
         );
     }
 
@@ -248,6 +276,7 @@ impl AspSolver {
         cand_assignment: &HashMap<Var, bool>,
         check_solver: &mut Solver,
         check_calls: &mut u64,
+        check_solve_time: &mut std::time::Duration,
     ) -> MinimalityResult {
         // Set candidate assignment as assumptions
         let assumptions: Vec<i32> = cand_assignment
@@ -258,7 +287,9 @@ impl AspSolver {
             .set_assumptions(&assumptions)
             .expect("Invalid assumption");
 
+        let solve_start = Instant::now();
         let result = check_solver.solve();
+        *check_solve_time += solve_start.elapsed();
         *check_calls += 1;
 
         // Clear assumptions for next call

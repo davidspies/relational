@@ -2,3 +2,4 @@
 /bin
 /cnf_benchmarks
 /solve_output
+__pycache__

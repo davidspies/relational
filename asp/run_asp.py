@@ -49,16 +49,23 @@ def generate_constraints(atoms_true: list[str], atoms_false: list[str]) -> str:
 
 
 def verify_with_clasp(
-    original_program: str, atoms_true: list[str], all_atoms: set[str]
+    original_program: str,
+    atoms_true: list[str],
+    all_atoms: set[str],
+    constants: list[str],
 ) -> bool:
     """Verify the solution using clasp."""
     atoms_false = [a for a in all_atoms if a not in atoms_true]
     constraints = generate_constraints(atoms_true, atoms_false)
     combined = original_program + "\n" + constraints
 
+    gringo_cmd = ["gringo"]
+    for c in constants:
+        gringo_cmd.extend(["-c", c])
+
     try:
         gringo = subprocess.run(
-            ["gringo"],
+            gringo_cmd,
             input=combined,
             capture_output=True,
             text=True,
@@ -84,12 +91,17 @@ def verify_with_clasp(
         return False
 
 
-def verify_unsat(original_program: str) -> bool:
+def verify_unsat(original_program: str, constants: list[str]) -> bool:
     """Verify UNSAT result with clasp."""
     print("Our solver returned UNSATISFIABLE, verifying with clasp...")
+
+    gringo_cmd = ["gringo"]
+    for c in constants:
+        gringo_cmd.extend(["-c", c])
+
     try:
         gringo = subprocess.run(
-            ["gringo"],
+            gringo_cmd,
             input=original_program,
             capture_output=True,
             text=True,
@@ -114,12 +126,16 @@ def verify_unsat(original_program: str) -> bool:
 
 
 def verify_answer_sets(
-    original_program: str, answer_sets: list[list[str]]
+    original_program: str, answer_sets: list[list[str]], constants: list[str]
 ) -> bool:
     """Verify all answer sets are valid."""
+    gringo_cmd = ["gringo", "--output=smodels"]
+    for c in constants:
+        gringo_cmd.extend(["-c", c])
+
     try:
         gringo = subprocess.run(
-            ["gringo", "--output=smodels"],
+            gringo_cmd,
             input=original_program,
             capture_output=True,
             text=True,
@@ -135,7 +151,7 @@ def verify_answer_sets(
     all_valid = True
     for i, atoms_true in enumerate(answer_sets):
         print(f"\nVerifying answer set {i+1}: {len(atoms_true)} atoms")
-        if verify_with_clasp(original_program, atoms_true, all_atoms):
+        if verify_with_clasp(original_program, atoms_true, all_atoms, constants):
             print(f"  Answer set {i+1}: VALID")
         else:
             print(f"  Answer set {i+1}: INVALID")
@@ -152,6 +168,7 @@ def run_solver(
     asp_bin: Path,
     limit: int,
     program_files: list[str],
+    constants: list[str],
     verify: bool,
 ) -> int:
     """Run gringo | asp solver, streaming output. Returns exit code."""
@@ -161,9 +178,15 @@ def run_solver(
         with open(f) as fp:
             original_program += fp.read() + "\n"
 
+    # Build gringo command with constants
+    gringo_cmd = ["gringo", "--output=smodels"]
+    for c in constants:
+        gringo_cmd.extend(["-c", c])
+    gringo_cmd.extend(program_files)
+
     # Run gringo
     gringo = subprocess.Popen(
-        ["gringo", "--output=smodels"] + program_files,
+        gringo_cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -213,9 +236,9 @@ def run_solver(
         return 1
 
     if not is_sat:
-        return 0 if verify_unsat(original_program) else 1
+        return 0 if verify_unsat(original_program, constants) else 1
 
-    return 0 if verify_answer_sets(original_program, answer_sets) else 1
+    return 0 if verify_answer_sets(original_program, answer_sets, constants) else 1
 
 
 def main():
@@ -232,6 +255,13 @@ def main():
         "--no-verify",
         action="store_true",
         help="Skip verification with clasp",
+    )
+    parser.add_argument(
+        "-c",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Define constant for gringo (can be repeated)",
     )
     parser.add_argument(
         "files",
@@ -252,6 +282,7 @@ def main():
         asp_bin,
         args.n,
         args.files,
+        args.c,
         verify=not args.no_verify,
     )
     sys.exit(exit_code)
