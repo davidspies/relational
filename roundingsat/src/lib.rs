@@ -24,9 +24,12 @@
 //! assert!(count >= 2);
 //! ```
 
+use std::marker::PhantomData;
+
 use roundingsat_sys::{
     rs_add_clause, rs_add_pb_constraint, rs_clear_assumptions, rs_free, rs_get_num_vars,
-    rs_get_value, rs_new, rs_set_assumptions, rs_set_num_vars, rs_solve, RsResult, RsSolver,
+    rs_get_value, rs_new, rs_set_assumptions, rs_set_num_vars, rs_set_solution_callback, rs_solve,
+    RsResult, RsSolver, RsViolatedConstraint,
 };
 
 /// Result of a solve operation.
@@ -49,6 +52,10 @@ impl From<RsResult> for SolveResult {
             RsResult::Unsat => SolveResult::Unsat,
             RsResult::Inconsistent => SolveResult::Inconsistent,
             RsResult::Unknown => SolveResult::Unknown,
+            RsResult::CallbackError => {
+                // This should already be caught by solve(), but panic here as a fallback
+                panic!("Callback error: constraint returned was not violated")
+            }
         }
     }
 }
@@ -91,6 +98,44 @@ impl std::fmt::Display for SolverError {
 
 impl std::error::Error for SolverError {}
 
+/// A violated constraint to be learned by the solver.
+/// Represents: sum(coefs[i] * lits[i]) >= rhs
+#[derive(Debug, Clone)]
+pub struct ViolatedConstraint {
+    pub lits: Vec<i32>,
+    pub coefs: Vec<i32>,
+    pub rhs: i64,
+}
+
+/// Read-only view of the current variable assignment.
+/// Passed to the solution callback to query variable values.
+pub struct Assignment<'a> {
+    ptr: *mut RsSolver,
+    _marker: PhantomData<&'a ()>,
+}
+
+impl Assignment<'_> {
+    /// Get the value of a variable in the current assignment.
+    pub fn get_value(&self, var: i32) -> Option<bool> {
+        let result = unsafe { rs_get_value(self.ptr, var) };
+        match result {
+            1 => Some(true),
+            0 => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Get the number of variables.
+    pub fn num_vars(&self) -> i32 {
+        unsafe { rs_get_num_vars(self.ptr) }
+    }
+}
+
+/// Callback type for solution checking.
+/// Returns `Some(constraint)` to reject the solution and continue searching,
+/// or `None` to accept the solution.
+type SolutionCallbackBox = Box<dyn FnMut(&Assignment) -> Option<ViolatedConstraint>>;
+
 /// A pseudo-boolean constraint solver.
 ///
 /// Variables are represented as positive integers (1, 2, 3, ...).
@@ -98,6 +143,12 @@ impl std::error::Error for SolverError {}
 /// and negative means the variable is false.
 pub struct Solver {
     ptr: *mut RsSolver,
+    /// Stored callback closure (must stay alive while solver uses it)
+    callback: Option<Box<SolutionCallbackBox>>,
+    /// Storage for the violated constraint returned by callback
+    violated_storage: Option<ViolatedConstraint>,
+    /// Storage for the FFI struct (avoids allocation each callback)
+    violated_ffi: RsViolatedConstraint,
 }
 
 // Safety: RsSolver instances are independent and don't share mutable state
@@ -111,7 +162,17 @@ impl Solver {
         if ptr.is_null() {
             Err(SolverError::CreationFailed)
         } else {
-            Ok(Self { ptr })
+            Ok(Self {
+                ptr,
+                callback: None,
+                violated_storage: None,
+                violated_ffi: RsViolatedConstraint {
+                    n: 0,
+                    lits: std::ptr::null(),
+                    coefs: std::ptr::null(),
+                    rhs: 0,
+                },
+            })
         }
     }
 
@@ -216,8 +277,21 @@ impl Solver {
     /// Solves the current problem.
     ///
     /// Returns the result of the solve operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the solution callback returns a constraint that is not actually
+    /// violated under the current assignment. This indicates a bug in the callback.
     pub fn solve(&mut self) -> SolveResult {
-        unsafe { rs_solve(self.ptr) }.into()
+        let result = unsafe { rs_solve(self.ptr) };
+        if result == RsResult::CallbackError {
+            panic!(
+                "Solution callback returned a constraint that is not violated \
+                under the current assignment. The constraint must have negative \
+                slack (sum of satisfied terms < rhs) to be valid."
+            );
+        }
+        result.into()
     }
 
     /// Gets the value of a variable in the solution.
@@ -257,6 +331,81 @@ impl Solver {
             }
         }
         Some(model)
+    }
+
+    /// Sets a callback to be invoked when a solution is found during solving.
+    ///
+    /// The callback receives a read-only `Assignment` to query variable values.
+    /// Return `Some(constraint)` to reject the solution and continue searching.
+    /// Return `None` to accept the solution (solver returns SAT).
+    ///
+    /// The callback will be called during `solve()`. If it returns a violated
+    /// constraint, the solver performs conflict analysis and backtracks instead
+    /// of returning SAT.
+    pub fn set_solution_callback<F>(&mut self, callback: F)
+    where
+        F: FnMut(&Assignment) -> Option<ViolatedConstraint> + 'static,
+    {
+        self.callback = Some(Box::new(Box::new(callback)));
+        // Set up the C callback trampoline
+        unsafe {
+            rs_set_solution_callback(
+                self.ptr,
+                Some(solution_callback_trampoline),
+                self as *mut Solver as *mut std::ffi::c_void,
+            );
+        }
+    }
+
+    /// Clears the solution callback.
+    pub fn clear_solution_callback(&mut self) {
+        unsafe {
+            rs_set_solution_callback(self.ptr, None, std::ptr::null_mut());
+        }
+        self.callback = None;
+        self.violated_storage = None;
+    }
+
+}
+
+/// FFI trampoline for solution callback.
+/// Called from C++ when a solution is found.
+unsafe extern "C" fn solution_callback_trampoline(
+    solver_ptr: *mut RsSolver,
+    user_data: *mut std::ffi::c_void,
+) -> *mut RsViolatedConstraint {
+    // SAFETY: user_data is a valid pointer to a Solver set up by set_solution_callback
+    let solver = unsafe { &mut *(user_data as *mut Solver) };
+
+    // Create an Assignment view for the callback
+    let assignment = Assignment {
+        ptr: solver_ptr,
+        _marker: PhantomData,
+    };
+
+    // Call the Rust callback
+    let result = if let Some(callback) = &mut solver.callback {
+        callback(&assignment)
+    } else {
+        None
+    };
+
+    match result {
+        None => std::ptr::null_mut(),
+        Some(violated) => {
+            // Store the constraint in the solver so it outlives this function
+            solver.violated_storage = Some(violated);
+            let stored = solver.violated_storage.as_ref().unwrap();
+
+            // Update the FFI struct to point to our stored data
+            solver.violated_ffi.n = stored.lits.len();
+            solver.violated_ffi.lits = stored.lits.as_ptr();
+            solver.violated_ffi.coefs = stored.coefs.as_ptr();
+            solver.violated_ffi.rhs = stored.rhs;
+
+            // Return a pointer to our stored FFI struct
+            &mut solver.violated_ffi as *mut RsViolatedConstraint
+        }
     }
 }
 
@@ -472,5 +621,129 @@ mod tests {
             solver.add_clause(&[2]).unwrap();
             assert_eq!(solver.solve(), SolveResult::Sat);
         }
+    }
+
+    #[test]
+    fn test_solution_callback_rejects_solution() {
+        // Problem: x1 AND x2 (both must be true)
+        // Only solution: (1,1)
+        // Callback will reject (1,1), so result should be UNSAT
+        // Then we'll test with a problem that has two solutions where one is rejected
+
+        let mut solver = Solver::new().unwrap();
+        solver.set_num_vars(2);
+
+        // XOR: exactly one of x1, x2 must be true
+        // Solutions: (1,0) and (0,1)
+        solver.add_clause(&[1, 2]).unwrap(); // x1 OR x2
+        solver.add_clause(&[-1, -2]).unwrap(); // NOT x1 OR NOT x2
+
+        // Callback rejects (1,0) by adding constraint: -x1 OR x2 (i.e., x1 implies x2)
+        solver.set_solution_callback(move |assignment: &Assignment| {
+            let x1 = assignment.get_value(1).unwrap();
+            let x2 = assignment.get_value(2).unwrap();
+
+            if x1 && !x2 {
+                // Reject (1,0) - return constraint: -x1 + x2 >= 1
+                // This means if x1 is true, x2 must be true
+                Some(ViolatedConstraint {
+                    lits: vec![-1, 2],
+                    coefs: vec![1, 1],
+                    rhs: 1,
+                })
+            } else {
+                // Accept this solution
+                None
+            }
+        });
+
+        let result = solver.solve();
+        assert_eq!(result, SolveResult::Sat);
+
+        // The only remaining solution is (0,1)
+        let x1 = solver.get_value(1).unwrap();
+        let x2 = solver.get_value(2).unwrap();
+        assert!(!x1 && x2, "Expected (0,1) but got ({}, {})", x1, x2);
+    }
+
+    #[test]
+    fn test_solution_callback_all_rejected_is_unsat() {
+        // Problem: x1 (just one solution: x1=true)
+        // Callback rejects x1=true, so no valid solutions exist
+
+        let mut solver = Solver::new().unwrap();
+        solver.set_num_vars(1);
+        solver.add_clause(&[1]).unwrap(); // x1 must be true
+
+        solver.set_solution_callback(|assignment: &Assignment| {
+            let x1 = assignment.get_value(1).unwrap();
+            if x1 {
+                // Reject x1=true by saying x1 must be false: -x1 >= 1
+                Some(ViolatedConstraint {
+                    lits: vec![-1],
+                    coefs: vec![1],
+                    rhs: 1,
+                })
+            } else {
+                None
+            }
+        });
+
+        let result = solver.solve();
+        // Should be UNSAT because we require x1=true but callback rejects it
+        assert_eq!(result, SolveResult::Unsat);
+    }
+
+    #[test]
+    fn test_clear_solution_callback() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let mut solver = Solver::new().unwrap();
+        solver.set_num_vars(1);
+        solver.add_clause(&[1]).unwrap();
+
+        let call_count = Rc::new(Cell::new(0));
+        let call_count_clone = call_count.clone();
+
+        solver.set_solution_callback(move |_: &Assignment| {
+            call_count_clone.set(call_count_clone.get() + 1);
+            None // Accept all solutions
+        });
+
+        // First solve - callback should be called
+        solver.solve();
+        assert_eq!(call_count.get(), 1);
+
+        // Clear callback
+        solver.clear_solution_callback();
+
+        // Second solve - callback should NOT be called
+        solver.solve();
+        assert_eq!(call_count.get(), 1); // Still 1, not 2
+    }
+
+    #[test]
+    #[should_panic(expected = "not violated")]
+    fn test_callback_error_on_invalid_constraint() {
+        // If callback returns a constraint that's not actually violated,
+        // the solver should panic.
+
+        let mut solver = Solver::new().unwrap();
+        solver.set_num_vars(1);
+        solver.add_clause(&[1]).unwrap(); // x1 must be true
+
+        solver.set_solution_callback(|_: &Assignment| {
+            // Return a constraint that's ALREADY SATISFIED: x1 >= 1
+            // Since x1=true, this is satisfied, not violated!
+            Some(ViolatedConstraint {
+                lits: vec![1],
+                coefs: vec![1],
+                rhs: 1,
+            })
+        });
+
+        // This should panic because the constraint is not violated
+        solver.solve();
     }
 }

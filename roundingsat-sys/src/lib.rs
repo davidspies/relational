@@ -16,7 +16,24 @@ pub enum RsResult {
     Unsat = 1,
     Inconsistent = 2,
     Unknown = 3,
+    CallbackError = 4,
 }
+
+/// Violated constraint returned by solution callback.
+/// Represents: sum(coefs[i] * lits[i]) >= rhs
+#[repr(C)]
+pub struct RsViolatedConstraint {
+    pub n: usize,
+    pub lits: *const i32,
+    pub coefs: *const i32,
+    pub rhs: i64,
+}
+
+/// Solution callback function type.
+/// Called when a solution is found during solving.
+/// Returns NULL to accept the solution, or pointer to violated constraint.
+pub type RsSolutionCallback =
+    Option<unsafe extern "C" fn(solver: *mut RsSolver, user_data: *mut std::ffi::c_void) -> *mut RsViolatedConstraint>;
 
 unsafe extern "C" {
     /// Create a new solver instance.
@@ -57,6 +74,14 @@ unsafe extern "C" {
 
     /// Get number of variables.
     pub fn rs_get_num_vars(solver: *mut RsSolver) -> i32;
+
+    /// Set a callback to be invoked when a solution is found.
+    /// The callback can return a violated constraint to reject the solution.
+    pub fn rs_set_solution_callback(
+        solver: *mut RsSolver,
+        callback: RsSolutionCallback,
+        user_data: *mut std::ffi::c_void,
+    );
 }
 
 #[cfg(test)]
