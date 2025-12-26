@@ -227,6 +227,11 @@ def run_solver(
     solver.wait()
     gringo.wait()
 
+    # Check if solver crashed/panicked
+    if solver.returncode != 0:
+        print(f"Solver exited with code {solver.returncode}", file=sys.stderr)
+        return solver.returncode
+
     if not verify:
         return 0
 
