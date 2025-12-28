@@ -9,7 +9,7 @@ use clap::Parser;
 #[command(name = "asp", about = "ASP solver using PB constraints")]
 struct Args {
     /// Number of solutions to find (0 = all solutions)
-    #[arg(short = 'n', default_value = "1")]
+    #[arg(default_value = "1")]
     limit: usize,
 }
 

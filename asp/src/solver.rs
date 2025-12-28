@@ -14,7 +14,7 @@ use std::time::Instant;
 use contiguous_data::HashSet;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
-use roundingsat::{Assignment, SolveResult, Solver, ViolatedConstraint};
+use roundingsat::{Assignment, SolveResult, Solver, SolverError, ViolatedConstraint};
 
 use crate::encoding::{Clause, EncodedProgram, Var, VarLayout, neg, pos};
 use crate::encoding::{encode_program, generate_loop_constraint};
@@ -112,9 +112,14 @@ impl AspSolver {
         let start = Instant::now();
         let mut count = 0usize;
 
-        // Create both solvers
-        let mut cand_solver = self.create_cand_solver();
-        let mut check_solver = self.create_check_solver();
+        // Create candidate solver - if trivially UNSAT, no models exist
+        let Some(mut cand_solver) = self.create_cand_solver() else {
+            eprintln!("c asp: 0.000s models=0 loop_constraints=0 (trivially unsat)");
+            return;
+        };
+
+        // Create check solver - if trivially UNSAT, all candidates are minimal
+        let mut check_solver_opt = self.create_check_solver();
 
         // Clone data for the callback (callback must be 'static)
         let layout = self.encoded.layout.clone();
@@ -175,11 +180,19 @@ impl AspSolver {
                 }
             }
 
+            // If check solver is None, all candidates are minimal (no smaller model can exist)
+            let Some(ref mut check_solver) = check_solver_opt else {
+                return None; // Accept as stable model
+            };
+
             // Set assumptions on check solver
             let assumptions: Vec<i32> = cand_assignment
                 .iter()
                 .map(|(&var, &value)| if value { var } else { -var })
                 .collect();
+
+            // Clone before passing to C++ code (can't trust it won't modify memory)
+            let assumptions_snapshot = assumptions.clone();
 
             check_solver
                 .set_assumptions(&assumptions)
@@ -189,6 +202,19 @@ impl AspSolver {
 
             match result {
                 SolveResult::Sat => {
+                    // VERIFY: Check that assumptions are respected
+                    for &assumption_lit in &assumptions_snapshot {
+                        let var = assumption_lit.abs();
+                        let expected = assumption_lit > 0;
+                        let actual = check_solver.get_value(var);
+                        if actual != Some(expected) {
+                            panic!(
+                                "BUG: Check solver violated assumption! var={} expected={} actual={:?}",
+                                var, expected, actual
+                            );
+                        }
+                    }
+
                     // VERIFY: Check that the check solver's assignment satisfies check constraints
                     let check_lit_is_true = |lit: i32| -> bool {
                         let var = lit.abs();
@@ -269,7 +295,8 @@ impl AspSolver {
                         &unfounded_set,
                         &program,
                         &layout,
-                        &cand_assignment,
+                        |var| cand_assignment.get(&var).copied(),
+                        |var| check_solver.get_value(var),
                         &mut rng,
                         false, // not initial setup - expect variables to be assigned
                         Some(&cand_pb_constraints),
@@ -331,7 +358,8 @@ impl AspSolver {
     }
 
     /// Create the candidate solver with base constraints.
-    fn create_cand_solver(&self) -> Solver {
+    /// Returns None if the problem is trivially UNSAT (no models exist).
+    fn create_cand_solver(&self) -> Option<Solver> {
         let layout = &self.encoded.layout;
         let num_vars = layout.total_vars();
 
@@ -340,22 +368,29 @@ impl AspSolver {
 
         // Add base candidate clauses
         for clause in &self.encoded.cand_clauses {
-            solver.add_clause(clause).unwrap();
+            match solver.add_clause(clause) {
+                Ok(()) => {}
+                Err(SolverError::UnsatAtRoot) => return None,
+                Err(e) => panic!("Failed to add clause: {}", e),
+            }
         }
 
         // Add base candidate PB constraints
         for pb in &self.encoded.cand_pb_constraints {
             let (lits, coefs): (Vec<i32>, Vec<i32>) = pb.terms.iter().copied().unzip();
-            solver
-                .add_pb_constraint(&lits, &coefs, pb.bound as i64)
-                .unwrap();
+            match solver.add_pb_constraint(&lits, &coefs, pb.bound as i64) {
+                Ok(()) => {}
+                Err(SolverError::UnsatAtRoot) => return None,
+                Err(e) => panic!("Failed to add PB constraint: {}", e),
+            }
         }
 
-        solver
+        Some(solver)
     }
 
     /// Create the check solver with base constraints.
-    fn create_check_solver(&self) -> Solver {
+    /// Returns None if trivially UNSAT (no smaller model can exist - all candidates are minimal).
+    fn create_check_solver(&self) -> Option<Solver> {
         let layout = &self.encoded.layout;
         let num_vars = layout.total_vars();
 
@@ -364,18 +399,24 @@ impl AspSolver {
 
         // Add check clauses
         for clause in &self.encoded.check_clauses {
-            solver.add_clause(clause).unwrap();
+            match solver.add_clause(clause) {
+                Ok(()) => {}
+                Err(SolverError::UnsatAtRoot) => return None,
+                Err(e) => panic!("Failed to add check clause: {}", e),
+            }
         }
 
         // Add check PB constraints
         for pb in &self.encoded.check_pb_constraints {
             let (lits, coefs): (Vec<i32>, Vec<i32>) = pb.terms.iter().copied().unzip();
-            solver
-                .add_pb_constraint(&lits, &coefs, pb.bound as i64)
-                .unwrap();
+            match solver.add_pb_constraint(&lits, &coefs, pb.bound as i64) {
+                Ok(()) => {}
+                Err(SolverError::UnsatAtRoot) => return None,
+                Err(e) => panic!("Failed to add check PB constraint: {}", e),
+            }
         }
 
-        solver
+        Some(solver)
     }
 
     /// Extract candidate assignment from solver.

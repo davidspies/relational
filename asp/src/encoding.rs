@@ -422,8 +422,7 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     cand_clauses.push(vec![neg(layout.cand(Atom(1)))]);
 
     // Add single-atom loop constraints for each atom (Constraint 12 initialization)
-    // At initialization, no assignments exist, so use empty HashMap
-    let empty_assignment: HashMap<Var, bool> = HashMap::new();
+    // At initialization, no assignments exist
     let mut rng = StdRng::seed_from_u64(42);
     for atom_id in 2..=layout.num_atoms {
         let atom = Atom(atom_id);
@@ -432,7 +431,8 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
             &[atom],
             program,
             &layout,
-            &empty_assignment,
+            |_| None, // no cand values during initial setup
+            |_| None, // no check values during initial setup
             &mut rng,
             true,
             None, // no constraints available yet during initial setup
@@ -761,17 +761,23 @@ fn encode_disjunctive_rule(
 /// for positive body atoms in U.
 ///
 /// Both choice and non-choice rules use active_r,s_cand at the appropriate level.
-pub fn generate_loop_constraint<R: rand::Rng>(
+pub fn generate_loop_constraint<R, F, G>(
     chosen_atom: Atom,
     unfounded_set: &[Atom],
     program: &Program,
     layout: &VarLayout,
-    assignment: &HashMap<Var, bool>,
+    get_cand_value: F,
+    get_check_value: G,
     rng: &mut R,
     is_initial_setup: bool,
     cand_constraints: Option<&[PBConstraint]>,
     check_constraints: Option<&[PBConstraint]>,
-) -> PBConstraint {
+) -> PBConstraint
+where
+    R: rand::Rng,
+    F: Fn(Var) -> Option<bool>,
+    G: Fn(Var) -> Option<bool>,
+{
     let u_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
 
     // Collect reason literals and overlap atoms
@@ -816,7 +822,7 @@ pub fn generate_loop_constraint<R: rand::Rng>(
 
             // Check if active_{r,s,cand} is true
             let active_var = layout.active_cand(entry.rule_idx, level);
-            let active_is_true = match assignment.get(&active_var).copied() {
+            let active_is_true = match get_cand_value(active_var) {
                 Some(_) if is_initial_setup => {
                     panic!(
                         "BUG: active_var {} is assigned during initial setup (expected unassigned)",
@@ -827,13 +833,8 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                 None if is_initial_setup => false, // During initial setup, unassigned is expected
                 None => {
                     eprintln!(
-                        "BUG: active_var {} not in assignment (rule_idx={}, level={})",
+                        "BUG: active_var {} has no value (rule_idx={}, level={})",
                         active_var, entry.rule_idx, level
-                    );
-                    eprintln!(
-                        "  assignment has {} entries, max key = {:?}",
-                        assignment.len(),
-                        assignment.keys().max()
                     );
                     eprintln!(
                         "  num_atoms={}, num_rules={}",
@@ -872,7 +873,7 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                             return false; // Skip UFS heads
                         }
                         let head_var = layout.cand(head);
-                        match assignment.get(&head_var).copied() {
+                        match get_cand_value(head_var) {
                             Some(_) if is_initial_setup => {
                                 panic!("BUG: head_var {} is assigned during initial setup (expected unassigned)", head_var);
                             }
@@ -901,8 +902,8 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                 for lit in body {
                     let cand_var = layout.cand(lit.atom);
                     let check_var = layout.check(lit.atom);
-                    let cand_val = assignment.get(&cand_var).copied();
-                    let check_val = assignment.get(&check_var).copied();
+                    let cand_val = get_cand_value(cand_var);
+                    let check_val = get_check_value(check_var);
                     eprintln!(
                         "  {} Atom({}) weight {} -> cand_var {}={:?}, check_var {}={:?}, in_ufs={}",
                         if lit.positive { "+" } else { "-" },
@@ -921,8 +922,8 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                 for &head in heads {
                     let cand_var = layout.cand(head);
                     let check_var = layout.check(head);
-                    let cand_val = assignment.get(&cand_var).copied();
-                    let check_val = assignment.get(&check_var).copied();
+                    let cand_val = get_cand_value(cand_var);
+                    let check_val = get_check_value(check_var);
                     eprintln!(
                         "  Atom({}) -> cand_var {}={:?}, check_var {}={:?}, in_ufs={}",
                         head.0,
@@ -948,7 +949,7 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                             eprintln!("  [{}] {} (bound={})", idx, c.kind, c.bound);
                             for &(lit, weight) in &c.terms {
                                 let var = lit.abs();
-                                let val = assignment.get(&var).copied();
+                                let val = get_cand_value(var);
                                 let decoded = layout.decode_var(var as u32);
                                 eprintln!(
                                     "      lit {} (var {} = {:?}) weight {} val={:?}",
@@ -972,7 +973,7 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                             eprintln!("  [{}] {} (bound={})", idx, c.kind, c.bound);
                             for &(lit, weight) in &c.terms {
                                 let var = lit.abs();
-                                let val = assignment.get(&var).copied();
+                                let val = get_check_value(var);
                                 let decoded = layout.decode_var(var as u32);
                                 eprintln!(
                                     "      lit {} (var {} = {:?}) weight {} val={:?}",
@@ -1198,17 +1199,17 @@ mod tests {
         let unfounded_set = vec![Atom(2), Atom(3), Atom(5)];
         let chosen_atom = Atom(2);
 
-        // At test time, use empty assignment (no stealing heads)
-        let empty_assignment: HashMap<Var, bool> = HashMap::new();
+        // At test time, no values assigned (initial setup)
         let mut rng = StdRng::seed_from_u64(42);
         let pb = generate_loop_constraint(
             chosen_atom,
             &unfounded_set,
             &program,
             &layout,
-            &empty_assignment,
+            |_| None,
+            |_| None,
             &mut rng,
-            true, // is_initial_setup - using empty assignment
+            true, // is_initial_setup
             None,
             None,
         );

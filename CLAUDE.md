@@ -19,6 +19,7 @@ If something shouldn't happen, PANIC. A crash with a stack trace is infinitely b
 - Default values that mask logic errors
 - `let _ = ...` or `if let Ok(_) = ...` to discard errors silently
 - `match ... { Ok(x) => use(x), Err(_) => {} }` - either handle the error or propagate it
+- `.is_err()` instead of matching on the specific error variant you expect - be explicit about which errors you're handling
 - `if let Some(x) = map.get(&key)` when the key should always exist - use `map.get(&key).unwrap()` instead so missing keys panic rather than silently skip
 - Silently enforcing invariants instead of asserting them - if something should be true, `assert!` it rather than making it true:
   - `.clear()` on a collection that should already be empty → `assert!(x.is_empty())`

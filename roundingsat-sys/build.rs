@@ -15,7 +15,7 @@ fn main() {
         std::fs::create_dir_all(&build_dir).expect("Failed to create build directory");
 
         let status = Command::new("cmake")
-            .args(["-DCMAKE_BUILD_TYPE=Release", ".."])
+            .args(["-DCMAKE_BUILD_TYPE=RelWithDebInfo", ".."])
             .current_dir(&build_dir)
             .status()
             .expect("Failed to run cmake");
