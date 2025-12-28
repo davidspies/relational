@@ -47,8 +47,98 @@ pub struct HeadEntry {
 /// A clause is a disjunction of literals.
 pub type Clause = Vec<Lit>;
 
-/// A PB constraint: sum of (lit * weight) >= bound.
-pub type PBConstraint = (Vec<(Lit, Weight)>, Weight);
+/// A PB constraint: sum of (lit * weight) >= bound, with classification.
+#[derive(Debug, Clone)]
+pub struct PBConstraint {
+    pub terms: Vec<(Lit, Weight)>,
+    pub bound: Weight,
+    pub kind: ConstraintKind,
+}
+
+/// Classification of constraints from ASP_formalization.md
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintKind {
+    /// Constraint 1: Body Satisfaction (when active) - cand solver
+    Constraint1 { rule_idx: u32, level: Weight },
+    /// Constraint 2: Body Falsification (when inactive) - cand solver
+    Constraint2 { rule_idx: u32, level: Weight },
+    /// Constraint 3: Head Requirement (non-choice rules only) - cand solver
+    Constraint3 { rule_idx: u32 },
+    /// Constraint 4: Subset Relationship - check solver
+    Constraint4 { atom: u32 },
+    /// Constraint 5: Diminished Propagation - check solver (clause)
+    Constraint5 { atom: u32 },
+    /// Constraint 6: Strict Subset - check solver (clause)
+    Constraint6,
+    /// Constraint 7: Reduct Body Satisfaction - check solver
+    Constraint7 { rule_idx: u32 },
+    /// Constraint 8: Reduct Body Falsification - check solver
+    Constraint8 { rule_idx: u32 },
+    /// Constraint 9: Check Active Implies Cand Active - check solver (clause)
+    Constraint9 { rule_idx: u32 },
+    /// Constraint 10: Reduct Head Implication (non-choice rules) - check solver
+    Constraint10 { rule_idx: u32 },
+    /// Constraint 11: Reduct Head Propagation (choice rules) - check solver (clause)
+    Constraint11 { rule_idx: u32, head: u32 },
+    /// Constraint 12: Loop Constraint - cand solver
+    Constraint12 { atom: u32 },
+    /// False atom constraint (atom 1 must be false)
+    FalseAtom,
+}
+
+impl std::fmt::Display for ConstraintKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConstraintKind::Constraint1 { rule_idx, level } => {
+                write!(
+                    f,
+                    "Constraint 1 (Body Sat, rule={}, level={})",
+                    rule_idx, level
+                )
+            }
+            ConstraintKind::Constraint2 { rule_idx, level } => {
+                write!(
+                    f,
+                    "Constraint 2 (Body Fals, rule={}, level={})",
+                    rule_idx, level
+                )
+            }
+            ConstraintKind::Constraint3 { rule_idx } => {
+                write!(f, "Constraint 3 (Head Req, rule={})", rule_idx)
+            }
+            ConstraintKind::Constraint4 { atom } => {
+                write!(f, "Constraint 4 (Subset, atom={})", atom)
+            }
+            ConstraintKind::Constraint5 { atom } => {
+                write!(f, "Constraint 5 (Dim Prop, atom={})", atom)
+            }
+            ConstraintKind::Constraint6 => write!(f, "Constraint 6 (Strict Subset)"),
+            ConstraintKind::Constraint7 { rule_idx } => {
+                write!(f, "Constraint 7 (Reduct Body Sat, rule={})", rule_idx)
+            }
+            ConstraintKind::Constraint8 { rule_idx } => {
+                write!(f, "Constraint 8 (Reduct Body Fals, rule={})", rule_idx)
+            }
+            ConstraintKind::Constraint9 { rule_idx } => {
+                write!(f, "Constraint 9 (Check->Cand Active, rule={})", rule_idx)
+            }
+            ConstraintKind::Constraint10 { rule_idx } => {
+                write!(f, "Constraint 10 (Reduct Head Impl, rule={})", rule_idx)
+            }
+            ConstraintKind::Constraint11 { rule_idx, head } => {
+                write!(
+                    f,
+                    "Constraint 11 (Reduct Head Prop, rule={}, head={})",
+                    rule_idx, head
+                )
+            }
+            ConstraintKind::Constraint12 { atom } => {
+                write!(f, "Constraint 12 (Loop, atom={})", atom)
+            }
+            ConstraintKind::FalseAtom => write!(f, "FalseAtom (atom 1 = false)"),
+        }
+    }
+}
 
 /// Normalize PB terms by combining duplicate literals.
 /// Returns a new Vec with each literal appearing at most once, weights summed.
@@ -337,8 +427,17 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
     let mut rng = StdRng::seed_from_u64(42);
     for atom_id in 2..=layout.num_atoms {
         let atom = Atom(atom_id);
-        let pb_constraint =
-            generate_loop_constraint(atom, &[atom], program, &layout, &empty_assignment, &mut rng);
+        let pb_constraint = generate_loop_constraint(
+            atom,
+            &[atom],
+            program,
+            &layout,
+            &empty_assignment,
+            &mut rng,
+            true,
+            None, // no constraints available yet during initial setup
+            None,
+        );
         cand_pb_constraints.push(pb_constraint);
     }
 
@@ -352,7 +451,11 @@ pub fn encode_program(program: &Program) -> EncodedProgram {
             (pos(layout.cand(atom)), 1),
             (neg(layout.dim(atom)), 1),
         ];
-        check_pb_constraints.push((terms, 2));
+        check_pb_constraints.push(PBConstraint {
+            terms,
+            bound: 2,
+            kind: ConstraintKind::Constraint4 { atom: atom_id },
+        });
     }
 
     // Constraint 5 (Diminished Propagation): x_check + ¬x_cand + x_dim >= 1
@@ -433,7 +536,11 @@ fn encode_choice_rule(
             };
             constraint1_terms.push((cdcl_lit, lit.weight));
         }
-        cand_pb_constraints.push((normalize_pb_terms(constraint1_terms), falsification_weight));
+        cand_pb_constraints.push(PBConstraint {
+            terms: normalize_pb_terms(constraint1_terms),
+            bound: falsification_weight,
+            kind: ConstraintKind::Constraint1 { rule_idx, level },
+        });
     }
 
     // Constraint 2 (body falsification when inactive) - at each level s:
@@ -450,7 +557,11 @@ fn encode_choice_rule(
             };
             constraint2_terms.push((cdcl_lit, lit.weight));
         }
-        cand_pb_constraints.push((normalize_pb_terms(constraint2_terms), level));
+        cand_pb_constraints.push(PBConstraint {
+            terms: normalize_pb_terms(constraint2_terms),
+            bound: level,
+            kind: ConstraintKind::Constraint2 { rule_idx, level },
+        });
     }
 
     // NOTE: No Constraint 3 - heads are OPTIONAL in choice rules
@@ -471,7 +582,11 @@ fn encode_choice_rule(
         };
         constraint7_terms.push((cdcl_lit, lit.weight));
     }
-    check_pb_constraints.push((normalize_pb_terms(constraint7_terms), falsification_weight));
+    check_pb_constraints.push(PBConstraint {
+        terms: normalize_pb_terms(constraint7_terms),
+        bound: falsification_weight,
+        kind: ConstraintKind::Constraint7 { rule_idx },
+    });
 
     // Constraint 8 (reduct body falsification):
     // t_r · ¬active_r_check + Σ w_i · b_i_check + Σ u_j · ¬c_j_cand >= t_r
@@ -485,7 +600,11 @@ fn encode_choice_rule(
         };
         constraint8_terms.push((cdcl_lit, lit.weight));
     }
-    check_pb_constraints.push((normalize_pb_terms(constraint8_terms), bound));
+    check_pb_constraints.push(PBConstraint {
+        terms: normalize_pb_terms(constraint8_terms),
+        bound,
+        kind: ConstraintKind::Constraint8 { rule_idx },
+    });
 
     // Constraint 11 (reduct head propagation): ¬h_cand ∨ h_check ∨ ¬active_r_check (for each head)
     for &head in &rule.heads {
@@ -547,7 +666,11 @@ fn encode_disjunctive_rule(
             };
             constraint1_terms.push((cdcl_lit, lit.weight));
         }
-        cand_pb_constraints.push((normalize_pb_terms(constraint1_terms), falsification_weight));
+        cand_pb_constraints.push(PBConstraint {
+            terms: normalize_pb_terms(constraint1_terms),
+            bound: falsification_weight,
+            kind: ConstraintKind::Constraint1 { rule_idx, level },
+        });
     }
 
     // Constraint 2 (body falsification when inactive) - at each level s:
@@ -564,7 +687,11 @@ fn encode_disjunctive_rule(
             };
             constraint2_terms.push((cdcl_lit, lit.weight));
         }
-        cand_pb_constraints.push((normalize_pb_terms(constraint2_terms), level));
+        cand_pb_constraints.push(PBConstraint {
+            terms: normalize_pb_terms(constraint2_terms),
+            bound: level,
+            kind: ConstraintKind::Constraint2 { rule_idx, level },
+        });
     }
 
     // Constraint 3 (head requirement) - base level: Σ h_cand + ¬active_r_cand >= 1
@@ -591,7 +718,11 @@ fn encode_disjunctive_rule(
         };
         constraint7_terms.push((cdcl_lit, lit.weight));
     }
-    check_pb_constraints.push((normalize_pb_terms(constraint7_terms), falsification_weight));
+    check_pb_constraints.push(PBConstraint {
+        terms: normalize_pb_terms(constraint7_terms),
+        bound: falsification_weight,
+        kind: ConstraintKind::Constraint7 { rule_idx },
+    });
 
     // Constraint 8 (reduct body falsification):
     // t_r · ¬active_r_check + Σ w_i · b_i_check + Σ u_j · ¬c_j_cand >= t_r
@@ -605,7 +736,11 @@ fn encode_disjunctive_rule(
         };
         constraint8_terms.push((cdcl_lit, lit.weight));
     }
-    check_pb_constraints.push((normalize_pb_terms(constraint8_terms), bound));
+    check_pb_constraints.push(PBConstraint {
+        terms: normalize_pb_terms(constraint8_terms),
+        bound,
+        kind: ConstraintKind::Constraint8 { rule_idx },
+    });
 
     // Constraint 10 (reduct head implication): Σ h_check + ¬active_r_check >= 1
     // For integrity constraints (empty heads), this is just ¬active_r_check >= 1
@@ -627,12 +762,15 @@ fn encode_disjunctive_rule(
 ///
 /// Both choice and non-choice rules use active_r,s_cand at the appropriate level.
 pub fn generate_loop_constraint<R: rand::Rng>(
-    _chosen_atom: Atom,
+    chosen_atom: Atom,
     unfounded_set: &[Atom],
     program: &Program,
     layout: &VarLayout,
     assignment: &HashMap<Var, bool>,
     rng: &mut R,
+    is_initial_setup: bool,
+    cand_constraints: Option<&[PBConstraint]>,
+    check_constraints: Option<&[PBConstraint]>,
 ) -> PBConstraint {
     let u_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
 
@@ -676,9 +814,34 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                 continue;
             }
 
-            // Check if active_{r,s,cand} is NOT true (false or unassigned)
+            // Check if active_{r,s,cand} is true
             let active_var = layout.active_cand(entry.rule_idx, level);
-            let active_is_true = assignment.get(&active_var).copied().unwrap_or(false);
+            let active_is_true = match assignment.get(&active_var).copied() {
+                Some(_) if is_initial_setup => {
+                    panic!(
+                        "BUG: active_var {} is assigned during initial setup (expected unassigned)",
+                        active_var
+                    );
+                }
+                Some(v) => v,
+                None if is_initial_setup => false, // During initial setup, unassigned is expected
+                None => {
+                    eprintln!(
+                        "BUG: active_var {} not in assignment (rule_idx={}, level={})",
+                        active_var, entry.rule_idx, level
+                    );
+                    eprintln!(
+                        "  assignment has {} entries, max key = {:?}",
+                        assignment.len(),
+                        assignment.keys().max()
+                    );
+                    eprintln!(
+                        "  num_atoms={}, num_rules={}",
+                        layout.num_atoms, layout.num_rules
+                    );
+                    panic!("active_cand should have value");
+                }
+            };
 
             if !active_is_true {
                 // Body isn't satisfied - add active as reason AND add overlap atoms to O
@@ -709,18 +872,122 @@ pub fn generate_loop_constraint<R: rand::Rng>(
                             return false; // Skip UFS heads
                         }
                         let head_var = layout.cand(head);
-                        assignment.get(&head_var).copied().unwrap_or(false)
+                        match assignment.get(&head_var).copied() {
+                            Some(_) if is_initial_setup => {
+                                panic!("BUG: head_var {} is assigned during initial setup (expected unassigned)", head_var);
+                            }
+                            Some(v) => v,
+                            None if is_initial_setup => false, // During initial setup, unassigned is expected
+                            None => panic!("head cand {} should have value", head_var),
+                        }
                     })
                     .collect()
             };
 
             if stealing_heads.is_empty() {
                 // Body is satisfied, no stealing head - U is not unfounded!
+                eprintln!("=== PANIC DEBUG ===");
+                eprintln!(
+                    "rule_idx: {}, is_choice: {}",
+                    entry.rule_idx, entry.is_choice
+                );
+                eprintln!("atom: {:?}, level: {}, bound: {}", atom, level, bound);
+                eprintln!("heads: {:?}", heads);
+
+                // Collect all relevant atoms for constraint lookup
+                let mut relevant_atoms: Vec<Atom> = Vec::new();
+
+                eprintln!("body ({} literals):", body.len());
+                for lit in body {
+                    let cand_var = layout.cand(lit.atom);
+                    let check_var = layout.check(lit.atom);
+                    let cand_val = assignment.get(&cand_var).copied();
+                    let check_val = assignment.get(&check_var).copied();
+                    eprintln!(
+                        "  {} Atom({}) weight {} -> cand_var {}={:?}, check_var {}={:?}, in_ufs={}",
+                        if lit.positive { "+" } else { "-" },
+                        lit.atom.0,
+                        lit.weight,
+                        cand_var,
+                        cand_val,
+                        check_var,
+                        check_val,
+                        u_set.contains(&lit.atom)
+                    );
+                    relevant_atoms.push(lit.atom);
+                }
+
+                eprintln!("heads ({} atoms):", heads.len());
+                for &head in heads {
+                    let cand_var = layout.cand(head);
+                    let check_var = layout.check(head);
+                    let cand_val = assignment.get(&cand_var).copied();
+                    let check_val = assignment.get(&check_var).copied();
+                    eprintln!(
+                        "  Atom({}) -> cand_var {}={:?}, check_var {}={:?}, in_ufs={}",
+                        head.0,
+                        cand_var,
+                        cand_val,
+                        check_var,
+                        check_val,
+                        u_set.contains(&head)
+                    );
+                    relevant_atoms.push(head);
+                }
+
+                // Print constraints containing relevant atoms
+                if let Some(cand_cs) = cand_constraints {
+                    eprintln!("\nCand constraints containing relevant atoms:");
+                    for (idx, c) in cand_cs.iter().enumerate() {
+                        let vars_in_constraint: Vec<Var> =
+                            c.terms.iter().map(|(lit, _)| lit.abs()).collect();
+                        let contains_relevant = relevant_atoms
+                            .iter()
+                            .any(|&a| vars_in_constraint.contains(&layout.cand(a)));
+                        if contains_relevant {
+                            eprintln!("  [{}] {} (bound={})", idx, c.kind, c.bound);
+                            for &(lit, weight) in &c.terms {
+                                let var = lit.abs();
+                                let val = assignment.get(&var).copied();
+                                let decoded = layout.decode_var(var as u32);
+                                eprintln!(
+                                    "      lit {} (var {} = {:?}) weight {} val={:?}",
+                                    lit, var, decoded, weight, val
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if let Some(check_cs) = check_constraints {
+                    eprintln!("\nCheck constraints containing relevant atoms:");
+                    for (idx, c) in check_cs.iter().enumerate() {
+                        let vars_in_constraint: Vec<Var> =
+                            c.terms.iter().map(|(lit, _)| lit.abs()).collect();
+                        let contains_relevant = relevant_atoms.iter().any(|&a| {
+                            vars_in_constraint.contains(&layout.cand(a))
+                                || vars_in_constraint.contains(&layout.check(a))
+                        });
+                        if contains_relevant {
+                            eprintln!("  [{}] {} (bound={})", idx, c.kind, c.bound);
+                            for &(lit, weight) in &c.terms {
+                                let var = lit.abs();
+                                let val = assignment.get(&var).copied();
+                                let decoded = layout.decode_var(var as u32);
+                                eprintln!(
+                                    "      lit {} (var {} = {:?}) weight {} val={:?}",
+                                    lit, var, decoded, weight, val
+                                );
+                            }
+                        }
+                    }
+                }
+
                 panic!(
                     "Bug: unfounded set {:?} is not unfounded. \
-                     Rule {} has atom {:?} in head, body satisfied at level {}, \
+                     Rule {} (is_choice={}) has atom {:?} in head, body satisfied at level {}, \
                      but no non-UFS stealing head is true.",
-                    unfounded_set, entry.rule_idx, atom, level
+                    unfounded_set, entry.rule_idx, entry.is_choice, atom, level
                 );
             }
 
@@ -735,6 +1002,9 @@ pub fn generate_loop_constraint<R: rand::Rng>(
     }
 
     // Build the final constraint based on whether O is empty
+    let kind = ConstraintKind::Constraint12 {
+        atom: chosen_atom.0,
+    };
     if !overlap_atoms.is_empty() {
         // O ≠ ∅: sum(¬x for x in O) + sum(reason_r) >= 1
         let mut terms: Vec<(Lit, Weight)> = Vec::new();
@@ -744,7 +1014,11 @@ pub fn generate_loop_constraint<R: rand::Rng>(
         for reason in reason_terms {
             terms.push((reason, 1));
         }
-        (terms, 1)
+        PBConstraint {
+            terms,
+            bound: 1,
+            kind,
+        }
     } else {
         // O = ∅: sum(¬x for x in U) + sum(n * reason_r) >= n
         let n = unfounded_set.len() as Weight;
@@ -755,7 +1029,11 @@ pub fn generate_loop_constraint<R: rand::Rng>(
         for reason in reason_terms {
             terms.push((reason, n));
         }
-        (terms, n)
+        PBConstraint {
+            terms,
+            bound: n,
+            kind,
+        }
     }
 }
 
@@ -923,37 +1201,41 @@ mod tests {
         // At test time, use empty assignment (no stealing heads)
         let empty_assignment: HashMap<Var, bool> = HashMap::new();
         let mut rng = StdRng::seed_from_u64(42);
-        let (terms, bound) = generate_loop_constraint(
+        let pb = generate_loop_constraint(
             chosen_atom,
             &unfounded_set,
             &program,
             &layout,
             &empty_assignment,
             &mut rng,
+            true, // is_initial_setup - using empty assignment
+            None,
+            None,
         );
 
         // O = {b} (only rule 0 contributes), plus one reason term
         // Constraint: ¬b + active_{0,2} >= 1
-        assert_eq!(bound, 1);
+        assert_eq!(pb.bound, 1);
         assert_eq!(
-            terms.len(),
+            pb.terms.len(),
             2,
             "Expected 2 terms (1 overlap atom + 1 reason), got {:?}",
-            terms
+            pb.terms
         );
 
         // Verify we have the overlap atom (¬b = neg(Var(3)))
-        let has_neg_b = terms
+        let has_neg_b = pb
+            .terms
             .iter()
             .any(|(lit, _)| *lit == neg(layout.cand(Atom(3))));
-        assert!(has_neg_b, "Expected ¬b in terms, got {:?}", terms);
+        assert!(has_neg_b, "Expected ¬b in terms, got {:?}", pb.terms);
 
         // Verify we have the active variable reason
-        let has_active = terms.iter().any(|(lit, _)| *lit > 0);
+        let has_active = pb.terms.iter().any(|(lit, _)| *lit > 0);
         assert!(
             has_active,
             "Expected active variable in terms, got {:?}",
-            terms
+            pb.terms
         );
     }
 }

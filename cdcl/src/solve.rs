@@ -148,7 +148,7 @@ impl Solver {
                     // Log the learned clause to proof
                     if let Some(ref mut p) = proof {
                         let lits: Vec<_> = learned_clause.iter().map(|&(lit, _)| lit).collect();
-                        let _ = p.add_clause(&lits);
+                        p.add_clause(&lits).unwrap();
                     }
 
                     // Bump VSIDS activity for variables in learned clause
@@ -169,7 +169,7 @@ impl Solver {
                     if conflict_level == Level::TOP {
                         // Conflict at level 0 = UNSAT
                         if let Some(ref mut p) = proof {
-                            let _ = p.flush();
+                            p.flush().unwrap();
                         }
                         return (false, stats);
                     }

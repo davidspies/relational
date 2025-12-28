@@ -32,8 +32,12 @@ pub struct RsViolatedConstraint {
 /// Solution callback function type.
 /// Called when a solution is found during solving.
 /// Returns NULL to accept the solution, or pointer to violated constraint.
-pub type RsSolutionCallback =
-    Option<unsafe extern "C" fn(solver: *mut RsSolver, user_data: *mut std::ffi::c_void) -> *mut RsViolatedConstraint>;
+pub type RsSolutionCallback = Option<
+    unsafe extern "C" fn(
+        solver: *mut RsSolver,
+        user_data: *mut std::ffi::c_void,
+    ) -> *mut RsViolatedConstraint,
+>;
 
 unsafe extern "C" {
     /// Create a new solver instance.

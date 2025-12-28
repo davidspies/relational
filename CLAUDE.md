@@ -2,23 +2,18 @@
 
 This is a personal project. I don't mind resolving dependency conflicts when major versions of things change. So just use `"*"` for all dependency versions in Cargo.toml to stay up to date.
 
-## Project Guidelines
+## FAIL FAST. FAIL FAST. FAIL FAST.
 
-### Code Style
+**NEVER SILENTLY HANDLE "IMPOSSIBLE" CASES.**
+**NEVER SILENTLY HANDLE "IMPOSSIBLE" CASES.**
+**NEVER SILENTLY HANDLE "IMPOSSIBLE" CASES.**
 
-- **File size limit**: All non-test Rust files should be ≤ 200 lines of code. Break large files into submodules.
-- Test files (files named `tests.rs` or in a `tests/` directory) are exempt from this limit.
-- **Imports**: One `super::` is fine, but avoid chains like `super::super::`. Use absolute paths like `crate::module::item` instead.
-- **Module file naming**: Rust supports two styles: old-style (`a/mod.rs` + `a/b.rs`) and new-style (`a.rs` + `a/b.rs`). Use new-style until you need a submodule besides just tests, then switch to old-style.
-- **Visibility**: Default to private. Use `pub(crate)` when needed within the crate, and `pub` only for items that are intentionally part of the public API. **Never** use `pub` as a default out of laziness - this is a serious code smell. If you're unsure whether something should be public, make it private first.
-- **Option usage**: `Option` is for values that are conceptually optional. Don't use `Option` as a placeholder because you're unsure what to fill in. If a value is required, make the field non-optional and require it in constructors.
+If something shouldn't happen, PANIC. A crash with a stack trace is infinitely better than silent corruption.
 
-### Error Handling: Fail Fast, Don't Hide Bugs
+### BAD patterns that hide bugs - DO NOT USE:
 
-**Never silently handle "impossible" cases.** If something shouldn't happen, panic.
-
-Bad patterns that hide bugs:
 - `.unwrap_or_default()` when None/Err indicates a bug
+- `.unwrap_or(some_value)` when None indicates a bug
 - `.min()` / `.max()` to clamp values that should already be in range
 - Silent fallbacks for cases that "can't happen"
 - Default values that mask logic errors
@@ -29,12 +24,23 @@ Bad patterns that hide bugs:
   - `.clear()` on a collection that should already be empty → `assert!(x.is_empty())`
   - `.first()` / `.next()` when expecting exactly one element → assert there's exactly one
 
-Good patterns:
+### GOOD patterns - USE THESE:
+
 - `.unwrap()` or `.expect("explanation")` for cases that indicate bugs
 - `assert!()` for invariants
-- Let it panic - a crash with a stack trace is infinitely better than silent corruption
+- Let it panic - surface bugs immediately
 
-The goal is to surface bugs immediately, not hide them behind fallbacks.
+## Project Guidelines
+
+### Code Style
+
+- **File size limit**: All non-test Rust files should be ≤ 200 lines of code. Break large files into submodules.
+- Test files (files named `tests.rs` or in a `tests/` directory) are exempt from this limit.
+- **Imports**: One `super::` is fine, but avoid chains like `super::super::`. Use absolute paths like `crate::module::item` instead.
+- **Module file naming**: Rust supports two styles: old-style (`a/mod.rs` + `a/b.rs`) and new-style (`a.rs` + `a/b.rs`). Use new-style until you need a submodule besides just tests, then switch to old-style.
+- **Visibility**: Default to private. Use `pub(crate)` when needed within the crate, and `pub` only for items that are intentionally part of the public API. **Never** use `pub` as a default out of laziness - this is a serious code smell. If you're unsure whether something should be public, make it private first.
+- **Option usage**: `Option` is for values that are conceptually optional. Don't use `Option` as a placeholder because you're unsure what to fill in. If a value is required, make the field non-optional and require it in constructors.
+- **Bundle related data**: Never rely on parallel vectors or iterators being the same length. If data belongs together, put it in a struct. For example, instead of `Vec<Constraint>` and `Vec<ConstraintKind>`, use `Vec<TaggedConstraint>` where `TaggedConstraint` bundles both.
 
 ### Avoid Unnecessary Conditionals
 
@@ -52,6 +58,10 @@ Good patterns:
 - `if` with a comment explaining why this branch is necessary
 
 When implementing an algorithm from a formalization, the code structure should mirror the formalization. If the formalization has no conditionals, the code shouldn't either. Add a comment to every `if` explaining which part of the spec requires it.
+
+### Communication Style
+
+When explaining something, use full sentences (not sentence fragments).
 
 ### Debugging: Understand Before Retrying
 
@@ -92,6 +102,24 @@ gringo --output=smodels program.lp | ASP_DEBUG=1 target/release/asp
 ```
 
 Each command in a pipeline runs in its own process, so environment variables only apply to the command they directly precede.
+
+### Exit Codes in Pipelines
+
+Commands like `grep`, `head`, and `tail` do NOT forward the exit code of the upstream command. They return their own exit code (0 if they successfully processed input). To check if a command in a pipeline failed, either:
+- Write output to a file and check the exit code separately
+- Use `set -o pipefail` in bash to fail on any pipeline component failure
+- Capture output to a variable and check `${PIPESTATUS[@]}`
+
+```bash
+# WRONG - will show exit code 0 even if asp panics
+gringo ... | target/release/asp 2>&1 | tail -20
+echo $?  # Always 0 if tail succeeded
+
+# RIGHT - capture to file, check exit code separately
+gringo ... | target/release/asp > /tmp/out.txt 2>&1
+echo "Exit code: $?"
+tail -20 /tmp/out.txt
+```
 
 ### Search Commands
 

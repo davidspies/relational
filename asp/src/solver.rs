@@ -37,8 +37,13 @@ fn extract_unfounded_set_standalone(
         let cand_var = layout.cand(atom);
         let check_var = layout.check(atom);
 
-        let in_cand = cand_assignment.get(&cand_var).copied().unwrap_or(false);
-        let in_check = check_solver.get_value(check_var).unwrap_or(false);
+        let in_cand = cand_assignment
+            .get(&cand_var)
+            .copied()
+            .expect("cand atom should have value");
+        let in_check = check_solver
+            .get_value(check_var)
+            .expect("check atom should have value");
 
         if in_cand && !in_check {
             unfounded.push(atom);
@@ -114,6 +119,10 @@ impl AspSolver {
         // Clone data for the callback (callback must be 'static)
         let layout = self.encoded.layout.clone();
         let program = self.program.clone();
+        let cand_clauses = self.encoded.cand_clauses.clone();
+        let cand_pb_constraints = self.encoded.cand_pb_constraints.clone();
+        let check_clauses = self.encoded.check_clauses.clone();
+        let check_pb_constraints = self.encoded.check_pb_constraints.clone();
         let mut rng = StdRng::seed_from_u64(self.rng.random());
 
         // Counters for stats (shared with callback)
@@ -125,6 +134,46 @@ impl AspSolver {
         cand_solver.set_solution_callback(move |assignment: &Assignment| {
             // Extract candidate assignment from the callback's Assignment view
             let cand_assignment = Self::extract_cand_assignment_from_callback(&layout, assignment);
+
+            // VERIFY: Check that the assignment actually satisfies all cand constraints
+            // A literal is true only if assigned to the right value (unassigned = unknown, not satisfied)
+            let cand_lit_is_true = |lit: i32| -> bool {
+                let var = lit.abs();
+                match assignment.get_value(var) {
+                    Some(true) => lit > 0,
+                    Some(false) => lit < 0,
+                    None => false, // unassigned doesn't satisfy
+                }
+            };
+            for (clause_idx, clause) in cand_clauses.iter().enumerate() {
+                let satisfied = clause.iter().any(|&lit| cand_lit_is_true(lit));
+                if !satisfied {
+                    eprintln!("BUG: Cand assignment does not satisfy clause {}: {:?}", clause_idx, clause);
+                    eprintln!("  Literal values:");
+                    for &lit in clause {
+                        let var = lit.abs();
+                        let val = assignment.get_value(var);
+                        eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
+                    }
+                    panic!("Assignment from callback does not satisfy candidate clauses!");
+                }
+            }
+            for (pb_idx, pb) in cand_pb_constraints.iter().enumerate() {
+                let sum: i32 = pb.terms.iter().map(|&(lit, weight)| {
+                    if cand_lit_is_true(lit) { weight } else { 0 }
+                }).sum();
+                if sum < pb.bound {
+                    eprintln!("BUG: Cand assignment does not satisfy PB constraint {}: sum={} < bound={}", pb_idx, sum, pb.bound);
+                    eprintln!("  Constraint kind: {}", pb.kind);
+                    eprintln!("  Terms:");
+                    for &(lit, weight) in &pb.terms {
+                        let var = lit.abs();
+                        let val = assignment.get_value(var);
+                        eprintln!("    lit {} (var {}) weight {} = {:?}", lit, var, weight, val);
+                    }
+                    panic!("Assignment from callback does not satisfy candidate PB constraints!");
+                }
+            }
 
             // Set assumptions on check solver
             let assumptions: Vec<i32> = cand_assignment
@@ -140,32 +189,101 @@ impl AspSolver {
 
             match result {
                 SolveResult::Sat => {
+                    // VERIFY: Check that the check solver's assignment satisfies check constraints
+                    let check_lit_is_true = |lit: i32| -> bool {
+                        let var = lit.abs();
+                        match check_solver.get_value(var) {
+                            Some(true) => lit > 0,
+                            Some(false) => lit < 0,
+                            None => false, // unassigned doesn't satisfy
+                        }
+                    };
+                    for (clause_idx, clause) in check_clauses.iter().enumerate() {
+                        let satisfied = clause.iter().any(|&lit| check_lit_is_true(lit));
+                        if !satisfied {
+                            eprintln!("BUG: Check solver does not satisfy check clause {}: {:?}", clause_idx, clause);
+                            eprintln!("  Literal values:");
+                            for &lit in clause {
+                                let var = lit.abs();
+                                let val = check_solver.get_value(var);
+                                eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
+                            }
+                            panic!("Check solver assignment does not satisfy check clauses!");
+                        }
+                    }
+                    for (pb_idx, pb) in check_pb_constraints.iter().enumerate() {
+                        let sum: i32 = pb.terms.iter().map(|&(lit, weight)| {
+                            if check_lit_is_true(lit) { weight } else { 0 }
+                        }).sum();
+                        if sum < pb.bound {
+                            eprintln!("BUG: Check solver does not satisfy check PB constraint {}: sum={} < bound={}", pb_idx, sum, pb.bound);
+                            eprintln!("  Constraint kind: {}", pb.kind);
+                            eprintln!("  Terms:");
+                            for &(lit, weight) in &pb.terms {
+                                let var = lit.abs();
+                                let val = check_solver.get_value(var);
+                                eprintln!("    lit {} (var {}) weight {} = {:?}", lit, var, weight, val);
+                            }
+                            panic!("Check solver assignment does not satisfy check PB constraints!");
+                        }
+                    }
+
                     // Found smaller model - extract unfounded set
                     let unfounded_set =
                         extract_unfounded_set_standalone(&layout, &cand_assignment, &check_solver);
+
+                    // DEBUG: Verify unfounded set completeness
+                    let ufs_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
+                    for &ufs_atom in &unfounded_set {
+                        for entry in layout.rules_for_head(ufs_atom) {
+                            let rule = &program.rules[entry.rule_idx as usize];
+                            let body = match rule {
+                                crate::types::Rule::Choice(r) => &r.body,
+                                crate::types::Rule::Disjunctive(r) => &r.body,
+                            };
+                            for lit in body {
+                                if lit.positive {
+                                    let cand_var = layout.cand(lit.atom);
+                                    let check_var = layout.check(lit.atom);
+                                    let in_cand = cand_assignment.get(&cand_var).copied().expect("cand_var should have value");
+                                    let in_check = check_solver.get_value(check_var).expect("check_var should have value");
+                                    let in_ufs = ufs_set.contains(&lit.atom);
+                                    if in_cand && !in_check && !in_ufs {
+                                        eprintln!("BUG: Atom({}) is true in cand, false in check, but NOT in unfounded set!", lit.atom.0);
+                                        eprintln!("  cand_var={}, check_var={}", cand_var, check_var);
+                                        eprintln!("  in_cand={}, in_check={}", in_cand, in_check);
+                                        panic!("Unfounded set is incomplete!");
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // Pick random atom from unfounded set
                     let idx = rng.random_range(0..unfounded_set.len());
                     let chosen_atom = unfounded_set[idx];
 
                     // Generate loop constraint
-                    let (terms, bound) = generate_loop_constraint(
+                    let pb = generate_loop_constraint(
                         chosen_atom,
                         &unfounded_set,
                         &program,
                         &layout,
                         &cand_assignment,
                         &mut rng,
+                        false, // not initial setup - expect variables to be assigned
+                        Some(&cand_pb_constraints),
+                        Some(&check_pb_constraints),
                     );
 
                     counter_clone.update(|x| x + 1);
 
                     // Return violated constraint
-                    let (lits, coefs): (Vec<i32>, Vec<i32>) = terms.iter().copied().unzip();
+                    let (lits, coefs): (Vec<i32>, Vec<i32>) = pb.terms.iter().copied().unzip();
                     Some(ViolatedConstraint {
                         lits,
                         coefs,
-                        rhs: bound as i64,
+                        rhs: pb.bound as i64,
                     })
                 }
                 SolveResult::Unsat | SolveResult::Inconsistent => {
@@ -222,13 +340,15 @@ impl AspSolver {
 
         // Add base candidate clauses
         for clause in &self.encoded.cand_clauses {
-            let _ = solver.add_clause(clause);
+            solver.add_clause(clause).unwrap();
         }
 
         // Add base candidate PB constraints
-        for (terms, bound) in &self.encoded.cand_pb_constraints {
-            let (lits, coefs): (Vec<i32>, Vec<i32>) = terms.iter().copied().unzip();
-            let _ = solver.add_pb_constraint(&lits, &coefs, *bound as i64);
+        for pb in &self.encoded.cand_pb_constraints {
+            let (lits, coefs): (Vec<i32>, Vec<i32>) = pb.terms.iter().copied().unzip();
+            solver
+                .add_pb_constraint(&lits, &coefs, pb.bound as i64)
+                .unwrap();
         }
 
         solver
@@ -244,13 +364,15 @@ impl AspSolver {
 
         // Add check clauses
         for clause in &self.encoded.check_clauses {
-            let _ = solver.add_clause(clause);
+            solver.add_clause(clause).unwrap();
         }
 
         // Add check PB constraints
-        for (terms, bound) in &self.encoded.check_pb_constraints {
-            let (lits, coefs): (Vec<i32>, Vec<i32>) = terms.iter().copied().unzip();
-            let _ = solver.add_pb_constraint(&lits, &coefs, *bound as i64);
+        for pb in &self.encoded.check_pb_constraints {
+            let (lits, coefs): (Vec<i32>, Vec<i32>) = pb.terms.iter().copied().unzip();
+            solver
+                .add_pb_constraint(&lits, &coefs, pb.bound as i64)
+                .unwrap();
         }
 
         solver

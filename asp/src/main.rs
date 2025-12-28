@@ -1,17 +1,20 @@
 //! ASP solver command-line interface.
 
-use std::env;
 use std::io::{self, Read, Write};
 
 use asp::{AspSolver, parse_smodels};
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(name = "asp", about = "ASP solver using PB constraints")]
+struct Args {
+    /// Number of solutions to find (0 = all solutions)
+    #[arg(short = 'n', default_value = "1")]
+    limit: usize,
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Parse command-line argument for solution limit (like clingo)
-    // Default is 1, pass 0 for all solutions
-    let limit: usize = env::args()
-        .nth(1)
-        .map(|s| s.parse().unwrap_or(1))
-        .unwrap_or(1);
+    let args = Args::parse();
 
     // Read smodels format from stdin
     let mut input = String::new();
@@ -30,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let atom_names = solver.atom_names();
     let mut count = 0usize;
 
-    solver.solve_streaming(limit, |answer_set| {
+    solver.solve_streaming(args.limit, |answer_set| {
         if count == 0 {
             println!("SATISFIABLE");
         }

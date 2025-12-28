@@ -27,9 +27,9 @@
 use std::marker::PhantomData;
 
 use roundingsat_sys::{
-    rs_add_clause, rs_add_pb_constraint, rs_clear_assumptions, rs_free, rs_get_num_vars,
-    rs_get_value, rs_new, rs_set_assumptions, rs_set_num_vars, rs_set_solution_callback, rs_solve,
-    RsResult, RsSolver, RsViolatedConstraint,
+    RsResult, RsSolver, RsViolatedConstraint, rs_add_clause, rs_add_pb_constraint,
+    rs_clear_assumptions, rs_free, rs_get_num_vars, rs_get_value, rs_new, rs_set_assumptions,
+    rs_set_num_vars, rs_set_solution_callback, rs_solve,
 };
 
 /// Result of a solve operation.
@@ -365,7 +365,6 @@ impl Solver {
         self.callback = None;
         self.violated_storage = None;
     }
-
 }
 
 /// FFI trampoline for solution callback.
@@ -452,9 +451,7 @@ mod tests {
         solver.set_num_vars(3);
 
         // At least 2 of {x1, x2, x3} must be true
-        solver
-            .add_pb_constraint(&[1, 2, 3], &[1, 1, 1], 2)
-            .unwrap();
+        solver.add_pb_constraint(&[1, 2, 3], &[1, 1, 1], 2).unwrap();
 
         assert_eq!(solver.solve(), SolveResult::Sat);
 
@@ -504,9 +501,7 @@ mod tests {
 
         // 2*x1 + 3*x2 + 1*x3 >= 4
         // This requires either x2 + something, or x1 + x2, etc.
-        solver
-            .add_pb_constraint(&[1, 2, 3], &[2, 3, 1], 4)
-            .unwrap();
+        solver.add_pb_constraint(&[1, 2, 3], &[2, 3, 1], 4).unwrap();
 
         assert_eq!(solver.solve(), SolveResult::Sat);
 
@@ -559,21 +554,30 @@ mod tests {
         let result = solver.add_clause(&[1, 3]);
         assert!(matches!(
             result,
-            Err(SolverError::InvalidLiteral { lit: 3, num_vars: 2 })
+            Err(SolverError::InvalidLiteral {
+                lit: 3,
+                num_vars: 2
+            })
         ));
 
         // Negative out of range
         let result = solver.add_clause(&[-5]);
         assert!(matches!(
             result,
-            Err(SolverError::InvalidLiteral { lit: -5, num_vars: 2 })
+            Err(SolverError::InvalidLiteral {
+                lit: -5,
+                num_vars: 2
+            })
         ));
 
         // Zero literal is invalid
         let result = solver.add_clause(&[0]);
         assert!(matches!(
             result,
-            Err(SolverError::InvalidLiteral { lit: 0, num_vars: 2 })
+            Err(SolverError::InvalidLiteral {
+                lit: 0,
+                num_vars: 2
+            })
         ));
     }
 
@@ -586,7 +590,10 @@ mod tests {
         let result = solver.add_pb_constraint(&[1, 10], &[1, 1], 1);
         assert!(matches!(
             result,
-            Err(SolverError::InvalidLiteral { lit: 10, num_vars: 2 })
+            Err(SolverError::InvalidLiteral {
+                lit: 10,
+                num_vars: 2
+            })
         ));
     }
 
@@ -599,7 +606,10 @@ mod tests {
         let result = solver.set_assumptions(&[1, 5]);
         assert!(matches!(
             result,
-            Err(SolverError::InvalidLiteral { lit: 5, num_vars: 2 })
+            Err(SolverError::InvalidLiteral {
+                lit: 5,
+                num_vars: 2
+            })
         ));
     }
 
