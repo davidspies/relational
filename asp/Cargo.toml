@@ -8,6 +8,7 @@ roundingsat = { path = "../roundingsat" }
 contiguous_data = { path = "../contiguous_data" }
 rand = "*"
 clap = { version = "*", features = ["derive"] }
+tempfile = "*"
 
 [[bin]]
 name = "asp"

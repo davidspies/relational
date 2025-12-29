@@ -100,6 +100,7 @@ dependencies = [
  "contiguous_data",
  "rand 0.10.2",
  "roundingsat",
+ "tempfile",
 ]
 
 [[package]]
@@ -800,6 +801,7 @@ name = "roundingsat"
 version = "0.1.0"
 dependencies = [
  "roundingsat-sys",
+ "tempfile",
 ]
 
 [[package]]

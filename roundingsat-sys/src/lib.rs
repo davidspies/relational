@@ -91,6 +91,10 @@ unsafe extern "C" {
     /// Must be called before adding any constraints.
     /// The proof will be written to {filename}.proof in VeriPB format.
     pub fn rs_set_proof_log(solver: *mut RsSolver, filename: *const std::ffi::c_char);
+
+    /// Flush the proof log to disk.
+    /// Call this after solve() to ensure the proof file is fully written.
+    pub fn rs_flush_proof_log(solver: *mut RsSolver);
 }
 
 #[cfg(test)]

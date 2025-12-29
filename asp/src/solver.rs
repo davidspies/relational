@@ -8,6 +8,7 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::path::Path;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -15,6 +16,7 @@ use contiguous_data::HashSet;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use roundingsat::{Assignment, SolveResult, Solver, SolverError, ViolatedConstraint};
+use tempfile::TempDir;
 
 use crate::encoding::{Clause, EncodedProgram, PBConstraint, Var, VarLayout, neg, pos};
 use crate::encoding::{encode_program, generate_loop_constraint};
@@ -112,14 +114,19 @@ impl AspSolver {
         let start = Instant::now();
         let mut count = 0usize;
 
+        // Create tempdir for proof logging (will be auto-cleaned on drop)
+        let proof_dir = TempDir::new().expect("Failed to create temp directory for proofs");
+        let cand_proof_path = proof_dir.path().join("cand_proof");
+        let check_proof_path = proof_dir.path().join("check_proof");
+
         // Create candidate solver - if trivially UNSAT, no models exist
-        let Some(mut cand_solver) = self.create_cand_solver() else {
+        let Some(mut cand_solver) = self.create_cand_solver(Some(&cand_proof_path)) else {
             eprintln!("c asp: 0.000s models=0 loop_constraints=0 (trivially unsat)");
             return;
         };
 
         // Create check solver - if trivially UNSAT, all candidates are minimal
-        let mut check_solver_opt = self.create_check_solver();
+        let mut check_solver_opt = self.create_check_solver(Some(&check_proof_path));
 
         // Clone data for the callback (callback must be 'static)
         let layout = self.encoded.layout.clone();
@@ -426,11 +433,17 @@ impl AspSolver {
 
     /// Create the candidate solver with base constraints.
     /// Returns None if the problem is trivially UNSAT (no models exist).
-    fn create_cand_solver(&self) -> Option<Solver> {
+    fn create_cand_solver(&self, proof_path: Option<&Path>) -> Option<Solver> {
         let layout = &self.encoded.layout;
         let num_vars = layout.total_vars();
 
         let mut solver = Solver::new().expect("Failed to create solver");
+
+        // Enable proof logging if path provided (must be before adding constraints)
+        if let Some(path) = proof_path {
+            solver.set_proof_log(path);
+        }
+
         solver.set_num_vars(num_vars as i32);
 
         // Add base candidate clauses
@@ -457,11 +470,17 @@ impl AspSolver {
 
     /// Create the check solver with base constraints.
     /// Returns None if trivially UNSAT (no smaller model can exist - all candidates are minimal).
-    fn create_check_solver(&self) -> Option<Solver> {
+    fn create_check_solver(&self, proof_path: Option<&Path>) -> Option<Solver> {
         let layout = &self.encoded.layout;
         let num_vars = layout.total_vars();
 
         let mut solver = Solver::new().expect("Failed to create solver");
+
+        // Enable proof logging if path provided (must be before adding constraints)
+        if let Some(path) = proof_path {
+            solver.set_proof_log(path);
+        }
+
         solver.set_num_vars(num_vars as i32);
 
         // Add check clauses

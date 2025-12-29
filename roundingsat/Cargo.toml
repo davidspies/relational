@@ -5,3 +5,6 @@ edition.workspace = true
 
 [dependencies]
 roundingsat-sys = { path = "../roundingsat-sys" }
+
+[dev-dependencies]
+tempfile = "*"
