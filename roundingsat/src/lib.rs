@@ -28,7 +28,7 @@ use std::marker::PhantomData;
 
 use roundingsat_sys::{
     RsResult, RsSolver, RsViolatedConstraint, rs_add_clause, rs_add_pb_constraint,
-    rs_clear_assumptions, rs_free, rs_get_num_vars, rs_get_value, rs_new, rs_set_assumptions,
+    rs_clear_externals, rs_free, rs_get_num_vars, rs_get_value, rs_new, rs_set_externals,
     rs_set_num_vars, rs_set_solution_callback, rs_solve,
 };
 
@@ -39,7 +39,7 @@ pub enum SolveResult {
     Sat,
     /// The problem is unsatisfiable.
     Unsat,
-    /// The problem is unsatisfiable under the current assumptions.
+    /// The problem is unsatisfiable under the current externals.
     Inconsistent,
     /// The solver could not determine satisfiability.
     Unknown,
@@ -254,24 +254,24 @@ impl Solver {
         }
     }
 
-    /// Sets assumptions for the next solve call.
+    /// Sets externals for the next solve call.
     ///
-    /// Assumptions are temporary assignments that can be cleared after solving.
-    /// If the problem is unsatisfiable under the assumptions, `solve()` returns
+    /// externals are temporary assignments that can be cleared after solving.
+    /// If the problem is unsatisfiable under the externals, `solve()` returns
     /// `SolveResult::Inconsistent`.
     ///
     /// # Errors
     ///
     /// Returns `SolverError::InvalidLiteral` if any literal references a variable outside 1..num_vars.
-    pub fn set_assumptions(&mut self, assumps: &[i32]) -> Result<(), SolverError> {
+    pub fn set_externals(&mut self, assumps: &[i32]) -> Result<(), SolverError> {
         self.validate_literals(assumps)?;
-        unsafe { rs_set_assumptions(self.ptr, assumps.len(), assumps.as_ptr()) }
+        unsafe { rs_set_externals(self.ptr, assumps.len(), assumps.as_ptr()) }
         Ok(())
     }
 
-    /// Clears all assumptions.
-    pub fn clear_assumptions(&mut self) {
-        unsafe { rs_clear_assumptions(self.ptr) }
+    /// Clears all externals.
+    pub fn clear_externals(&mut self) {
+        unsafe { rs_clear_externals(self.ptr) }
     }
 
     /// Solves the current problem.
@@ -462,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn test_assumptions() {
+    fn test_externals() {
         let mut solver = Solver::new().unwrap();
         solver.set_num_vars(2);
 
@@ -470,11 +470,11 @@ mod tests {
         solver.add_clause(&[1, 2]).unwrap();
 
         // Assume NOT x1 AND NOT x2 -> should be inconsistent
-        solver.set_assumptions(&[-1, -2]).unwrap();
+        solver.set_externals(&[-1, -2]).unwrap();
         assert_eq!(solver.solve(), SolveResult::Inconsistent);
 
-        // Clear assumptions -> should be SAT again
-        solver.clear_assumptions();
+        // Clear externals -> should be SAT again
+        solver.clear_externals();
         assert_eq!(solver.solve(), SolveResult::Sat);
     }
 
@@ -598,12 +598,12 @@ mod tests {
     }
 
     #[test]
-    fn test_error_invalid_literal_assumptions() {
+    fn test_error_invalid_literal_externals() {
         let mut solver = Solver::new().unwrap();
         solver.set_num_vars(2);
 
         // Variable 5 doesn't exist
-        let result = solver.set_assumptions(&[1, 5]);
+        let result = solver.set_externals(&[1, 5]);
         assert!(matches!(
             result,
             Err(SolverError::InvalidLiteral {

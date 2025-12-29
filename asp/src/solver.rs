@@ -4,7 +4,7 @@
 //! - Candidate solver: finds candidate answer sets
 //! - Check solver: checks if a strictly smaller model exists (unfounded set detection)
 //! - Both solvers are created once; constraints are added incrementally to cand_solver,
-//!   and check_solver uses assumptions for the candidate assignment.
+//!   and check_solver uses externals for the candidate assignment.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -185,25 +185,25 @@ impl AspSolver {
                 return None; // Accept as stable model
             };
 
-            // Set assumptions on check solver
-            let assumptions: Vec<i32> = cand_assignment
+            // Set externals on check solver
+            let externals: Vec<i32> = cand_assignment
                 .iter()
                 .map(|(&var, &value)| if value { var } else { -var })
                 .collect();
 
             // Clone before passing to C++ code (can't trust it won't modify memory)
-            let assumptions_snapshot = assumptions.clone();
+            let externals_snapshot = externals.clone();
 
             check_solver
-                .set_assumptions(&assumptions)
+                .set_externals(&externals)
                 .expect("Invalid assumption");
             let result = check_solver.solve();
-            check_solver.clear_assumptions();
+            check_solver.clear_externals();
 
             match result {
                 SolveResult::Sat => {
-                    // VERIFY: Check that assumptions are respected
-                    for &assumption_lit in &assumptions_snapshot {
+                    // VERIFY: Check that externals are respected
+                    for &assumption_lit in &externals_snapshot {
                         let var = assumption_lit.abs();
                         let expected = assumption_lit > 0;
                         let actual = check_solver.get_value(var);

@@ -63,11 +63,11 @@ unsafe extern "C" {
     /// Returns 0 on success, -1 if UNSAT at root.
     pub fn rs_add_clause(solver: *mut RsSolver, n: usize, lits: *const i32) -> c_int;
 
-    /// Set assumptions for the next solve call.
-    pub fn rs_set_assumptions(solver: *mut RsSolver, n: usize, assumps: *const i32);
+    /// Set externals for the next solve call.
+    pub fn rs_set_externals(solver: *mut RsSolver, n: usize, assumps: *const i32);
 
-    /// Clear all assumptions.
-    pub fn rs_clear_assumptions(solver: *mut RsSolver);
+    /// Clear all externals.
+    pub fn rs_clear_externals(solver: *mut RsSolver);
 
     /// Solve the current problem.
     pub fn rs_solve(solver: *mut RsSolver) -> RsResult;
@@ -267,13 +267,13 @@ mod tests {
             // Test 3: Assumptions making it inconsistent
             // Assume NOT x1 AND NOT x2 AND NOT x3 -> should be inconsistent
             let assumps = [-1i32, -2, -3];
-            rs_set_assumptions(solver, 3, assumps.as_ptr());
+            rs_set_externals(solver, 3, assumps.as_ptr());
 
             let result = rs_solve(solver);
             assert_eq!(result, RsResult::Inconsistent);
 
-            // Test 4: Clear assumptions and solve again -> should be SAT
-            rs_clear_assumptions(solver);
+            // Test 4: Clear externals and solve again -> should be SAT
+            rs_clear_externals(solver);
             let result = rs_solve(solver);
             assert_eq!(result, RsResult::Sat);
 
