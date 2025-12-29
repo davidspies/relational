@@ -258,7 +258,7 @@ impl Solver {
     ///
     /// externals are temporary assignments that can be cleared after solving.
     /// If the problem is unsatisfiable under the externals, `solve()` returns
-    /// `SolveResult::Inconsistent`.
+    /// `SolveResult::Unsat`.
     ///
     /// # Errors
     ///
@@ -469,9 +469,9 @@ mod tests {
         // x1 OR x2
         solver.add_clause(&[1, 2]).unwrap();
 
-        // Assume NOT x1 AND NOT x2 -> should be inconsistent
+        // Assume NOT x1 AND NOT x2 -> should be unsat
         solver.set_externals(&[-1, -2]).unwrap();
-        assert_eq!(solver.solve(), SolveResult::Inconsistent);
+        assert_eq!(solver.solve(), SolveResult::Unsat);
 
         // Clear externals -> should be SAT again
         solver.clear_externals();

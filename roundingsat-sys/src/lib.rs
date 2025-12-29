@@ -270,7 +270,7 @@ mod tests {
             rs_set_externals(solver, 3, assumps.as_ptr());
 
             let result = rs_solve(solver);
-            assert_eq!(result, RsResult::Inconsistent);
+            assert_eq!(result, RsResult::Unsat);
 
             // Test 4: Clear externals and solve again -> should be SAT
             rs_clear_externals(solver);

@@ -16,7 +16,7 @@ use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use roundingsat::{Assignment, SolveResult, Solver, SolverError, ViolatedConstraint};
 
-use crate::encoding::{Clause, EncodedProgram, Var, VarLayout, neg, pos};
+use crate::encoding::{Clause, EncodedProgram, PBConstraint, Var, VarLayout, neg, pos};
 use crate::encoding::{encode_program, generate_loop_constraint};
 use crate::types::{Atom, Program};
 
@@ -137,188 +137,18 @@ impl AspSolver {
         let counter_clone = loop_constraints_added.clone();
 
         cand_solver.set_solution_callback(move |assignment: &Assignment| {
-            // Extract candidate assignment from the callback's Assignment view
-            let cand_assignment = Self::extract_cand_assignment_from_callback(&layout, assignment);
-
-            // VERIFY: Check that the assignment actually satisfies all cand constraints
-            // A literal is true only if assigned to the right value (unassigned = unknown, not satisfied)
-            let cand_lit_is_true = |lit: i32| -> bool {
-                let var = lit.abs();
-                match assignment.get_value(var) {
-                    Some(true) => lit > 0,
-                    Some(false) => lit < 0,
-                    None => false, // unassigned doesn't satisfy
-                }
-            };
-            for (clause_idx, clause) in cand_clauses.iter().enumerate() {
-                let satisfied = clause.iter().any(|&lit| cand_lit_is_true(lit));
-                if !satisfied {
-                    eprintln!("BUG: Cand assignment does not satisfy clause {}: {:?}", clause_idx, clause);
-                    eprintln!("  Literal values:");
-                    for &lit in clause {
-                        let var = lit.abs();
-                        let val = assignment.get_value(var);
-                        eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
-                    }
-                    panic!("Assignment from callback does not satisfy candidate clauses!");
-                }
-            }
-            for (pb_idx, pb) in cand_pb_constraints.iter().enumerate() {
-                let sum: i32 = pb.terms.iter().map(|&(lit, weight)| {
-                    if cand_lit_is_true(lit) { weight } else { 0 }
-                }).sum();
-                if sum < pb.bound {
-                    eprintln!("BUG: Cand assignment does not satisfy PB constraint {}: sum={} < bound={}", pb_idx, sum, pb.bound);
-                    eprintln!("  Constraint kind: {}", pb.kind);
-                    eprintln!("  Terms:");
-                    for &(lit, weight) in &pb.terms {
-                        let var = lit.abs();
-                        let val = assignment.get_value(var);
-                        eprintln!("    lit {} (var {}) weight {} = {:?}", lit, var, weight, val);
-                    }
-                    panic!("Assignment from callback does not satisfy candidate PB constraints!");
-                }
-            }
-
-            // If check solver is None, all candidates are minimal (no smaller model can exist)
-            let Some(ref mut check_solver) = check_solver_opt else {
-                return None; // Accept as stable model
-            };
-
-            // Set externals on check solver
-            let externals: Vec<i32> = cand_assignment
-                .iter()
-                .map(|(&var, &value)| if value { var } else { -var })
-                .collect();
-
-            // Clone before passing to C++ code (can't trust it won't modify memory)
-            let externals_snapshot = externals.clone();
-
-            check_solver
-                .set_externals(&externals)
-                .expect("Invalid assumption");
-            let result = check_solver.solve();
-            check_solver.clear_externals();
-
-            match result {
-                SolveResult::Sat => {
-                    // VERIFY: Check that externals are respected
-                    for &assumption_lit in &externals_snapshot {
-                        let var = assumption_lit.abs();
-                        let expected = assumption_lit > 0;
-                        let actual = check_solver.get_value(var);
-                        if actual != Some(expected) {
-                            panic!(
-                                "BUG: Check solver violated assumption! var={} expected={} actual={:?}",
-                                var, expected, actual
-                            );
-                        }
-                    }
-
-                    // VERIFY: Check that the check solver's assignment satisfies check constraints
-                    let check_lit_is_true = |lit: i32| -> bool {
-                        let var = lit.abs();
-                        match check_solver.get_value(var) {
-                            Some(true) => lit > 0,
-                            Some(false) => lit < 0,
-                            None => false, // unassigned doesn't satisfy
-                        }
-                    };
-                    for (clause_idx, clause) in check_clauses.iter().enumerate() {
-                        let satisfied = clause.iter().any(|&lit| check_lit_is_true(lit));
-                        if !satisfied {
-                            eprintln!("BUG: Check solver does not satisfy check clause {}: {:?}", clause_idx, clause);
-                            eprintln!("  Literal values:");
-                            for &lit in clause {
-                                let var = lit.abs();
-                                let val = check_solver.get_value(var);
-                                eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
-                            }
-                            panic!("Check solver assignment does not satisfy check clauses!");
-                        }
-                    }
-                    for (pb_idx, pb) in check_pb_constraints.iter().enumerate() {
-                        let sum: i32 = pb.terms.iter().map(|&(lit, weight)| {
-                            if check_lit_is_true(lit) { weight } else { 0 }
-                        }).sum();
-                        if sum < pb.bound {
-                            eprintln!("BUG: Check solver does not satisfy check PB constraint {}: sum={} < bound={}", pb_idx, sum, pb.bound);
-                            eprintln!("  Constraint kind: {}", pb.kind);
-                            eprintln!("  Terms:");
-                            for &(lit, weight) in &pb.terms {
-                                let var = lit.abs();
-                                let val = check_solver.get_value(var);
-                                eprintln!("    lit {} (var {}) weight {} = {:?}", lit, var, weight, val);
-                            }
-                            panic!("Check solver assignment does not satisfy check PB constraints!");
-                        }
-                    }
-
-                    // Found smaller model - extract unfounded set
-                    let unfounded_set =
-                        extract_unfounded_set_standalone(&layout, &cand_assignment, &check_solver);
-
-                    // DEBUG: Verify unfounded set completeness
-                    let ufs_set: std::collections::HashSet<Atom> = unfounded_set.iter().copied().collect();
-                    for &ufs_atom in &unfounded_set {
-                        for entry in layout.rules_for_head(ufs_atom) {
-                            let rule = &program.rules[entry.rule_idx as usize];
-                            let body = match rule {
-                                crate::types::Rule::Choice(r) => &r.body,
-                                crate::types::Rule::Disjunctive(r) => &r.body,
-                            };
-                            for lit in body {
-                                if lit.positive {
-                                    let cand_var = layout.cand(lit.atom);
-                                    let check_var = layout.check(lit.atom);
-                                    let in_cand = cand_assignment.get(&cand_var).copied().expect("cand_var should have value");
-                                    let in_check = check_solver.get_value(check_var).expect("check_var should have value");
-                                    let in_ufs = ufs_set.contains(&lit.atom);
-                                    if in_cand && !in_check && !in_ufs {
-                                        eprintln!("BUG: Atom({}) is true in cand, false in check, but NOT in unfounded set!", lit.atom.0);
-                                        eprintln!("  cand_var={}, check_var={}", cand_var, check_var);
-                                        eprintln!("  in_cand={}, in_check={}", in_cand, in_check);
-                                        panic!("Unfounded set is incomplete!");
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Pick random atom from unfounded set
-                    let idx = rng.random_range(0..unfounded_set.len());
-                    let chosen_atom = unfounded_set[idx];
-
-                    // Generate loop constraint
-                    let pb = generate_loop_constraint(
-                        chosen_atom,
-                        &unfounded_set,
-                        &program,
-                        &layout,
-                        |var| cand_assignment.get(&var).copied(),
-                        |var| check_solver.get_value(var),
-                        &mut rng,
-                        false, // not initial setup - expect variables to be assigned
-                        Some(&cand_pb_constraints),
-                        Some(&check_pb_constraints),
-                    );
-
-                    counter_clone.update(|x| x + 1);
-
-                    // Return violated constraint
-                    let (lits, coefs): (Vec<i32>, Vec<i32>) = pb.terms.iter().copied().unzip();
-                    Some(ViolatedConstraint {
-                        lits,
-                        coefs,
-                        rhs: pb.bound as i64,
-                    })
-                }
-                SolveResult::Unsat | SolveResult::Inconsistent => {
-                    // Minimal - this is a stable model, accept it
-                    None
-                }
-                SolveResult::Unknown => panic!("Check solver returned Unknown"),
-            }
+            Self::solution_callback(
+                assignment,
+                &layout,
+                &program,
+                &cand_clauses,
+                &cand_pb_constraints,
+                &check_clauses,
+                &check_pb_constraints,
+                &mut check_solver_opt,
+                &mut rng,
+                &counter_clone,
+            )
         });
 
         // Outer loop: solve, emit answers, add blocking clauses
@@ -355,6 +185,243 @@ impl AspSolver {
             count,
             loops,
         );
+    }
+
+    fn solution_callback(
+        assignment: &Assignment,
+        layout: &VarLayout,
+        program: &Program,
+        cand_clauses: &Vec<Clause>,
+        cand_pb_constraints: &Vec<PBConstraint>,
+        check_clauses: &Vec<Clause>,
+        check_pb_constraints: &Vec<PBConstraint>,
+        check_solver_opt: &mut Option<Solver>,
+        rng: &mut StdRng,
+        counter_clone: &Rc<Cell<u64>>,
+    ) -> Option<ViolatedConstraint> {
+        // Extract candidate assignment from the callback's Assignment view
+        let cand_assignment = Self::extract_cand_assignment_from_callback(&layout, assignment);
+
+        // VERIFY: Check that the assignment actually satisfies all cand constraints
+        // A literal is true only if assigned to the right value (unassigned = unknown, not satisfied)
+        let cand_lit_is_true = |lit: i32| -> bool {
+            let var = lit.abs();
+            match assignment.get_value(var) {
+                Some(true) => lit > 0,
+                Some(false) => lit < 0,
+                None => false, // unassigned doesn't satisfy
+            }
+        };
+        for (clause_idx, clause) in cand_clauses.iter().enumerate() {
+            let satisfied = clause.iter().any(|&lit| cand_lit_is_true(lit));
+            if !satisfied {
+                eprintln!(
+                    "BUG: Cand assignment does not satisfy clause {}: {:?}",
+                    clause_idx, clause
+                );
+                eprintln!("  Literal values:");
+                for &lit in clause {
+                    let var = lit.abs();
+                    let val = assignment.get_value(var);
+                    eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
+                }
+                panic!("Assignment from callback does not satisfy candidate clauses!");
+            }
+        }
+        for (pb_idx, pb) in cand_pb_constraints.iter().enumerate() {
+            let sum: i32 = pb
+                .terms
+                .iter()
+                .map(
+                    |&(lit, weight)| {
+                        if cand_lit_is_true(lit) { weight } else { 0 }
+                    },
+                )
+                .sum();
+            if sum < pb.bound {
+                eprintln!(
+                    "BUG: Cand assignment does not satisfy PB constraint {}: sum={} < bound={}",
+                    pb_idx, sum, pb.bound
+                );
+                eprintln!("  Constraint kind: {}", pb.kind);
+                eprintln!("  Terms:");
+                for &(lit, weight) in &pb.terms {
+                    let var = lit.abs();
+                    let val = assignment.get_value(var);
+                    eprintln!(
+                        "    lit {} (var {}) weight {} = {:?}",
+                        lit, var, weight, val
+                    );
+                }
+                panic!("Assignment from callback does not satisfy candidate PB constraints!");
+            }
+        }
+
+        // If check solver is None, all candidates are minimal (no smaller model can exist)
+        let Some(check_solver) = check_solver_opt else {
+            return None; // Accept as stable model
+        };
+
+        // Set externals on check solver
+        let externals: Vec<i32> = cand_assignment
+            .iter()
+            .map(|(&var, &value)| if value { var } else { -var })
+            .collect();
+
+        // Clone before passing to C++ code (can't trust it won't modify memory)
+        let externals_snapshot = externals.clone();
+
+        check_solver
+            .set_externals(&externals)
+            .expect("Invalid assumption");
+        let result = check_solver.solve();
+        check_solver.clear_externals();
+
+        match result {
+            SolveResult::Sat => {
+                // VERIFY: Check that externals are respected
+                for &assumption_lit in &externals_snapshot {
+                    let var = assumption_lit.abs();
+                    let expected = assumption_lit > 0;
+                    let actual = check_solver.get_value(var);
+                    if actual != Some(expected) {
+                        panic!(
+                            "BUG: Check solver violated assumption! var={} expected={} actual={:?}",
+                            var, expected, actual
+                        );
+                    }
+                }
+
+                // VERIFY: Check that the check solver's assignment satisfies check constraints
+                let check_lit_is_true = |lit: i32| -> bool {
+                    let var = lit.abs();
+                    match check_solver.get_value(var) {
+                        Some(true) => lit > 0,
+                        Some(false) => lit < 0,
+                        None => false, // unassigned doesn't satisfy
+                    }
+                };
+                for (clause_idx, clause) in check_clauses.iter().enumerate() {
+                    let satisfied = clause.iter().any(|&lit| check_lit_is_true(lit));
+                    if !satisfied {
+                        eprintln!(
+                            "BUG: Check solver does not satisfy check clause {}: {:?}",
+                            clause_idx, clause
+                        );
+                        eprintln!("  Literal values:");
+                        for &lit in clause {
+                            let var = lit.abs();
+                            let val = check_solver.get_value(var);
+                            eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
+                        }
+                        panic!("Check solver assignment does not satisfy check clauses!");
+                    }
+                }
+                for (pb_idx, pb) in check_pb_constraints.iter().enumerate() {
+                    let sum: i32 = pb
+                        .terms
+                        .iter()
+                        .map(
+                            |&(lit, weight)| {
+                                if check_lit_is_true(lit) { weight } else { 0 }
+                            },
+                        )
+                        .sum();
+                    if sum < pb.bound {
+                        eprintln!(
+                            "BUG: Check solver does not satisfy check PB constraint {}: sum={} < bound={}",
+                            pb_idx, sum, pb.bound
+                        );
+                        eprintln!("  Constraint kind: {}", pb.kind);
+                        eprintln!("  Terms:");
+                        for &(lit, weight) in &pb.terms {
+                            let var = lit.abs();
+                            let val = check_solver.get_value(var);
+                            eprintln!(
+                                "    lit {} (var {}) weight {} = {:?}",
+                                lit, var, weight, val
+                            );
+                        }
+                        panic!("Check solver assignment does not satisfy check PB constraints!");
+                    }
+                }
+
+                // Found smaller model - extract unfounded set
+                let unfounded_set =
+                    extract_unfounded_set_standalone(&layout, &cand_assignment, &check_solver);
+
+                // DEBUG: Verify unfounded set completeness
+                let ufs_set: std::collections::HashSet<Atom> =
+                    unfounded_set.iter().copied().collect();
+                for &ufs_atom in &unfounded_set {
+                    for entry in layout.rules_for_head(ufs_atom) {
+                        let rule = &program.rules[entry.rule_idx as usize];
+                        let body = match rule {
+                            crate::types::Rule::Choice(r) => &r.body,
+                            crate::types::Rule::Disjunctive(r) => &r.body,
+                        };
+                        for lit in body {
+                            if lit.positive {
+                                let cand_var = layout.cand(lit.atom);
+                                let check_var = layout.check(lit.atom);
+                                let in_cand = cand_assignment
+                                    .get(&cand_var)
+                                    .copied()
+                                    .expect("cand_var should have value");
+                                let in_check = check_solver
+                                    .get_value(check_var)
+                                    .expect("check_var should have value");
+                                let in_ufs = ufs_set.contains(&lit.atom);
+                                if in_cand && !in_check && !in_ufs {
+                                    eprintln!(
+                                        "BUG: Atom({}) is true in cand, false in check, but NOT in unfounded set!",
+                                        lit.atom.0
+                                    );
+                                    eprintln!("  cand_var={}, check_var={}", cand_var, check_var);
+                                    eprintln!("  in_cand={}, in_check={}", in_cand, in_check);
+                                    panic!("Unfounded set is incomplete!");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Pick random atom from unfounded set
+                let idx = rng.random_range(0..unfounded_set.len());
+                let chosen_atom = unfounded_set[idx];
+
+                // Generate loop constraint
+                let pb = generate_loop_constraint(
+                    chosen_atom,
+                    &unfounded_set,
+                    &program,
+                    &layout,
+                    |var| cand_assignment.get(&var).copied(),
+                    |var| check_solver.get_value(var),
+                    rng,
+                    false, // not initial setup - expect variables to be assigned
+                    Some(&cand_pb_constraints),
+                    Some(&check_pb_constraints),
+                );
+
+                counter_clone.update(|x| x + 1);
+
+                // Return violated constraint
+                let (lits, coefs): (Vec<i32>, Vec<i32>) = pb.terms.iter().copied().unzip();
+                Some(ViolatedConstraint {
+                    lits,
+                    coefs,
+                    rhs: pb.bound as i64,
+                })
+            }
+            SolveResult::Unsat => {
+                // Minimal - this is a stable model, accept it
+                None
+            }
+            e @ (SolveResult::Inconsistent | SolveResult::Unknown) => {
+                panic!("Check solver returned {e:?}")
+            }
+        }
     }
 
     /// Create the candidate solver with base constraints.
@@ -537,339 +604,4 @@ impl AspSolver {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::parse_smodels;
-
-    /// Helper to solve an ASP program and return sorted answer set names.
-    fn solve_asp(input: &str) -> Vec<Vec<String>> {
-        let program = parse_smodels(input).unwrap();
-        let mut solver = AspSolver::new(program);
-        let mut results: Vec<Vec<String>> = solver
-            .solve()
-            .into_iter()
-            .map(|answer_set| {
-                let mut names: Vec<String> = answer_set
-                    .iter()
-                    .filter_map(|atom| solver.atom_name(*atom).map(String::from))
-                    .collect();
-                names.sort();
-                names
-            })
-            .collect();
-        results.sort();
-        results
-    }
-
-    #[test]
-    fn test_simple_fact() {
-        // p.
-        let input = "1 2 0 0\n0\n2 p\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["p"]]);
-    }
-
-    #[test]
-    fn test_two_facts() {
-        // p. q.
-        let input = "1 2 0 0\n1 3 0 0\n0\n2 p\n3 q\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["p", "q"]]);
-    }
-
-    #[test]
-    fn test_default_negation_two_models() {
-        // a :- not b. b :- not a.
-        // Two answer sets: {a} and {b}
-        let input = "1 2 1 1 3\n1 3 1 1 2\n0\n2 a\n3 b\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a"], vec!["b"]]);
-    }
-
-    #[test]
-    fn test_self_referential_negation_unsat() {
-        // a :- not a.
-        // No stable models
-        let input = "1 2 1 1 2\n0\n2 a\n0\n";
-        let results = solve_asp(input);
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn test_constraint_filters_model() {
-        // a :- not b. b :- not a. :- a, b.
-        // Still two answer sets since a and b can't both be true anyway
-        let input = "1 2 1 1 3\n1 3 1 1 2\n1 1 2 0 2 3\n0\n2 a\n3 b\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a"], vec!["b"]]);
-    }
-
-    #[test]
-    fn test_constraint_makes_unsat() {
-        // a :- not b. b :- not a. :- a. :- b.
-        // No stable models - both a and b are forbidden
-        let input = "1 2 1 1 3\n1 3 1 1 2\n1 1 1 0 2\n1 1 1 0 3\n0\n2 a\n3 b\n0\n";
-        let results = solve_asp(input);
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn test_chain_derivation() {
-        // a. b :- a. c :- b.
-        // One answer set: {a, b, c}
-        let input = "1 2 0 0\n1 3 1 0 2\n1 4 1 0 3\n0\n2 a\n3 b\n4 c\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a", "b", "c"]]);
-    }
-
-    #[test]
-    fn test_unfounded_loop() {
-        // a :- b. b :- a.
-        // No facts, so no stable models with a or b (only empty model)
-        let input = "1 2 1 0 3\n1 3 1 0 2\n0\n2 a\n3 b\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![Vec::<String>::new()]);
-    }
-
-    #[test]
-    fn test_empty_program() {
-        // Empty program has one answer set: {}
-        let input = "0\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![Vec::<String>::new()]);
-    }
-
-    #[test]
-    fn test_supported_loop() {
-        // a :- b. b :- a. a :- not c.
-        // c is false by default, so a is supported, then b is supported
-        let input = "1 2 1 0 3\n1 3 1 0 2\n1 2 1 1 4\n0\n2 a\n3 b\n4 c\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a", "b"]]);
-    }
-
-    #[test]
-    fn test_constraint_requires_derivation() {
-        // a. :- not a. (a is a fact, constraint requires a to be true - satisfied)
-        let input = "1 2 0 0\n1 1 1 1 2\n0\n2 a\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a"]]);
-    }
-
-    #[test]
-    fn test_multiple_rules_same_head() {
-        // a :- b. a :- c. b.
-        // a is derived from b
-        let input = "1 2 1 0 3\n1 2 1 0 4\n1 3 0 0\n0\n2 a\n3 b\n4 c\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a", "b"]]);
-    }
-
-    #[test]
-    fn test_choice_rule_forbidden() {
-        // {a}. :- a.
-        // Only {} is valid since a is forbidden
-        let input = "3 1 2 0 0\n1 1 1 0 2\n0\n2 a\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![Vec::<String>::new()]);
-    }
-
-    #[test]
-    fn test_choice_rule_required() {
-        // {a}. :- not a.
-        // Only {a} is valid since a is required
-        let input = "3 1 2 0 0\n1 1 1 1 2\n0\n2 a\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a"]]);
-    }
-
-    #[test]
-    fn test_disjunctive_simple() {
-        // a | b.
-        // Two answer sets: {a} and {b}
-        // Format: 8 num_heads h1 h2 num_pos num_neg body_lits...
-        let input = "8 2 2 3 0 0\n0\n2 a\n3 b\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a"], vec!["b"]]);
-    }
-
-    #[test]
-    fn test_disjunctive_with_body() {
-        // a | b :- c. c.
-        // Two answer sets: {a, c} and {b, c}
-        // Rule 1: 8 2 2 3 1 0 4 (a | b :- c)
-        // Rule 2: 1 4 0 0 (c.)
-        let input = "8 2 2 3 1 0 4\n1 4 0 0\n0\n2 a\n3 b\n4 c\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a", "c"], vec!["b", "c"]]);
-    }
-
-    #[test]
-    fn test_disjunctive_with_constraint() {
-        // a | b. :- a.
-        // Only {b} is valid since a is forbidden
-        let input = "8 2 2 3 0 0\n1 1 1 0 2\n0\n2 a\n3 b\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["b"]]);
-    }
-
-    #[test]
-    fn test_disjunctive_three_heads() {
-        // a | b | c.
-        // Three answer sets: {a}, {b}, {c}
-        let input = "8 3 2 3 4 0 0\n0\n2 a\n3 b\n4 c\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a"], vec!["b"], vec!["c"]]);
-    }
-
-    #[test]
-    fn test_disjunctive_with_default_negation() {
-        // a | b. c :- not a.
-        // Two answer sets: {a} and {b, c}
-        let input = "8 2 2 3 0 0\n1 4 1 1 2\n0\n2 a\n3 b\n4 c\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a"], vec!["b", "c"]]);
-    }
-
-    #[test]
-    fn test_weight_body_loop() {
-        // a :- #count{b:b; c:c} >= 1.
-        // b :- a.
-        // {c}.
-        // :- not c.
-        // Expected answer set: {a, b, c}
-        //
-        // From gringo --output=smodels:
-        // 3 1 2 0 0       -> {c}.  (choice rule, head=2)
-        // 1 1 1 1 2       -> :- not c.  (constraint: false :- not c)
-        // 1 3 1 0 4       -> a :- aux4
-        // 1 5 1 0 3       -> b :- a
-        // 2 6 2 0 1 2 5   -> aux6 :- {c, b} >= 1  (cardinality rule)
-        // 1 4 1 0 6       -> aux4 :- aux6
-        // Symbols: 2=c, 3=a, 5=b
-        let input = "3 1 2 0 0\n1 1 1 1 2\n1 3 1 0 4\n1 5 1 0 3\n2 6 2 0 1 2 5\n1 4 1 0 6\n0\n2 c\n3 a\n5 b\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results, vec![vec!["a", "b", "c"]]);
-    }
-
-    #[test]
-    fn test_weight_body_loop_empty() {
-        // a :- #count{b:b; c:c} >= 1.
-        // b :- a.
-        // {c}.
-        // :- c.       (c must be false)
-        //
-        // The only stable model is {} because:
-        // - c=false (from :- c)
-        // - a requires {b, c} >= 1, but c=false so need b=true
-        // - b requires a, which requires b (circular with no external support)
-        // - So {a, b} is unfounded and rejected
-        //
-        // From gringo --output=smodels:
-        // 3 1 2 0 0       -> {c}.
-        // 1 1 1 0 2       -> :- c.
-        // 1 3 1 0 4       -> a :- aux4
-        // 1 5 1 0 3       -> b :- a
-        // 2 6 2 0 1 2 5   -> aux6 :- {c, b} >= 1
-        // 1 4 1 0 6       -> aux4 :- aux6
-        // Symbols: 2=c, 3=a, 5=b
-        let input = "3 1 2 0 0\n1 1 1 0 2\n1 3 1 0 4\n1 5 1 0 3\n2 6 2 0 1 2 5\n1 4 1 0 6\n0\n2 c\n3 a\n5 b\n0\n";
-        let results = solve_asp(input);
-        // Only the empty set should be a stable model
-        assert_eq!(
-            results,
-            vec![Vec::<&str>::new()],
-            "Expected only empty set but got: {:?}",
-            results
-        );
-    }
-
-    #[test]
-    fn test_weight_body_two_models() {
-        // a :- #count{b:b; c:c} >= 1.
-        // b :- a.
-        // {c}.
-        //
-        // Two stable models:
-        // - {} (empty: c not chosen, so a not derived, so b not derived)
-        // - {a, b, c} (c chosen, {c} >= 1 satisfied, a derived, b derived)
-        //
-        // From gringo --output=smodels:
-        // 3 1 2 0 0       -> {c}.
-        // 1 3 1 0 4       -> a :- aux4
-        // 1 5 1 0 3       -> b :- a
-        // 2 6 2 0 1 2 5   -> aux6 :- {c, b} >= 1
-        // 1 4 1 0 6       -> aux4 :- aux6
-        // Symbols: 2=c, 3=a, 5=b
-        let input =
-            "3 1 2 0 0\n1 3 1 0 4\n1 5 1 0 3\n2 6 2 0 1 2 5\n1 4 1 0 6\n0\n2 c\n3 a\n5 b\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results.len(), 2, "Expected 2 models but got: {:?}", results);
-        assert!(
-            results.iter().any(|m| m.is_empty()),
-            "Expected empty model but got: {:?}",
-            results
-        );
-        assert!(
-            results.iter().any(|m| m == &vec!["a", "b", "c"]),
-            "Expected {{a,b,c}} but got: {:?}",
-            results
-        );
-    }
-
-    #[test]
-    fn test_self_loop_rule() {
-        // Program:
-        //   {a}.
-        //   b :- a.
-        //   c :- a.
-        //   d :- b, c.
-        //   d :- d, d.  % Self-loop
-        //   :- not d, a.
-        //
-        // Two stable models: {} and {a, b, c, d}
-        //
-        // From gringo --output=smodels:
-        // 3 1 2 0 0      -> {a}.
-        // 1 3 1 0 2      -> b :- a
-        // 1 4 1 0 2      -> c :- a
-        // 1 5 2 0 3 4    -> d :- b, c
-        // 1 5 2 0 5 5    -> d :- d, d
-        // 1 1 2 1 5 2    -> :- not d, a
-        // Symbols: 2=a, 5=d
-        let input = "3 1 2 0 0\n1 3 1 0 2\n1 4 1 0 2\n1 5 2 0 3 4\n1 5 2 0 5 5\n1 1 2 1 5 2\n0\n2 a\n5 d\n0\n";
-        let results = solve_asp(input);
-        assert_eq!(results.len(), 2, "Expected 2 models but got: {:?}", results);
-        assert!(
-            results.iter().any(|m| m.is_empty()),
-            "Expected empty model but got: {:?}",
-            results
-        );
-        assert!(
-            results.iter().any(|m| m == &vec!["a", "d"]),
-            "Expected {{a, d}} but got: {:?}",
-            results
-        );
-    }
-
-    #[test]
-    fn test_loop_constraint_should_be_added_not_blocked() {
-        // Program:
-        //   a :- {b, c} >= 1.
-        //   b :- a.
-        //   {c}.
-        //   :- c.       (c must be false)
-        //
-        // Only valid stable model is {} (empty set).
-
-        let input = "3 1 2 0 0\n1 1 1 0 2\n1 3 1 0 4\n1 5 1 0 3\n2 6 2 0 1 2 5\n1 4 1 0 6\n0\n2 c\n3 a\n5 b\n0\n";
-        let program = crate::parse_smodels(input).unwrap();
-        let mut solver = super::AspSolver::new(program);
-
-        let results = solver.solve();
-
-        // The result is correct (empty set only)
-        assert_eq!(results.len(), 1);
-        assert!(results[0].is_empty());
-    }
-}
+mod tests;
