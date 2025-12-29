@@ -14,8 +14,9 @@ fn main() {
     if !lib_path.exists() {
         std::fs::create_dir_all(&build_dir).expect("Failed to create build directory");
 
+        // Use RelWithDebInfo for -O2 -g, but undefine NDEBUG to keep asserts enabled
         let status = Command::new("cmake")
-            .args(["-DCMAKE_BUILD_TYPE=RelWithDebInfo", ".."])
+            .args(["-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -g", ".."])
             .current_dir(&build_dir)
             .status()
             .expect("Failed to run cmake");

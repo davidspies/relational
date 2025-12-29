@@ -82,7 +82,12 @@ def verify_with_clasp(
             text=True,
             timeout=30,
         )
-        return "SATISFIABLE" in clasp.stdout
+        if re.search(r"^SATISFIABLE$", clasp.stdout, re.MULTILINE):
+            return True
+        elif re.search(r"^UNSATISFIABLE$", clasp.stdout, re.MULTILINE):
+            return False
+        else:
+            raise RuntimeError(f"Unexpected clasp output: {clasp.stdout}")
     except subprocess.TimeoutExpired:
         print("Timeout running clasp", file=sys.stderr)
         return False
