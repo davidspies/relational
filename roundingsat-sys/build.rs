@@ -8,27 +8,28 @@ fn main() {
         .join("vendor/roundingsat");
 
     let build_dir = roundingsat_dir.join("build_lib");
-    let lib_path = build_dir.join("libroundingsat.a");
 
-    // Build with cmake if library doesn't exist
-    if !lib_path.exists() {
-        std::fs::create_dir_all(&build_dir).expect("Failed to create build directory");
+    // Always run cmake/make - they handle incremental builds efficiently
+    std::fs::create_dir_all(&build_dir).expect("Failed to create build directory");
 
-        // Use RelWithDebInfo for -O2 -g, but undefine NDEBUG to keep asserts enabled
-        let status = Command::new("cmake")
-            .args(["-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -g", ".."])
-            .current_dir(&build_dir)
-            .status()
-            .expect("Failed to run cmake");
-        assert!(status.success(), "cmake configuration failed");
+    // Use RelWithDebInfo for -O2 -g, but undefine NDEBUG to keep asserts enabled
+    let status = Command::new("cmake")
+        .args([
+            "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+            "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -g",
+            "..",
+        ])
+        .current_dir(&build_dir)
+        .status()
+        .expect("Failed to run cmake");
+    assert!(status.success(), "cmake configuration failed");
 
-        let status = Command::new("make")
-            .args(["-j4", "roundingsat_lib"])
-            .current_dir(&build_dir)
-            .status()
-            .expect("Failed to run make");
-        assert!(status.success(), "make failed");
-    }
+    let status = Command::new("make")
+        .args(["-j4", "roundingsat_lib"])
+        .current_dir(&build_dir)
+        .status()
+        .expect("Failed to run make");
+    assert!(status.success(), "make failed");
 
     // Link the pre-built library
     println!("cargo:rustc-link-search=native={}", build_dir.display());
