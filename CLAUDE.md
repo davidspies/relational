@@ -64,17 +64,37 @@ When implementing an algorithm from a formalization, the code structure should m
 
 When explaining something, use full sentences (not sentence fragments).
 
-### Debugging: Understand Before Retrying
+### Debugging: Inspection vs Shotgun
 
-When something doesn't work, **figure out why** before trying a different approach.
+There are two fundamentally different approaches to debugging:
 
-Bad pattern:
-- "That didn't work. Let me try a different approach."
+**Shotgun debugging** (BAD): Try changes and see if they fix the problem.
+- "The assertion fails. Let me change this condition and see if it helps."
+- "That didn't work. Let me try a different fix."
+- "Still failing. What if I reset this variable here?"
 
-Good pattern:
-- "That didn't work. Let me figure out why."
+**Debugging by inspection** (GOOD): Understand the problem completely before changing anything.
+- "The assertion `x == y` fails. What are the actual values of x and y?"
+- "x is 5 and y is 3. How did x become 5? Let me trace backwards."
+- "x comes from function F. What inputs did F receive? Why did it return 5?"
+- "Now I understand the root cause. The fix is..."
 
-Blindly trying alternatives wastes time and teaches nothing. Understand the failure first.
+Shotgun debugging is tempting because each attempt feels like progress. But it's actually:
+- **Slow**: You waste time on fixes that don't address the root cause.
+- **Unreliable**: Even if a fix "works", you don't know if it's correct or just masking the bug.
+- **Uninformative**: You learn nothing about the system.
+
+Debugging by inspection requires patience but is:
+- **Fast**: Once you understand the bug, the fix is usually obvious.
+- **Reliable**: You fix the actual problem, not a symptom.
+- **Educational**: You learn how the system works.
+
+**The rule**: Before making ANY code change to fix a bug, you must be able to explain:
+1. What the incorrect behavior is (not just "it crashes", but the specific wrong state).
+2. How the system got into that state (the sequence of events).
+3. Why your fix addresses the root cause (not just suppresses the symptom).
+
+If you can't explain all three, you don't understand the bug yet. Keep investigating.
 
 ### Debug Scripts
 
