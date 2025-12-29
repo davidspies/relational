@@ -10,3 +10,6 @@
 [submodule "vendor/roundingsat"]
 	path = vendor/roundingsat
 	url = git@github.com:davidspies/roundingsat.git
+[submodule "vendor/veripb"]
+	path = vendor/veripb
+	url = https://github.com/StephanGocht/VeriPB.git

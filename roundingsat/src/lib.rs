@@ -24,12 +24,14 @@
 //! assert!(count >= 2);
 //! ```
 
+use std::ffi::CString;
 use std::marker::PhantomData;
+use std::path::Path;
 
 use roundingsat_sys::{
     RsResult, RsSolver, RsViolatedConstraint, rs_add_clause, rs_add_pb_constraint,
     rs_clear_externals, rs_free, rs_get_num_vars, rs_get_value, rs_new, rs_set_externals,
-    rs_set_num_vars, rs_set_solution_callback, rs_solve,
+    rs_set_num_vars, rs_set_proof_log, rs_set_solution_callback, rs_solve,
 };
 
 /// Result of a solve operation.
@@ -107,6 +109,21 @@ pub struct ViolatedConstraint {
     pub rhs: i64,
 }
 
+/// A term in a pseudo-boolean constraint: coefficient * literal.
+#[derive(Debug, Clone, Copy)]
+struct Term {
+    lit: i32,
+    coef: i32,
+}
+
+/// A stored constraint for sanity checking.
+/// Represents: sum(term.coef * term.lit) >= rhs
+#[derive(Debug, Clone)]
+struct StoredConstraint {
+    terms: Vec<Term>,
+    rhs: i64,
+}
+
 /// Read-only view of the current variable assignment.
 /// Passed to the solution callback to query variable values.
 pub struct Assignment<'a> {
@@ -149,6 +166,10 @@ pub struct Solver {
     violated_storage: Option<ViolatedConstraint>,
     /// Storage for the FFI struct (avoids allocation each callback)
     violated_ffi: RsViolatedConstraint,
+    /// All constraints added to the solver (for sanity checking)
+    constraints: Vec<StoredConstraint>,
+    /// Current externals (for sanity checking)
+    externals: Vec<i32>,
 }
 
 // Safety: RsSolver instances are independent and don't share mutable state
@@ -172,8 +193,24 @@ impl Solver {
                     coefs: std::ptr::null(),
                     rhs: 0,
                 },
+                constraints: Vec::new(),
+                externals: Vec::new(),
             })
         }
+    }
+
+    /// Enables proof logging to a file.
+    ///
+    /// Must be called before adding any constraints.
+    /// The proof will be written to `{path}.proof` in VeriPB format.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the path contains a null byte.
+    pub fn set_proof_log(&mut self, path: &Path) {
+        let path_str = path.to_str().expect("Path must be valid UTF-8");
+        let c_path = CString::new(path_str).expect("Path must not contain null bytes");
+        unsafe { rs_set_proof_log(self.ptr, c_path.as_ptr()) }
     }
 
     /// Sets the number of variables (1..n).
@@ -232,6 +269,12 @@ impl Solver {
         if result < 0 {
             Err(SolverError::UnsatAtRoot)
         } else {
+            let terms = lits
+                .iter()
+                .zip(coefs.iter())
+                .map(|(&lit, &coef)| Term { lit, coef })
+                .collect();
+            self.constraints.push(StoredConstraint { terms, rhs });
             Ok(())
         }
     }
@@ -250,6 +293,8 @@ impl Solver {
         if result < 0 {
             Err(SolverError::UnsatAtRoot)
         } else {
+            let terms = lits.iter().map(|&lit| Term { lit, coef: 1 }).collect();
+            self.constraints.push(StoredConstraint { terms, rhs: 1 });
             Ok(())
         }
     }
@@ -266,12 +311,14 @@ impl Solver {
     pub fn set_externals(&mut self, assumps: &[i32]) -> Result<(), SolverError> {
         self.validate_literals(assumps)?;
         unsafe { rs_set_externals(self.ptr, assumps.len(), assumps.as_ptr()) }
+        self.externals = assumps.to_vec();
         Ok(())
     }
 
     /// Clears all externals.
     pub fn clear_externals(&mut self) {
         unsafe { rs_clear_externals(self.ptr) }
+        self.externals.clear();
     }
 
     /// Solves the current problem.
@@ -291,7 +338,65 @@ impl Solver {
                 slack (sum of satisfied terms < rhs) to be valid."
             );
         }
-        result.into()
+        let solve_result: SolveResult = result.into();
+
+        if solve_result == SolveResult::Sat {
+            self.sanity_check_solution();
+        }
+
+        solve_result
+    }
+
+    /// Verifies that the current solution satisfies all constraints and externals.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any constraint is violated or any external disagrees with the solution.
+    fn sanity_check_solution(&self) {
+        // Check all externals are satisfied
+        for &lit in &self.externals {
+            let var = lit.abs();
+            let expected = lit > 0;
+            let actual = self
+                .get_value(var)
+                .expect("Variable should have a value in SAT solution");
+            assert!(
+                actual == expected,
+                "External {} violated: expected var {} = {}, got {}",
+                lit,
+                var,
+                expected,
+                actual
+            );
+        }
+
+        // Check all constraints are satisfied
+        for (i, constraint) in self.constraints.iter().enumerate() {
+            let sum: i64 = constraint
+                .terms
+                .iter()
+                .map(|term| {
+                    let var = term.lit.abs();
+                    let lit_true = term.lit > 0;
+                    let var_true = self
+                        .get_value(var)
+                        .expect("Variable should have a value in SAT solution");
+                    let lit_satisfied = lit_true == var_true;
+                    if lit_satisfied {
+                        term.coef as i64
+                    } else {
+                        0
+                    }
+                })
+                .sum();
+            assert!(
+                sum >= constraint.rhs,
+                "Constraint {} violated: sum = {}, rhs = {}",
+                i,
+                sum,
+                constraint.rhs
+            );
+        }
     }
 
     /// Gets the value of a variable in the solution.

@@ -86,6 +86,11 @@ unsafe extern "C" {
         callback: RsSolutionCallback,
         user_data: *mut std::ffi::c_void,
     );
+
+    /// Enable proof logging to a file.
+    /// Must be called before adding any constraints.
+    /// The proof will be written to {filename}.proof in VeriPB format.
+    pub fn rs_set_proof_log(solver: *mut RsSolver, filename: *const std::ffi::c_char);
 }
 
 #[cfg(test)]

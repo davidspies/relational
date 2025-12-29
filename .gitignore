@@ -3,3 +3,4 @@
 /cnf_benchmarks
 /solve_output
 __pycache__
+.venv
