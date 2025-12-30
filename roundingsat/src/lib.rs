@@ -313,25 +313,28 @@ impl Solver {
             });
         }
         self.validate_literals(lits)?;
+
+        let terms: Vec<Term> = lits
+            .iter()
+            .zip(coefs.iter())
+            .map(|(&lit, &coef)| Term { lit, coef })
+            .collect();
+        let constraint = StoredConstraint { terms, rhs };
+
+        // Write to OPB file BEFORE calling C++ - even if the add causes UNSAT,
+        // the C++ side will have already logged `l N` to the proof referencing
+        // this constraint, so it must be in the OPB file.
+        if let Some(ref mut writer) = self.opb_writer {
+            Self::write_constraint_to_opb(writer, &constraint);
+            self.opb_constraint_count += 1;
+        }
+
         let result = unsafe {
             rs_add_pb_constraint(self.ptr, lits.len(), lits.as_ptr(), coefs.as_ptr(), rhs)
         };
         if result < 0 {
             Err(SolverError::UnsatAtRoot)
         } else {
-            let terms: Vec<Term> = lits
-                .iter()
-                .zip(coefs.iter())
-                .map(|(&lit, &coef)| Term { lit, coef })
-                .collect();
-            let constraint = StoredConstraint { terms, rhs };
-
-            // Write to OPB file if proof logging is enabled
-            if let Some(ref mut writer) = self.opb_writer {
-                Self::write_constraint_to_opb(writer, &constraint);
-                self.opb_constraint_count += 1;
-            }
-
             self.constraints.push(constraint);
             Ok(())
         }
@@ -347,19 +350,22 @@ impl Solver {
     /// Returns `SolverError::UnsatAtRoot` if this clause makes the problem unsatisfiable.
     pub fn add_clause(&mut self, lits: &[i32]) -> Result<(), SolverError> {
         self.validate_literals(lits)?;
+
+        let terms: Vec<Term> = lits.iter().map(|&lit| Term { lit, coef: 1 }).collect();
+        let constraint = StoredConstraint { terms, rhs: 1 };
+
+        // Write to OPB file BEFORE calling C++ - even if the add causes UNSAT,
+        // the C++ side will have already logged `l N` to the proof referencing
+        // this constraint, so it must be in the OPB file.
+        if let Some(ref mut writer) = self.opb_writer {
+            Self::write_constraint_to_opb(writer, &constraint);
+            self.opb_constraint_count += 1;
+        }
+
         let result = unsafe { rs_add_clause(self.ptr, lits.len(), lits.as_ptr()) };
         if result < 0 {
             Err(SolverError::UnsatAtRoot)
         } else {
-            let terms: Vec<Term> = lits.iter().map(|&lit| Term { lit, coef: 1 }).collect();
-            let constraint = StoredConstraint { terms, rhs: 1 };
-
-            // Write to OPB file if proof logging is enabled
-            if let Some(ref mut writer) = self.opb_writer {
-                Self::write_constraint_to_opb(writer, &constraint);
-                self.opb_constraint_count += 1;
-            }
-
             self.constraints.push(constraint);
             Ok(())
         }
@@ -524,21 +530,19 @@ impl Solver {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    let opb_content = std::fs::read_to_string(&opb_path).unwrap_or_default();
+                    // Copy files to a stable location for debugging
+                    let debug_dir = PathBuf::from("/tmp/veripb_debug");
+                    let _ = std::fs::create_dir_all(&debug_dir);
+                    let _ = std::fs::copy(&opb_path, debug_dir.join("check_proof.opb"));
+                    let _ = std::fs::copy(&proof_file, debug_dir.join("check_proof.proof"));
                     panic!(
                         "veripb verification failed!\n\
-                         OPB file: {}\n\
-                         Proof file: {}\n\
+                         Debug files saved to: {}\n\
                          stdout: {}\n\
-                         stderr: {}\n\
-                         \n=== OPB ===\n{}\n\
-                         \n=== Proof ===\n{}",
-                        opb_path.display(),
-                        proof_file.display(),
+                         stderr: {}",
+                        debug_dir.display(),
                         stdout,
                         stderr,
-                        opb_content,
-                        proof_content
                     );
                 }
                 return;
@@ -594,25 +598,24 @@ impl Solver {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let temp_opb_content = std::fs::read_to_string(&temp_opb).unwrap_or_default();
-            let temp_proof_content = std::fs::read_to_string(&temp_proof).unwrap_or_default();
+            // Copy files to a stable location for debugging
+            let debug_dir = PathBuf::from("/tmp/veripb_debug");
+            let _ = std::fs::create_dir_all(&debug_dir);
+            let debug_opb = debug_dir.join("check_proof.opb");
+            let debug_proof = debug_dir.join("check_proof.proof");
+            let _ = std::fs::copy(&temp_opb, &debug_opb);
+            let _ = std::fs::copy(&temp_proof, &debug_proof);
             // Clean up temp files
             let _ = std::fs::remove_file(&temp_opb);
             let _ = std::fs::remove_file(&temp_proof);
             panic!(
                 "veripb verification failed!\n\
-                 OPB file: {}\n\
-                 Proof file: {}\n\
+                 Debug files saved to: {}\n\
                  stdout: {}\n\
-                 stderr: {}\n\
-                 \n=== Temp OPB ===\n{}\n\
-                 \n=== Temp Proof ===\n{}",
-                opb_path.display(),
-                proof_file.display(),
+                 stderr: {}",
+                debug_dir.display(),
                 stdout,
                 stderr,
-                temp_opb_content,
-                temp_proof_content
             );
         }
 

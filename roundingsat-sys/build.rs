@@ -14,7 +14,7 @@ fn main() {
 
     // Use RelWithDebInfo for -O2 -g, but undefine NDEBUG to keep asserts enabled
     let status = Command::new("cmake")
-        .args(["-DCMAKE_BUILD_TYPE=Debug", ".."])
+        .args(["-DCMAKE_BUILD_TYPE=Release", ".."])
         .current_dir(&build_dir)
         .status()
         .expect("Failed to run cmake");
