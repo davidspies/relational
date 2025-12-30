@@ -246,12 +246,16 @@ impl Solver {
         self.opb_writer = Some(writer);
     }
 
-    /// Writes a constraint in OPB format: +1 x1 -2 x2 >= 3 ;
+    /// Writes a constraint in OPB format: +1 x1 +1 ~x2 >= 3 ;
     fn write_constraint_to_opb(writer: &mut BufWriter<File>, constraint: &StoredConstraint) {
         for term in &constraint.terms {
             let var = term.lit.abs();
+            // Always include sign before coefficient
+            if term.coef >= 0 {
+                write!(writer, "+").unwrap();
+            }
             if term.lit > 0 {
-                write!(writer, "+{} x{} ", term.coef, var).unwrap();
+                write!(writer, "{} x{} ", term.coef, var).unwrap();
             } else {
                 write!(writer, "{} ~x{} ", term.coef, var).unwrap();
             }
@@ -476,61 +480,108 @@ impl Solver {
             }
         }
 
-        // Create temp proof: copy original but strip conclusion, then add our derivation
+        // Create temp proof: modify conclusion to derive contradiction from externals
         let temp_proof = proof_path.with_extension("proof.tmp");
         {
-            // Read original proof and filter out conclusion lines
             let proof_content = std::fs::read_to_string(&proof_file).unwrap();
-            let filtered: String = proof_content
-                .lines()
-                .filter(|l| !l.trim().starts_with('c'))
-                .map(|l| format!("{}\n", l))
-                .collect();
 
-            std::fs::write(&temp_proof, &filtered).expect("Failed to write temp proof");
+            // OPB constraint IDs for externals (appended after original constraints)
+            let ext_opb_base = self.constraints.len() + 1;
 
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&temp_proof)
-                .expect("Failed to open temp proof for appending");
+            // Find the highest proof ID used, and the conclusion line
+            let mut max_proof_id = 0u64;
 
-            // Load each external constraint (they come after the original constraints)
-            // OPB constraints are numbered 1..n, externals are n+1..n+k
-            let base_id = self.constraints.len() + 1;
-            for i in 0..self.externals.len() {
-                writeln!(file, "l {}", base_id + i).unwrap();
+            for line in proof_content.lines() {
+                let trimmed = line.trim();
+                // Lines like "e N ..." define constraint N
+                if trimmed.starts_with('e') {
+                    if let Some(id_str) =
+                        trimmed.strip_prefix('e').unwrap().split_whitespace().next()
+                    {
+                        if let Ok(id) = id_str.parse::<u64>() {
+                            max_proof_id = max_proof_id.max(id);
+                        }
+                    }
+                }
+                // Conclusion line: "c N 0"
+                if trimmed.starts_with('c') && trimmed.ends_with(" 0") {
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    if parts.len() == 3 {
+                        let _conclusion_constraint_id = parts[1].parse::<u64>().ok();
+                    }
+                }
             }
 
-            // Derive the empty constraint (contradiction) by unit propagation
-            writeln!(file, "u >= 1 ;").unwrap();
+            if self.externals.is_empty() {
+                // No externals - verify with original files
+                let output = Command::new(&veripb_path)
+                    .arg("--requireUnsat")
+                    .arg(&opb_path)
+                    .arg(&proof_file)
+                    .output()
+                    .expect("Failed to run veripb");
 
-            // Count proof IDs to find the ID of the contradiction we just derived.
-            // Lines that create proof IDs: u, l, p, rup, etc.
-            // Lines that don't create IDs: comments (*), headers, e (equate), c (conclude), d (delete), w, f
-            drop(file);
-            let final_proof = std::fs::read_to_string(&temp_proof).unwrap();
-            let proof_id_count = final_proof
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let opb_content = std::fs::read_to_string(&opb_path).unwrap_or_default();
+                    panic!(
+                        "veripb verification failed!\n\
+                         OPB file: {}\n\
+                         Proof file: {}\n\
+                         stdout: {}\n\
+                         stderr: {}\n\
+                         \n=== OPB ===\n{}\n\
+                         \n=== Proof ===\n{}",
+                        opb_path.display(),
+                        proof_file.display(),
+                        stdout,
+                        stderr,
+                        opb_content,
+                        proof_content
+                    );
+                }
+                return;
+            }
+
+            // Build load commands for externals
+            let mut load_commands = String::new();
+            for i in 0..self.externals.len() {
+                let opb_id = ext_opb_base + i;
+                load_commands.push_str(&format!("l {}\n", opb_id));
+            }
+
+            // After loading externals, derive contradiction via RUP and conclude
+            let rup_and_conclude = format!(
+                "{}u >= 1 ;\nc {} 0\n",
+                load_commands,
+                max_proof_id + self.externals.len() as u64 + 1
+            );
+
+            // Check if there's an existing conclusion line to replace
+            let has_conclusion = proof_content
                 .lines()
-                .filter(|l| {
-                    let l = l.trim();
-                    !l.is_empty()
-                        && !l.starts_with("pseudo-Boolean")
-                        && !l.starts_with('*')
-                        && !l.starts_with('#')
-                        && !l.starts_with('e')
-                        && !l.starts_with('c')
-                        && !l.starts_with('d')
-                        && !l.starts_with('w')
-                        && !l.starts_with('f')
-                })
-                .count();
+                .any(|l| l.trim().starts_with('c') && l.trim().ends_with(" 0"));
 
-            // Conclude with the ID of the contradiction we just derived
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&temp_proof)
-                .expect("Failed to reopen temp proof");
-            writeln!(file, "c {}", proof_id_count).unwrap();
+            let modified: String = if has_conclusion {
+                // Replace the conclusion line with: load externals + RUP + conclude
+                proof_content
+                    .lines()
+                    .map(|l| {
+                        let trimmed = l.trim();
+                        if trimmed.starts_with('c') && trimmed.ends_with(" 0") {
+                            rup_and_conclude.clone()
+                        } else {
+                            format!("{}\n", l)
+                        }
+                    })
+                    .collect()
+            } else {
+                // No conclusion line - append our RUP + conclude at the end
+                format!("{}{}", proof_content, rup_and_conclude)
+            };
+
+            std::fs::write(&temp_proof, &modified).expect("Failed to write temp proof");
         }
 
         let output = Command::new(&veripb_path)
@@ -540,25 +591,34 @@ impl Solver {
             .output()
             .expect("Failed to run veripb");
 
-        // Clean up temp files
-        let _ = std::fs::remove_file(&temp_opb);
-        let _ = std::fs::remove_file(&temp_proof);
-
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
+            let temp_opb_content = std::fs::read_to_string(&temp_opb).unwrap_or_default();
+            let temp_proof_content = std::fs::read_to_string(&temp_proof).unwrap_or_default();
+            // Clean up temp files
+            let _ = std::fs::remove_file(&temp_opb);
+            let _ = std::fs::remove_file(&temp_proof);
             panic!(
                 "veripb verification failed!\n\
                  OPB file: {}\n\
                  Proof file: {}\n\
                  stdout: {}\n\
-                 stderr: {}",
+                 stderr: {}\n\
+                 \n=== Temp OPB ===\n{}\n\
+                 \n=== Temp Proof ===\n{}",
                 opb_path.display(),
                 proof_file.display(),
                 stdout,
-                stderr
+                stderr,
+                temp_opb_content,
+                temp_proof_content
             );
         }
+
+        // Clean up temp files on success
+        let _ = std::fs::remove_file(&temp_opb);
+        let _ = std::fs::remove_file(&temp_proof);
     }
 
     /// Verifies that the current solution satisfies all constraints and externals.
@@ -596,11 +656,7 @@ impl Solver {
                         .get_value(var)
                         .expect("Variable should have a value in SAT solution");
                     let lit_satisfied = lit_true == var_true;
-                    if lit_satisfied {
-                        term.coef as i64
-                    } else {
-                        0
-                    }
+                    if lit_satisfied { term.coef as i64 } else { 0 }
                 })
                 .sum();
             assert!(
@@ -1145,5 +1201,131 @@ mod tests {
         // Verify OPB file exists
         let opb_path = proof_base.with_extension("opb");
         assert!(opb_path.exists());
+    }
+
+    #[test]
+    fn debug_print_proof_with_externals() {
+        use std::process::Command;
+
+        let proof_dir = tempfile::tempdir().unwrap();
+        let proof_base = proof_dir.path().join("test");
+
+        let mut solver = Solver::new().unwrap();
+        solver.set_proof_log(&proof_base);
+        solver.set_num_vars(2);
+
+        // x1 OR x2
+        solver.add_clause(&[1, 2]).unwrap();
+
+        // Assume NOT x1 AND NOT x2 -> should be UNSAT
+        solver.set_externals(&[-1, -2]).unwrap();
+
+        let result = solver.solve();
+        eprintln!("Result: {:?}", result);
+
+        // Print files
+        let opb = std::fs::read_to_string(proof_base.with_extension("opb")).unwrap();
+        let proof = std::fs::read_to_string(proof_base.with_extension("proof")).unwrap();
+
+        eprintln!("=== OPB ===\n{}", opb);
+        eprintln!("=== PROOF ===\n{}", proof);
+
+        // Test manual verification with externals appended
+        let temp_opb = proof_dir.path().join("temp.opb");
+        let temp_proof = proof_dir.path().join("temp.proof");
+
+        // Append externals to OPB
+        {
+            std::fs::copy(proof_base.with_extension("opb"), &temp_opb).unwrap();
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&temp_opb)
+                .unwrap();
+            use std::io::Write;
+            // External -1 means x1 = false, so ~x1 >= 1
+            writeln!(file, "+1 ~x1 >= 1 ;").unwrap();
+            // External -2 means x2 = false, so ~x2 >= 1
+            writeln!(file, "+1 ~x2 >= 1 ;").unwrap();
+        }
+
+        // Modify proof exactly as verify_proof_if_enabled does
+        {
+            // Calculate max_proof_id from original proof
+            let mut max_proof_id = 0u64;
+            for line in proof.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('e') {
+                    if let Some(id_str) =
+                        trimmed.strip_prefix('e').unwrap().split_whitespace().next()
+                    {
+                        if let Ok(id) = id_str.parse::<u64>() {
+                            max_proof_id = max_proof_id.max(id);
+                        }
+                    }
+                }
+            }
+            eprintln!("max_proof_id: {}", max_proof_id);
+
+            // ext_opb_base = constraints.len() + 1 = 1 + 1 = 2
+            let ext_opb_base = 2;
+            let externals = vec![-1i32, -2i32];
+
+            let mut load_commands = String::new();
+            for i in 0..externals.len() {
+                let opb_id = ext_opb_base + i;
+                load_commands.push_str(&format!("l {}\n", opb_id));
+            }
+
+            let rup_and_conclude = format!(
+                "{}u >= 1 ;\nc {} 0\n",
+                load_commands,
+                max_proof_id + externals.len() as u64 + 1
+            );
+            eprintln!("rup_and_conclude:\n{}", rup_and_conclude);
+
+            // Replace the conclusion line
+            let modified: String = proof
+                .lines()
+                .map(|l| {
+                    let trimmed = l.trim();
+                    if trimmed.starts_with('c') && trimmed.ends_with(" 0") {
+                        rup_and_conclude.clone()
+                    } else {
+                        format!("{}\n", l)
+                    }
+                })
+                .collect();
+
+            std::fs::write(&temp_proof, &modified).unwrap();
+        }
+
+        eprintln!("=== TEMP OPB ===");
+        eprintln!("{}", std::fs::read_to_string(&temp_opb).unwrap());
+        eprintln!("=== TEMP PROOF ===");
+        eprintln!("{}", std::fs::read_to_string(&temp_proof).unwrap());
+
+        // Try veripb with verbose trace
+        let veripb_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join(".venv/bin/veripb");
+
+        if veripb_path.exists() {
+            let output = Command::new(&veripb_path)
+                .arg("--requireUnsat")
+                .arg("--trace")
+                .arg("-v")
+                .arg(&temp_opb)
+                .arg(&temp_proof)
+                .output()
+                .expect("Failed to run veripb");
+
+            eprintln!("=== VeriPB Output ===");
+            eprintln!("status: {:?}", output.status);
+            eprintln!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+            eprintln!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+        } else {
+            eprintln!("veripb not found at {:?}", veripb_path);
+        }
     }
 }
