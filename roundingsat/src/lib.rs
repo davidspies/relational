@@ -24,18 +24,22 @@
 //! assert!(count >= 2);
 //! ```
 
+#[cfg(debug_assertions)]
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
+#[cfg(debug_assertions)]
 use std::process::Command;
 
 use roundingsat_sys::{
     RsResult, RsSolver, RsViolatedConstraint, rs_add_clause, rs_add_pb_constraint,
     rs_clear_externals, rs_flush_proof_log, rs_free, rs_get_num_vars, rs_get_value, rs_new,
-    rs_set_externals, rs_set_num_vars, rs_set_proof_log, rs_set_solution_callback, rs_solve,
+    rs_set_externals, rs_set_num_vars, rs_set_solution_callback, rs_solve,
 };
+#[cfg(debug_assertions)]
+use roundingsat_sys::rs_set_proof_log;
 
 /// Result of a solve operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +118,7 @@ pub struct ViolatedConstraint {
 
 /// A term in a pseudo-boolean constraint: coefficient * literal.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Fields only read in debug builds
 struct Term {
     lit: i32,
     coef: i32,
@@ -122,6 +127,7 @@ struct Term {
 /// A stored constraint for sanity checking.
 /// Represents: sum(term.coef * term.lit) >= rhs
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Fields only read in debug builds
 struct StoredConstraint {
     terms: Vec<Term>,
     rhs: i64,
@@ -178,6 +184,7 @@ pub struct Solver {
     /// Writer for the OPB problem file
     opb_writer: Option<BufWriter<File>>,
     /// Number of constraints written to OPB file (for header update)
+    #[allow(dead_code)] // Only used in debug builds
     opb_constraint_count: usize,
 }
 
@@ -211,14 +218,17 @@ impl Solver {
         }
     }
 
-    /// Enables proof logging to a file.
+    /// Enables proof logging to a file (debug builds only).
     ///
     /// Creates both `{path}.proof` (VeriPB proof) and `{path}.opb` (problem file).
     /// On UNSAT, automatically validates the proof using veripb.
     ///
+    /// In release builds, this is a no-op for performance.
+    ///
     /// # Panics
     ///
     /// Panics if the path contains a null byte or file creation fails.
+    #[cfg(debug_assertions)]
     pub fn set_proof_log(&mut self, path: &Path) {
         let path_str = path.to_str().expect("Path must be valid UTF-8");
         let c_path = CString::new(path_str).expect("Path must not contain null bytes");
@@ -246,7 +256,16 @@ impl Solver {
         self.opb_writer = Some(writer);
     }
 
+    /// Enables proof logging to a file (debug builds only).
+    ///
+    /// In release builds, this is a no-op for performance.
+    #[cfg(not(debug_assertions))]
+    pub fn set_proof_log(&mut self, _path: &Path) {
+        // No-op in release builds
+    }
+
     /// Writes a constraint in OPB format: +1 x1 +1 ~x2 >= 3 ;
+    #[cfg(debug_assertions)]
     fn write_constraint_to_opb(writer: &mut BufWriter<File>, constraint: &StoredConstraint) {
         for term in &constraint.terms {
             let var = term.lit.abs();
@@ -324,6 +343,7 @@ impl Solver {
         // Write to OPB file BEFORE calling C++ - even if the add causes UNSAT,
         // the C++ side will have already logged `l N` to the proof referencing
         // this constraint, so it must be in the OPB file.
+        #[cfg(debug_assertions)]
         if let Some(ref mut writer) = self.opb_writer {
             Self::write_constraint_to_opb(writer, &constraint);
             self.opb_constraint_count += 1;
@@ -357,6 +377,7 @@ impl Solver {
         // Write to OPB file BEFORE calling C++ - even if the add causes UNSAT,
         // the C++ side will have already logged `l N` to the proof referencing
         // this constraint, so it must be in the OPB file.
+        #[cfg(debug_assertions)]
         if let Some(ref mut writer) = self.opb_writer {
             Self::write_constraint_to_opb(writer, &constraint);
             self.opb_constraint_count += 1;
@@ -424,6 +445,7 @@ impl Solver {
         }
         let solve_result: SolveResult = result.into();
 
+        #[cfg(debug_assertions)]
         match solve_result {
             SolveResult::Sat => {
                 self.sanity_check_solution();
@@ -438,6 +460,7 @@ impl Solver {
     }
 
     /// Verifies the proof using veripb if proof logging is enabled.
+    #[cfg(debug_assertions)]
     fn verify_proof_if_enabled(&mut self) {
         let Some(ref proof_path) = self.proof_path else {
             return;
@@ -629,6 +652,7 @@ impl Solver {
     /// # Panics
     ///
     /// Panics if any constraint is violated or any external disagrees with the solution.
+    #[cfg(debug_assertions)]
     fn sanity_check_solution(&self) {
         // Check all externals are satisfied
         for &lit in &self.externals {
@@ -771,6 +795,7 @@ unsafe extern "C" fn solution_callback_trampoline(
         None => std::ptr::null_mut(),
         Some(violated) => {
             // Write to OPB file if proof logging is enabled
+            #[cfg(debug_assertions)]
             if let Some(ref mut writer) = solver.opb_writer {
                 let constraint = StoredConstraint {
                     terms: violated
