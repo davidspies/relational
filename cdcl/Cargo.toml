@@ -16,6 +16,5 @@ ctrlc = "*"
 dhat = { version = "*", optional = true }
 either = "*"
 priority-queue = "*"
-rand = "*"
 rand_chacha = "*"
 relational = { path = "../relational" }

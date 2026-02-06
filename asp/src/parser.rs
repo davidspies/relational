@@ -9,14 +9,14 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
     let mut max_atom = 1u32; // Atom 1 is reserved for "false"
 
     // Skip "asp" header line if present
-    if let Some(line) = lines.peek() {
-        if line.trim().starts_with("asp ") {
-            lines.next();
-        }
+    if let Some(line) = lines.peek()
+        && line.trim().starts_with("asp ")
+    {
+        lines.next();
     }
 
     // Parse rules until we hit "0"
-    while let Some(line) = lines.next() {
+    for line in lines.by_ref() {
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -82,7 +82,7 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
     }
 
     // Parse symbol table until we hit "0"
-    while let Some(line) = lines.next() {
+    for line in lines {
         let line = line.trim();
         if line.is_empty() {
             continue;

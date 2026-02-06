@@ -6,8 +6,10 @@ use std::cmp::Ordering;
 
 use contiguous_data::{HashMap, HashSet};
 use priority_queue::PriorityQueue;
-use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha8Rng;
+use rand_chacha::{
+    ChaCha8Rng,
+    rand_core::{Rng, SeedableRng},
+};
 
 use super::types::Var;
 
@@ -60,7 +62,7 @@ impl Vsids {
                 var,
                 Priority {
                     activity: 0.0,
-                    nonce: rng.random(),
+                    nonce: rng.next_u64(),
                 },
             );
         }
@@ -91,7 +93,7 @@ impl Vsids {
         self.phase.insert(var, positive);
         // Restore from stash back to queue with a fresh nonce
         if let Some(mut priority) = self.stashed.remove(&var) {
-            priority.nonce = self.rng.random();
+            priority.nonce = self.rng.next_u64();
             self.queue.push(var, priority);
         }
     }
