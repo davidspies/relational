@@ -131,10 +131,23 @@ impl AspSolver {
         // Clone data for the callback (callback must be 'static)
         let layout = self.encoded.layout.clone();
         let program = self.program.clone();
+        // These are only used for debug verification - use empty vecs in release
+        #[cfg(debug_assertions)]
         let cand_clauses = self.encoded.cand_clauses.clone();
+        #[cfg(not(debug_assertions))]
+        let cand_clauses: Vec<Clause> = Vec::new();
+        #[cfg(debug_assertions)]
         let cand_pb_constraints = self.encoded.cand_pb_constraints.clone();
+        #[cfg(not(debug_assertions))]
+        let cand_pb_constraints: Vec<PBConstraint> = Vec::new();
+        #[cfg(debug_assertions)]
         let check_clauses = self.encoded.check_clauses.clone();
+        #[cfg(not(debug_assertions))]
+        let check_clauses: Vec<Clause> = Vec::new();
+        #[cfg(debug_assertions)]
         let check_pb_constraints = self.encoded.check_pb_constraints.clone();
+        #[cfg(not(debug_assertions))]
+        let check_pb_constraints: Vec<PBConstraint> = Vec::new();
         let mut rng = StdRng::seed_from_u64(self.rng.random());
 
         // Counters for stats (shared with callback)
@@ -194,6 +207,7 @@ impl AspSolver {
         );
     }
 
+    #[allow(unused_variables)] // Some params only used in debug builds
     fn solution_callback(
         assignment: &Assignment,
         layout: &VarLayout,
@@ -210,57 +224,56 @@ impl AspSolver {
         let cand_assignment = Self::extract_cand_assignment_from_callback(&layout, assignment);
 
         // VERIFY: Check that the assignment actually satisfies all cand constraints
-        // A literal is true only if assigned to the right value (unassigned = unknown, not satisfied)
-        let cand_lit_is_true = |lit: i32| -> bool {
-            let var = lit.abs();
-            match assignment.get_value(var) {
-                Some(true) => lit > 0,
-                Some(false) => lit < 0,
-                None => false, // unassigned doesn't satisfy
-            }
-        };
-        for (clause_idx, clause) in cand_clauses.iter().enumerate() {
-            let satisfied = clause.iter().any(|&lit| cand_lit_is_true(lit));
-            if !satisfied {
-                eprintln!(
-                    "BUG: Cand assignment does not satisfy clause {}: {:?}",
-                    clause_idx, clause
-                );
-                eprintln!("  Literal values:");
-                for &lit in clause {
-                    let var = lit.abs();
-                    let val = assignment.get_value(var);
-                    eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
+        // (expensive - only in debug builds)
+        #[cfg(debug_assertions)]
+        {
+            let cand_lit_is_true = |lit: i32| -> bool {
+                let var = lit.abs();
+                match assignment.get_value(var) {
+                    Some(true) => lit > 0,
+                    Some(false) => lit < 0,
+                    None => false, // unassigned doesn't satisfy
                 }
-                panic!("Assignment from callback does not satisfy candidate clauses!");
-            }
-        }
-        for (pb_idx, pb) in cand_pb_constraints.iter().enumerate() {
-            let sum: i32 = pb
-                .terms
-                .iter()
-                .map(
-                    |&(lit, weight)| {
-                        if cand_lit_is_true(lit) { weight } else { 0 }
-                    },
-                )
-                .sum();
-            if sum < pb.bound {
-                eprintln!(
-                    "BUG: Cand assignment does not satisfy PB constraint {}: sum={} < bound={}",
-                    pb_idx, sum, pb.bound
-                );
-                eprintln!("  Constraint kind: {}", pb.kind);
-                eprintln!("  Terms:");
-                for &(lit, weight) in &pb.terms {
-                    let var = lit.abs();
-                    let val = assignment.get_value(var);
+            };
+            for (clause_idx, clause) in cand_clauses.iter().enumerate() {
+                let satisfied = clause.iter().any(|&lit| cand_lit_is_true(lit));
+                if !satisfied {
                     eprintln!(
-                        "    lit {} (var {}) weight {} = {:?}",
-                        lit, var, weight, val
+                        "BUG: Cand assignment does not satisfy clause {}: {:?}",
+                        clause_idx, clause
                     );
+                    eprintln!("  Literal values:");
+                    for &lit in clause {
+                        let var = lit.abs();
+                        let val = assignment.get_value(var);
+                        eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
+                    }
+                    panic!("Assignment from callback does not satisfy candidate clauses!");
                 }
-                panic!("Assignment from callback does not satisfy candidate PB constraints!");
+            }
+            for (pb_idx, pb) in cand_pb_constraints.iter().enumerate() {
+                let sum: i32 = pb
+                    .terms
+                    .iter()
+                    .map(|&(lit, weight)| if cand_lit_is_true(lit) { weight } else { 0 })
+                    .sum();
+                if sum < pb.bound {
+                    eprintln!(
+                        "BUG: Cand assignment does not satisfy PB constraint {}: sum={} < bound={}",
+                        pb_idx, sum, pb.bound
+                    );
+                    eprintln!("  Constraint kind: {}", pb.kind);
+                    eprintln!("  Terms:");
+                    for &(lit, weight) in &pb.terms {
+                        let var = lit.abs();
+                        let val = assignment.get_value(var);
+                        eprintln!(
+                            "    lit {} (var {}) weight {} = {:?}",
+                            lit, var, weight, val
+                        );
+                    }
+                    panic!("Assignment from callback does not satisfy candidate PB constraints!");
+                }
             }
         }
 
@@ -275,7 +288,8 @@ impl AspSolver {
             .map(|(&var, &value)| if value { var } else { -var })
             .collect();
 
-        // Clone before passing to C++ code (can't trust it won't modify memory)
+        // Clone before passing to C++ code (only needed for debug verification)
+        #[cfg(debug_assertions)]
         let externals_snapshot = externals.clone();
 
         check_solver
@@ -286,70 +300,71 @@ impl AspSolver {
 
         match result {
             SolveResult::Sat => {
-                // VERIFY: Check that externals are respected
-                for &assumption_lit in &externals_snapshot {
-                    let var = assumption_lit.abs();
-                    let expected = assumption_lit > 0;
-                    let actual = check_solver.get_value(var);
-                    if actual != Some(expected) {
-                        panic!(
-                            "BUG: Check solver violated assumption! var={} expected={} actual={:?}",
-                            var, expected, actual
-                        );
-                    }
-                }
-
-                // VERIFY: Check that the check solver's assignment satisfies check constraints
-                let check_lit_is_true = |lit: i32| -> bool {
-                    let var = lit.abs();
-                    match check_solver.get_value(var) {
-                        Some(true) => lit > 0,
-                        Some(false) => lit < 0,
-                        None => false, // unassigned doesn't satisfy
-                    }
-                };
-                for (clause_idx, clause) in check_clauses.iter().enumerate() {
-                    let satisfied = clause.iter().any(|&lit| check_lit_is_true(lit));
-                    if !satisfied {
-                        eprintln!(
-                            "BUG: Check solver does not satisfy check clause {}: {:?}",
-                            clause_idx, clause
-                        );
-                        eprintln!("  Literal values:");
-                        for &lit in clause {
-                            let var = lit.abs();
-                            let val = check_solver.get_value(var);
-                            eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
-                        }
-                        panic!("Check solver assignment does not satisfy check clauses!");
-                    }
-                }
-                for (pb_idx, pb) in check_pb_constraints.iter().enumerate() {
-                    let sum: i32 = pb
-                        .terms
-                        .iter()
-                        .map(
-                            |&(lit, weight)| {
-                                if check_lit_is_true(lit) { weight } else { 0 }
-                            },
-                        )
-                        .sum();
-                    if sum < pb.bound {
-                        eprintln!(
-                            "BUG: Check solver does not satisfy check PB constraint {}: sum={} < bound={}",
-                            pb_idx, sum, pb.bound
-                        );
-                        eprintln!("  Constraint kind: {}", pb.kind);
-                        eprintln!("  Terms:");
-                        for &(lit, weight) in &pb.terms {
-                            let var = lit.abs();
-                            let val = check_solver.get_value(var);
-                            eprintln!(
-                                "    lit {} (var {}) weight {} = {:?}",
-                                lit, var, weight, val
+                // VERIFY: Check that externals are respected and constraints satisfied
+                // (expensive - only in debug builds)
+                #[cfg(debug_assertions)]
+                {
+                    for &assumption_lit in &externals_snapshot {
+                        let var = assumption_lit.abs();
+                        let expected = assumption_lit > 0;
+                        let actual = check_solver.get_value(var);
+                        if actual != Some(expected) {
+                            panic!(
+                                "BUG: Check solver violated assumption! var={} expected={} actual={:?}",
+                                var, expected, actual
                             );
                         }
-                        panic!("Check solver assignment does not satisfy check PB constraints!");
+                    }
+
+                    let check_lit_is_true = |lit: i32| -> bool {
+                        let var = lit.abs();
+                        match check_solver.get_value(var) {
+                            Some(true) => lit > 0,
+                            Some(false) => lit < 0,
+                            None => false,
+                        }
+                    };
+                    for (clause_idx, clause) in check_clauses.iter().enumerate() {
+                        let satisfied = clause.iter().any(|&lit| check_lit_is_true(lit));
+                        if !satisfied {
+                            eprintln!(
+                                "BUG: Check solver does not satisfy check clause {}: {:?}",
+                                clause_idx, clause
+                            );
+                            eprintln!("  Literal values:");
+                            for &lit in clause {
+                                let var = lit.abs();
+                                let val = check_solver.get_value(var);
+                                eprintln!("    lit {} (var {}) = {:?}", lit, var, val);
+                            }
+                            panic!("Check solver assignment does not satisfy check clauses!");
+                        }
+                    }
+                    for (pb_idx, pb) in check_pb_constraints.iter().enumerate() {
+                        let sum: i32 = pb
+                            .terms
+                            .iter()
+                            .map(|&(lit, weight)| if check_lit_is_true(lit) { weight } else { 0 })
+                            .sum();
+                        if sum < pb.bound {
+                            eprintln!(
+                                "BUG: Check solver does not satisfy check PB constraint {}: sum={} < bound={}",
+                                pb_idx, sum, pb.bound
+                            );
+                            eprintln!("  Constraint kind: {}", pb.kind);
+                            eprintln!("  Terms:");
+                            for &(lit, weight) in &pb.terms {
+                                let var = lit.abs();
+                                let val = check_solver.get_value(var);
+                                eprintln!(
+                                    "    lit {} (var {}) weight {} = {:?}",
+                                    lit, var, weight, val
+                                );
+                            }
+                            panic!(
+                                "Check solver assignment does not satisfy check PB constraints!"
+                            );
+                        }
                     }
                 }
 
@@ -357,36 +372,42 @@ impl AspSolver {
                 let unfounded_set =
                     extract_unfounded_set_standalone(&layout, &cand_assignment, &check_solver);
 
-                // DEBUG: Verify unfounded set completeness
-                let ufs_set: std::collections::HashSet<Atom> =
-                    unfounded_set.iter().copied().collect();
-                for &ufs_atom in &unfounded_set {
-                    for entry in layout.rules_for_head(ufs_atom) {
-                        let rule = &program.rules[entry.rule_idx as usize];
-                        let body = match rule {
-                            crate::types::Rule::Choice(r) => &r.body,
-                            crate::types::Rule::Disjunctive(r) => &r.body,
-                        };
-                        for lit in body {
-                            if lit.positive {
-                                let cand_var = layout.cand(lit.atom);
-                                let check_var = layout.check(lit.atom);
-                                let in_cand = cand_assignment
-                                    .get(&cand_var)
-                                    .copied()
-                                    .expect("cand_var should have value");
-                                let in_check = check_solver
-                                    .get_value(check_var)
-                                    .expect("check_var should have value");
-                                let in_ufs = ufs_set.contains(&lit.atom);
-                                if in_cand && !in_check && !in_ufs {
-                                    eprintln!(
-                                        "BUG: Atom({}) is true in cand, false in check, but NOT in unfounded set!",
-                                        lit.atom.0
-                                    );
-                                    eprintln!("  cand_var={}, check_var={}", cand_var, check_var);
-                                    eprintln!("  in_cand={}, in_check={}", in_cand, in_check);
-                                    panic!("Unfounded set is incomplete!");
+                // DEBUG: Verify unfounded set completeness (expensive - only in debug builds)
+                #[cfg(debug_assertions)]
+                {
+                    let ufs_set: std::collections::HashSet<Atom> =
+                        unfounded_set.iter().copied().collect();
+                    for &ufs_atom in &unfounded_set {
+                        for entry in layout.rules_for_head(ufs_atom) {
+                            let rule = &program.rules[entry.rule_idx as usize];
+                            let body = match rule {
+                                crate::types::Rule::Choice(r) => &r.body,
+                                crate::types::Rule::Disjunctive(r) => &r.body,
+                            };
+                            for lit in body {
+                                if lit.positive {
+                                    let cand_var = layout.cand(lit.atom);
+                                    let check_var = layout.check(lit.atom);
+                                    let in_cand = cand_assignment
+                                        .get(&cand_var)
+                                        .copied()
+                                        .expect("cand_var should have value");
+                                    let in_check = check_solver
+                                        .get_value(check_var)
+                                        .expect("check_var should have value");
+                                    let in_ufs = ufs_set.contains(&lit.atom);
+                                    if in_cand && !in_check && !in_ufs {
+                                        eprintln!(
+                                            "BUG: Atom({}) is true in cand, false in check, but NOT in unfounded set!",
+                                            lit.atom.0
+                                        );
+                                        eprintln!(
+                                            "  cand_var={}, check_var={}",
+                                            cand_var, check_var
+                                        );
+                                        eprintln!("  in_cand={}, in_check={}", in_cand, in_check);
+                                        panic!("Unfounded set is incomplete!");
+                                    }
                                 }
                             }
                         }

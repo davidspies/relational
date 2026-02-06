@@ -33,13 +33,13 @@ use std::path::{Path, PathBuf};
 #[cfg(debug_assertions)]
 use std::process::Command;
 
+#[cfg(debug_assertions)]
+use roundingsat_sys::rs_set_proof_log;
 use roundingsat_sys::{
     RsResult, RsSolver, RsViolatedConstraint, rs_add_clause, rs_add_pb_constraint,
     rs_clear_externals, rs_flush_proof_log, rs_free, rs_get_num_vars, rs_get_value, rs_new,
     rs_set_externals, rs_set_num_vars, rs_set_solution_callback, rs_solve,
 };
-#[cfg(debug_assertions)]
-use roundingsat_sys::rs_set_proof_log;
 
 /// Result of a solve operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
