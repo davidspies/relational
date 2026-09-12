@@ -8,11 +8,15 @@ pub fn parse_smodels(input: &str) -> Result<Program, String> {
     let mut program = Program::new();
     let mut max_atom = 1u32; // Atom 1 is reserved for "false"
 
-    // Skip "asp" header line if present
+    // gringo's default output is aspif (header "asp 1 0 0"), which is a different
+    // format entirely. Reject it rather than misparsing it as smodels.
     if let Some(line) = lines.peek()
         && line.trim().starts_with("asp ")
     {
-        lines.next();
+        return Err(
+            "Input is in aspif format, not smodels. Run gringo with `--output=smodels`."
+                .to_string(),
+        );
     }
 
     // Parse rules until we hit "0"
@@ -128,6 +132,12 @@ fn parse_basic_rule(parts: &[&str]) -> Result<BasicRule, String> {
         ));
     }
 
+    if neg_count > body_count {
+        return Err(format!(
+            "Negative literal count {neg_count} exceeds body count {body_count}"
+        ));
+    }
+
     let mut neg_body = Vec::with_capacity(neg_count);
     let mut pos_body = Vec::with_capacity(body_count - neg_count);
 
@@ -184,6 +194,12 @@ fn parse_choice_rule(parts: &[&str]) -> Result<ChoiceRule, String> {
         return Err(format!(
             "Body too short: expected {body_count} literals, got {}",
             parts.len() - body_lits_start
+        ));
+    }
+
+    if neg_count > body_count {
+        return Err(format!(
+            "Negative literal count {neg_count} exceeds body count {body_count}"
         ));
     }
 
@@ -247,6 +263,12 @@ fn parse_disjunctive_rule(parts: &[&str]) -> Result<DisjunctiveRule, String> {
         return Err(format!(
             "Body too short: expected {body_count} literals, got {}",
             parts.len() - body_lits_start
+        ));
+    }
+
+    if neg_count > body_count {
+        return Err(format!(
+            "Negative literal count {neg_count} exceeds body count {body_count}"
         ));
     }
 
