@@ -12,7 +12,7 @@ use std::time::Instant;
 use cdcl::{Level, Lit, Var};
 use contiguous_data::HashSet;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use relational::create_persistent_input;
 use relational::database::{Database, DatabaseBuilder};
 

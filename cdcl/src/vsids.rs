@@ -102,7 +102,7 @@ impl Vsids {
     /// Call this when backtracking to Level::TOP to handle external input changes.
     pub(crate) fn restore_all_stashed(&mut self) {
         for (var, mut priority) in self.stashed.drain() {
-            priority.nonce = self.rng.random();
+            priority.nonce = self.rng.next_u64();
             self.queue.push(var, priority);
         }
     }

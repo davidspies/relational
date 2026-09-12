@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 
 use cdcl::{Lit, Var, Weight};
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::{RngExt, SeedableRng};
 
 use crate::types::{Atom, ChoiceRule, DisjunctiveRule, Program, Rule, WeightedLit};
 
@@ -930,11 +930,17 @@ mod tests {
         );
 
         // Verify we have the overlap atom (¬b = Lit::neg(Var(3)))
-        let has_neg_b = terms.iter().any(|(lit, _)| *lit == Lit::neg(layout.cand(Atom(3))));
+        let has_neg_b = terms
+            .iter()
+            .any(|(lit, _)| *lit == Lit::neg(layout.cand(Atom(3))));
         assert!(has_neg_b, "Expected ¬b in terms, got {:?}", terms);
 
         // Verify we have the active variable reason
         let has_active = terms.iter().any(|(lit, _)| lit.is_positive());
-        assert!(has_active, "Expected active variable in terms, got {:?}", terms);
+        assert!(
+            has_active,
+            "Expected active variable in terms, got {:?}",
+            terms
+        );
     }
 }
